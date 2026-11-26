@@ -2,7 +2,7 @@
 
 The arena draws one run into the 480×270 canvas and shows a native HUD, level-up prompt and defeat overlay above it. It reads a run only through `Snapshot`, `Events` and a copied seed, so nothing in drawing can change a run or its replay.
 
-The palette and the atlas are generated at startup from `art.go`'s rows of palette indices, so the repository carries no sprite sheet and one colour list governs the ground, the creatures and the native screens. A new picture is a row of hex digits and a frame name.
+The palette and the fallback atlas are generated at startup from `art.go`'s rows of palette indices, so one colour list governs the ground, the creatures and the native screens. Today the renderer draws that procedural atlas; once the stylized 2D sprite sheets land under `assets/sprites/`, `art.go` will load them into `sprite.Atlas` and drive actor frames through `sprite.Animation`, keeping the procedural atlas as fallback.
 
 ## The frame
 

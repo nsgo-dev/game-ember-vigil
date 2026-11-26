@@ -6,7 +6,7 @@ A twelve-minute survivors-like 2D game in Go with NSGo and nsgo-dev/game. Read [
 
 - Keep the run in `run.go` headless, deterministic and free of NSGo views; the shell translates input, draws and saves.
 - Keep balance in `data/*.yaml`; a view never holds a rule or a tuning number.
-- Generate gameplay art in code. The app icon and title key art are the only images.
+- Keep procedural ground, decor and particle art in code as fallback; stylized 2D sprite sheets, card icons, app icon and title key art live under `assets/` and are designed by 彩叶.
 - Pin the game layer and NSGo. Ask before changing either dependency, adding one or changing a public API.
 - Add no CI until the user asks for it.
 

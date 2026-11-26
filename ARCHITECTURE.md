@@ -12,7 +12,7 @@ Ember Vigil is an NSGo app with one fixed-step game loop. A run is simulated hea
 | `upgrades.go` | The upgrade pool, three-card offers and the derived stat block |
 | `waves.go` | The wave director: timeline, spawn ring, caps and the view it stays outside |
 | `data.go`, `data/` | Tuning YAML and its loaders: version checked, unknown fields refused, canonical round trip |
-| `art.go`, `draw.go` | Palette and procedural pixel atlas; world, lighting and effects |
+| `art.go`, `draw.go` | Palette, embedded sprite-sheet atlases with procedural fallback; world, lighting and effects |
 | `screens.go` | Native HUD, title, pause, level-up, defeat and settings views |
 | `audio.go`, `save.go`, `strings/` | Mixer and cues; records and settings; English and Chinese strings |
 | `*_test.go` | Headless shell, run and project tests |
@@ -22,7 +22,7 @@ Ember Vigil is an NSGo app with one fixed-step game loop. A run is simulated hea
 - `run.go` knows nothing about NSGo views, devices, sound, storage or wall-clock time. It takes one step of controls and a fixed `dt`, and returns a snapshot and the step's events.
 - The shell turns input into controls and events into sounds, screen changes and saves. A rule never lives in a view, and a view never mutates a run.
 - Tuning lives in `data/*.yaml`, versioned and canonical, with unknown fields refused. Constants in code only name things no designer would tune.
-- `art.go` builds one atlas from the palette at startup, and the ground is painted once per run from its seed. The repository carries no sprite sheets.
+- `art.go` loads embedded stylized 2D sprite sheets from `assets/sprites/` into `sprite.Atlas` with `sprite.Animation` (falling back to the procedural atlas when a sheet is absent), and paints the ground once per run from its seed.
 - One canvas draws the world. The HUD and menus are native views above it and read run snapshots through signals instead of polling the simulation.
 - A seed plus a list of controls replays a run. The map, spawns, offers and drops all derive from the run's streams.
 - Pin `nsgo-dev/game` and `nsgo-dev/nsgo`; upgrade both in a change of its own after the tests pass. No cgo and no hand-written C.

@@ -1,6 +1,6 @@
 # Roadmap
 
-The first version ships in three milestones. The developer closes one issue before starting the next; the art issue can run beside them.
+The first version ships in three milestones. The developer closes one issue before starting the next; the art issues can run beside them.
 
 ## M1: Playable slice
 
@@ -17,14 +17,17 @@ The first version ships in three milestones. The developer closes one issue befo
 | --- | --- | --- |
 | [#5](https://github.com/oneo-me/test-game-2/issues/5) | Wave director, the Hollow King and results | #2, #3, #4 |
 | [#6](https://github.com/oneo-me/test-game-2/issues/6) | Menus, settings, localization and saved records | #1, #3, #5 |
+| [#15](https://github.com/oneo-me/test-game-2/issues/15) | Animated sprite sheets and card icons integration | #3, #13 |
 
 ## M3: Ship
 
 | Issue | Delivers | Depends on |
 | --- | --- | --- |
 | [#7](https://github.com/oneo-me/test-game-2/issues/7) | Audio, game feel and quality presets | #3, #4, #5 |
-| [#8](https://github.com/oneo-me/test-game-2/issues/8) | Touch layout, web build and release packaging | #5, #6, #7, #9 |
+| [#8](https://github.com/oneo-me/test-game-2/issues/8) | Touch layout, web build and release packaging | #5, #6, #7, #9, #14, #15 |
 | [#9](https://github.com/oneo-me/test-game-2/issues/9) | App icon and title key art | — |
+| [#13](https://github.com/oneo-me/test-game-2/issues/13) | Core actor sprite sheets and upgrade card icons | #9 |
+| [#14](https://github.com/oneo-me/test-game-2/issues/14) | Late-wave enemies, elite and Hollow King sprite sheets | #13 |
 
 ## Later
 

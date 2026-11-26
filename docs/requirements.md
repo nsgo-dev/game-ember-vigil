@@ -28,7 +28,7 @@ The first version is one playable run on one open arena:
 - Title, run, level-up, pause, results and settings screens.
 - Settings keep master, music and SFX volume, screen shake, quality and language. Records keep best time, most kills, highest level and wins.
 - Keyboard, gamepad and touch input. English and Simplified Chinese strings.
-- Procedural pixel art in one original palette, a lit darkness layer, particles and screen shake. Audio starts from the game layer's CC0 placeholder pack.
+- Stylized 2D hand-painted sprite sheets and frame animations for the keeper, enemies, elite, boss, embers, weapon effects and upgrade card icons (drawn by 彩叶 under `assets/`), paired with procedural forest ground, particles, a lit darkness layer and screen shake. Procedural sprites remain in code as fallback until each sheet lands. Audio starts from the game layer's CC0 placeholder pack.
 
 The target is 60 fixed updates a second at 480×270 virtual pixels, holding 60 fps with 200 enemies and effects on the user's Mac.
 
@@ -41,13 +41,13 @@ The first version does not include:
 - Multiplayer, accounts, cloud saves, leaderboards or telemetry.
 - Android and iOS store builds. The touch layout and builds are prepared, but store packaging comes later.
 - Steam, consoles, achievements, modding or replay files.
-- Hand-painted sprite sheets or custom music. The icon and title key art are the only image assets.
+- Custom music or voice acting (audio uses the CC0 placeholder pack in the first version).
 
 ## Constraints
 
 - Go 1.27, NSGo v0.3.4 and the `nsgo-dev/game` version pinned in `go.mod`; no cgo.
 - All tuning lives in versioned YAML under `data/`, refuses unknown fields and is canonical on save.
-- Gameplay art is generated in code, so the repository stays text except for the icon and title art.
+- Image assets live under `assets/` (app icon, title key art, uniform-grid transparent PNG sprite sheets and card icons); ground texture, decor and particles stay generated in code, and procedural fallback keeps the game runnable without every sheet.
 - The same seed and controls replay the same run on every platform.
 - Every change keeps `go tool nsgo test ./...` and `go tool nsgo check -target macos,windows,linux,web` passing.
 - No CI is added unless the user asks for it.
@@ -57,7 +57,7 @@ The first version does not include:
 - The working title is Ember Vigil, the app ID `me.oneo.embervigil` and the module `me.oneo/embervigil`. The repository stays `oneo-me/test-game-2` until the user renames it.
 - Desktop comes first; touch input and the web build ship with the first version, mobile store builds later.
 - Audio uses the CC0 placeholder pack until a custom set exists.
-- The icon and title key art are drawn by 彩叶 after the palette is on screen.
+- The app icon, title key art, stylized 2D sprite sheets and card icons are drawn by 彩叶 in the ash-and-ember palette.
 
 ## Acceptance
 

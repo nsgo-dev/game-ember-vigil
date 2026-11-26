@@ -21,7 +21,7 @@
 - One twelve-minute run against a rising tide of shadow creatures, ending with the Hollow King at dawn.
 - Four auto-firing weapons and eight passives, each with five levels, chosen from three cards on every level-up.
 - Six enemy kinds, the Gloomwarden elite and a three-phase boss.
-- A 480×270 pixel-art world generated in code and lit by the keeper's lantern.
+- Stylized 2D animated sprites in a lantern-lit ash forest, built over a procedural ground and particle layer.
 - Keyboard, gamepad and touch controls, with English and Simplified Chinese interface.
 - Best records and settings kept between sessions.
 - Builds for macOS, Windows, Linux and the web.
