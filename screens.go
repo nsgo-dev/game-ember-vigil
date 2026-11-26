@@ -1,33 +1,38 @@
 package main
 
 import (
+	"math"
 	"strconv"
 
 	"github.com/nsgo-dev/nsgo/base"
 	"github.com/nsgo-dev/nsgo/core"
+	evstrings "me.oneo/embervigil/strings"
 )
 
 // Colors of the native screens, which read as the arena's palette.
 var (
-	barColor     = core.RGB(0x0b0d17)
-	textColor    = core.RGB(0xf8fafc)
-	dimColor     = core.RGB(0x8a93a8)
-	panelColor   = core.RGBA(0x111827, 0.92)
-	cardColor    = core.RGBA(0x1a2234, 0.96)
-	cardBorder   = core.RGBA(0x3b4a66, 0.9)
-	buttonColor  = core.RGB(0xc2410c)
-	healthColor  = core.RGB(0xd0453a)
-	xpColor      = core.RGB(0xffb347)
-	flameColor   = core.RGB(0xff7a1a)
-	passiveColor = core.RGB(0x5b4a7f)
-	healColor    = core.RGB(0x3f6b4a)
-	pipEmpty     = core.RGBA(0x8a93a8, 0.3)
+	barColor       = core.RGB(0x0b0d17)
+	textColor      = core.RGB(0xf8fafc)
+	dimColor       = core.RGB(0x8a93a8)
+	panelColor     = core.RGBA(0x111827, 0.92)
+	titleScrim     = core.RGBA(0x0b0d17, 0.78)
+	cardColor      = core.RGBA(0x1a2234, 0.96)
+	cardBorder     = core.RGBA(0x3b4a66, 0.9)
+	buttonColor    = core.RGB(0xc2410c)
+	secondaryColor = core.RGB(0x27314a)
+	dangerColor    = core.RGB(0xa3341a)
+	healthColor    = core.RGB(0xd0453a)
+	xpColor        = core.RGB(0xffb347)
+	flameColor     = core.RGB(0xff7a1a)
+	passiveColor   = core.RGB(0x5b4a7f)
+	healColor      = core.RGB(0x3f6b4a)
+	pipEmpty       = core.RGBA(0x8a93a8, 0.3)
 )
 
 // buttonSide is the shortest side of a tappable button in points, and menuButtonWidth keeps a menu's buttons alike.
 const (
 	buttonSide      = 44
-	menuButtonWidth = 160
+	menuButtonWidth = 176
 	cardWidth       = 176
 	cardMinHeight   = 186
 	cardIconSize    = 36
@@ -89,10 +94,10 @@ func (g *emberVigil) view() core.Node {
 		Style:  fill(),
 		Children: []core.Node{
 			core.Canvas{
-				TestID: "arena",
-				Label:  Project.Title() + " arena",
-				Style:  fill(),
-				Draw:   g.draw,
+				TestID:    "arena",
+				LabelFunc: func() string { return g.tr().ArenaLabel },
+				Style:     fill(),
+				Draw:      g.draw,
 			},
 		},
 	}
@@ -105,9 +110,9 @@ func (g *emberVigil) view() core.Node {
 			g.when(phaseArena, func() core.Node { return dynamic(g.hudView) }),
 			g.show(func() bool { return g.inRun(PhaseLevelUp) }, func() core.Node { return dynamic(g.levelUp) }),
 			g.show(func() bool { return g.inRun(PhaseVictory) || g.inRun(PhaseDefeat) }, func() core.Node { return dynamic(g.resultsOverlay) }),
-			g.when(phaseTitle, g.title),
-			g.when(phasePaused, g.paused),
-			g.when(phaseSettings, g.settings),
+			g.when(phaseTitle, func() core.Node { return dynamic(g.title) }),
+			g.when(phasePaused, func() core.Node { return dynamic(g.paused) }),
+			g.when(phaseSettings, func() core.Node { return dynamic(g.settingsView) }),
 		},
 	}
 }
@@ -138,6 +143,7 @@ func (g *emberVigil) show(when func() bool, screen func() core.Node) core.Node {
 // hudView is the native bar over the arena: the run's clock, health and XP, its level, kills and weapons, and the pause button. Touches elsewhere reach the arena.
 func (g *emberVigil) hudView() core.Node {
 	st := g.hud.Get()
+	tr := g.tr()
 	health := float64(1)
 	if st.maxHealth > 0 {
 		health = float64(st.health) / float64(st.maxHealth)
@@ -157,11 +163,11 @@ func (g *emberVigil) hudView() core.Node {
 				core.View{
 					Style: core.Style{Direction: core.Row, Gap: 12},
 					Children: []core.Node{
-						label("hud-level", "Level "+strconv.Itoa(st.level), 12, textColor),
-						label("hud-kills", "Kills "+strconv.Itoa(st.kills), 12, dimColor),
+						label("hud-level", tr.Level(st.level), 12, textColor),
+						label("hud-kills", tr.Kills(st.kills), 12, dimColor),
 					},
 				},
-				g.weaponSlots(st.weapons),
+				g.weaponSlots(st.weapons, tr),
 			},
 		},
 	}
@@ -169,13 +175,6 @@ func (g *emberVigil) hudView() core.Node {
 		bossFrac := float64(0)
 		if st.bossMaxHealth > 0 {
 			bossFrac = float64(st.bossHealth) / float64(st.bossMaxHealth)
-		}
-		phaseTag := "Phase I"
-		switch st.bossPhase {
-		case 2:
-			phaseTag = "Phase II"
-		case 3:
-			phaseTag = "Phase III"
 		}
 		topChildren = append(topChildren, core.View{
 			TestID: "hud-boss",
@@ -191,15 +190,15 @@ func (g *emberVigil) hudView() core.Node {
 				core.View{
 					Style: core.Style{Direction: core.Row, Gap: 8, AlignItems: core.AlignCenter},
 					Children: []core.Node{
-						label("hud-boss-name", st.bossName, 13, textColor),
-						label("hud-boss-phase", phaseTag, 11, xpColor),
+						label("hud-boss-name", tr.BossDisplayName(st.bossName), 13, textColor),
+						label("hud-boss-phase", tr.BossPhaseLabel(st.bossPhase), 11, xpColor),
 					},
 				},
 				wideMeter("hud-boss-health", 220, 10, bossFrac, healthColor),
 			},
 		})
 	}
-	topChildren = append(topChildren, button("Pause", buttonSide, g.pause))
+	topChildren = append(topChildren, actionButton("hud-pause", tr.Pause, buttonSide, buttonColor, false, g.pause))
 
 	return core.View{
 		TestID:        "hud",
@@ -220,7 +219,7 @@ func (g *emberVigil) hudView() core.Node {
 }
 
 // weaponSlots shows the keeper's equipped weapons, keeping the starter slot identifiable as hud-weapon / hud-weapon-name.
-func (g *emberVigil) weaponSlots(slots [maxHUDWeapons]hudSlot) core.Node {
+func (g *emberVigil) weaponSlots(slots [maxHUDWeapons]hudSlot, tr evstrings.Table) core.Node {
 	var children []core.Node
 	for i, slot := range slots {
 		if slot.name == "" {
@@ -230,6 +229,7 @@ func (g *emberVigil) weaponSlots(slots [maxHUDWeapons]hudSlot) core.Node {
 		if i == 0 {
 			boxID, nameID = "hud-weapon", "hud-weapon-name"
 		}
+		displayName := tr.Card(slot.id, slot.name, "").Name
 		children = append(children, core.View{
 			TestID: boxID,
 			Style: core.Style{
@@ -242,7 +242,7 @@ func (g *emberVigil) weaponSlots(slots [maxHUDWeapons]hudSlot) core.Node {
 			},
 			Children: []core.Node{
 				core.View{Style: core.Style{Width: core.Pt(10), Height: core.Pt(10), CornerRadius: 5, Background: cardAccent(slot.id, offerWeapon)}},
-				label(nameID, slot.name, 12, textColor),
+				label(nameID, displayName, 12, textColor),
 			},
 		})
 	}
@@ -258,6 +258,7 @@ func (g *emberVigil) weaponSlots(slots [maxHUDWeapons]hudSlot) core.Node {
 // levelUp is the three-card level-up modal: each card shows an icon, name, description and level pips, and can be chosen by tap, 1/2/3 or a gamepad button.
 func (g *emberVigil) levelUp() core.Node {
 	st := g.hud.Get()
+	tr := g.tr()
 	var cards []core.Node
 	for i, c := range st.offers {
 		if c.name == "" {
@@ -265,10 +266,10 @@ func (g *emberVigil) levelUp() core.Node {
 		}
 		idx := i
 		focused := i == st.cardFocus
-		cards = append(cards, g.upgradeCard(idx, c, focused))
+		cards = append(cards, g.upgradeCard(idx, c, focused, tr))
 	}
-	return panel("level-up",
-		heading("Level "+strconv.Itoa(st.level)),
+	return panel("level-up", tr.Level(st.level),
+		heading(tr.Level(st.level)),
 		core.View{
 			Style: core.Style{
 				Direction:      core.Row,
@@ -282,18 +283,19 @@ func (g *emberVigil) levelUp() core.Node {
 }
 
 // upgradeCard renders one selectable level-up card button.
-func (g *emberVigil) upgradeCard(index int, c hudCard, focused bool) core.Node {
+func (g *emberVigil) upgradeCard(index int, c hudCard, focused bool, tr evstrings.Table) core.Node {
 	border := cardBorder
 	if focused {
 		border = xpColor
 	}
-	kindLabel := "PASSIVE"
+	kindLabel := tr.KindPassive
 	switch c.kind {
 	case offerWeapon:
-		kindLabel = "WEAPON"
+		kindLabel = tr.KindWeapon
 	case offerHeal:
-		kindLabel = "HEAL"
+		kindLabel = tr.KindHeal
 	}
+	copyText := tr.Card(c.id, c.name, c.description)
 
 	children := []core.Node{
 		core.View{
@@ -322,12 +324,12 @@ func (g *emberVigil) upgradeCard(index int, c hudCard, focused bool) core.Node {
 		g.cardIcon(c.id, c.kind),
 		core.Text{
 			TestID:  "level-up-card-name-" + strconv.Itoa(index),
-			Content: c.name,
+			Content: copyText.Name,
 			Style:   core.Style{Color: textColor, FontSize: 15, FontWeight: core.FontWeightBold, TextAlign: core.TextAlignCenter},
 		},
 		core.Text{
 			TestID:  "level-up-card-desc-" + strconv.Itoa(index),
-			Content: c.description,
+			Content: copyText.Description,
 			Style:   core.Style{Color: dimColor, FontSize: 12, TextAlign: core.TextAlignCenter},
 		},
 	}
@@ -337,7 +339,7 @@ func (g *emberVigil) upgradeCard(index int, c hudCard, focused bool) core.Node {
 
 	return base.Button{
 		TestID:  "level-up-card-" + strconv.Itoa(index),
-		Label:   c.name,
+		Label:   copyText.Name,
 		OnPress: func(core.PressEvent) { g.choose(index) },
 		Style: core.Style{
 			Width:          core.Pt(cardWidth),
@@ -362,9 +364,10 @@ func (g *emberVigil) upgradeCard(index int, c hudCard, focused bool) core.Node {
 func (g *emberVigil) cardIcon(id, kind string) core.Node {
 	if img, ok := g.art.cardIcon(id); ok {
 		return core.Image{
-			TestID: "card-icon-" + id,
-			Source: img,
-			Style:  core.Style{Width: core.Pt(cardIconSize), Height: core.Pt(cardIconSize)},
+			TestID:         "card-icon-" + id,
+			Source:         img,
+			ElementsHidden: true,
+			Style:          core.Style{Width: core.Pt(cardIconSize), Height: core.Pt(cardIconSize)},
 		}
 	}
 	return core.View{
@@ -472,15 +475,20 @@ func levelPips(id string, nextLevel, maxLevel int) core.Node {
 // resultsOverlay is the end-of-run screen for victory and defeat: outcome, time, kills, level, record status and actions.
 func (g *emberVigil) resultsOverlay() core.Node {
 	st := g.hud.Get()
-	badgeText, badgeColor, titleText := "DEFEAT", healthColor, "The ember goes out"
+	rec := g.records.Get()
+	tr := g.tr()
+	focus := g.menuFocus.Get()
+
+	badgeText, badgeColor, titleText := tr.DefeatBadge, healthColor, tr.DefeatTitle
 	if st.phase == PhaseVictory {
-		badgeText, badgeColor, titleText = "VICTORY", xpColor, "Dawn breaks"
+		badgeText, badgeColor, titleText = tr.VictoryBadge, xpColor, tr.VictoryTitle
 	}
-	recordText, recordColor := "No new record", dimColor
+	recordText, recordColor := tr.NoNewRecord, dimColor
 	if st.newRecord {
-		recordText, recordColor = "New record", xpColor
+		recordText, recordColor = tr.NewRecord, xpColor
 	}
-	return panel("results",
+
+	return panel("results", titleText,
 		label("results-outcome", badgeText, 12, badgeColor),
 		heading(titleText),
 		core.View{
@@ -493,53 +501,341 @@ func (g *emberVigil) resultsOverlay() core.Node {
 				Padding:      core.Symmetric(12, 24),
 			},
 			Children: []core.Node{
-				label("results-time", "Time "+st.time, 15, textColor),
-				label("results-kills", "Kills "+strconv.Itoa(st.kills), 15, textColor),
-				label("results-level", "Level "+strconv.Itoa(st.level), 15, textColor),
+				label("results-time", tr.Time(st.time), 15, textColor),
+				label("results-kills", tr.Kills(st.kills), 15, textColor),
+				label("results-level", tr.Level(st.level), 15, textColor),
 				label("results-record", recordText, 13, recordColor),
+			},
+		},
+		core.View{
+			TestID: "results-best-records",
+			Style: core.Style{
+				Direction:      core.Row,
+				AlignItems:     core.AlignCenter,
+				JustifyContent: core.JustifyCenter,
+				Gap:            12,
+				Wrap:           core.Wrap,
+			},
+			Children: []core.Node{
+				label("results-best-time", tr.BestTime(clockText(rec.BestTime)), 11, dimColor),
+				label("results-best-kills", tr.BestKills(rec.BestKills), 11, dimColor),
+				label("results-best-level", tr.BestLevel(rec.BestLevel), 11, dimColor),
+				label("results-wins", tr.Wins(rec.Wins), 11, dimColor),
 			},
 		},
 		core.View{
 			Style: core.Style{Direction: core.Row, Gap: 12},
 			Children: []core.Node{
-				button("Play Again", menuButtonWidth, g.start),
-				button("Title", menuButtonWidth, g.quitRun),
+				actionButton("results-play-again", tr.PlayAgain, menuButtonWidth, buttonColor, focus == 0, g.start),
+				actionButton("results-title", tr.TitleButton, menuButtonWidth, secondaryColor, focus == 1, g.quitRun),
 			},
 		},
 	)
 }
 
-// title is the first screen: start a run, open the settings, or leave the app.
+// title is the first screen: full-bleed title key art (or dark ash-and-ember fallback) with title, best records and menu buttons in the left third.
 func (g *emberVigil) title() core.Node {
-	return panel("title",
-		heading(Project.Title()),
-		button("Start", menuButtonWidth, g.start),
-		button("Settings", menuButtonWidth, g.openSettings),
-		button("Quit", menuButtonWidth, g.quitApp),
-	)
+	tr := g.tr()
+	rec := g.records.Get()
+	focus := g.menuFocus.Get()
+
+	var backdrop core.Node
+	if img, ok := g.art.titleKeyArt(); ok {
+		backdrop = core.Image{
+			TestID:     "title-art",
+			Label:      tr.TitleArtLabel,
+			Source:     img,
+			ResizeMode: core.Cover,
+			Style:      fill(),
+		}
+	} else {
+		backdrop = core.View{
+			TestID: "title-art-fallback",
+			Style: core.Style{
+				Position:   core.Absolute,
+				Top:        core.Pt(0),
+				Right:      core.Pt(0),
+				Bottom:     core.Pt(0),
+				Left:       core.Pt(0),
+				Background: barColor,
+			},
+		}
+	}
+
+	var recordChildren []core.Node
+	if rec.HasRecord {
+		recordChildren = []core.Node{
+			label("title-records-heading", tr.BestRecords, 12, xpColor),
+			label("title-record-time", tr.BestTime(clockText(rec.BestTime)), 12, textColor),
+			label("title-record-kills", tr.BestKills(rec.BestKills), 12, textColor),
+			label("title-record-level", tr.BestLevel(rec.BestLevel), 12, textColor),
+			label("title-record-wins", tr.Wins(rec.Wins), 12, dimColor),
+		}
+	} else {
+		recordChildren = []core.Node{
+			label("title-records-heading", tr.BestRecords, 12, xpColor),
+			label("title-records-empty", tr.NoRecordsYet, 12, dimColor),
+		}
+	}
+
+	return core.View{
+		TestID: "title",
+		Label:  tr.GameTitle,
+		Style: core.Style{
+			Position:   core.Absolute,
+			Top:        core.Pt(0),
+			Right:      core.Pt(0),
+			Bottom:     core.Pt(0),
+			Left:       core.Pt(0),
+			Direction:  core.Row,
+			AlignItems: core.AlignStretch,
+			Background: barColor,
+		},
+		Children: []core.Node{
+			backdrop,
+			core.View{
+				Style: core.Style{
+					Width:          core.Pct(36),
+					MinWidth:       core.Pt(240),
+					MaxWidth:       core.Pt(380),
+					Height:         core.Pct(100),
+					Background:     titleScrim,
+					Padding:        core.Symmetric(20, 24),
+					PaddingEnv:     core.EnvAll(core.EnvSafeArea),
+					Direction:      core.Column,
+					AlignItems:     core.AlignStart,
+					JustifyContent: core.JustifyCenter,
+					Gap:            12,
+				},
+				Children: []core.Node{
+					core.Text{
+						TestID:  "title-heading",
+						Content: tr.GameTitle,
+						Style:   core.Style{Color: textColor, FontSize: 28, FontWeight: core.FontWeightBold},
+					},
+					core.View{
+						TestID: "title-records",
+						Style: core.Style{
+							Direction:    core.Column,
+							AlignItems:   core.AlignStart,
+							Gap:          3,
+							Background:   cardColor,
+							BorderWidth:  1,
+							BorderColor:  cardBorder,
+							CornerRadius: 10,
+							Padding:      core.Symmetric(10, 14),
+							MinWidth:     core.Pt(menuButtonWidth),
+						},
+						Children: recordChildren,
+					},
+					actionButton("title-start", tr.Start, menuButtonWidth, buttonColor, focus == 0, g.start),
+					actionButton("title-settings", tr.Settings, menuButtonWidth, secondaryColor, focus == 1, g.openSettings),
+					actionButton("title-quit", tr.Quit, menuButtonWidth, secondaryColor, focus == 2, g.quitApp),
+				},
+			},
+		},
+	}
 }
 
-// paused is the overlay that stops a run: continue it, or leave it for the title screen.
+// paused is the overlay that stops a run: resume, open settings, or quit to the title screen with confirmation.
 func (g *emberVigil) paused() core.Node {
-	return panel("pause",
-		heading("Paused"),
-		button("Resume", menuButtonWidth, g.resume),
-		button("Quit", menuButtonWidth, g.quitRun),
+	tr := g.tr()
+	focus := g.menuFocus.Get()
+
+	if g.confirmQuit.Get() {
+		return panel("pause", tr.ConfirmQuitTitle,
+			core.View{
+				TestID: "pause-confirm-quit",
+				Style:  core.Style{Direction: core.Column, AlignItems: core.AlignCenter, Gap: 12},
+				Children: []core.Node{
+					heading(tr.ConfirmQuitTitle),
+					core.Text{
+						TestID:  "pause-confirm-quit-body",
+						Content: tr.ConfirmQuitBody,
+						Style:   core.Style{Color: dimColor, FontSize: 13, TextAlign: core.TextAlignCenter},
+					},
+					core.View{
+						Style: core.Style{Direction: core.Row, Gap: 12},
+						Children: []core.Node{
+							actionButton("pause-confirm-quit-yes", tr.ConfirmQuitYes, menuButtonWidth, dangerColor, focus == 0, g.quitRun),
+							actionButton("pause-confirm-quit-no", tr.Cancel, menuButtonWidth, secondaryColor, focus == 1, g.cancelQuitRun),
+						},
+					},
+				},
+			},
+		)
+	}
+
+	return panel("pause", tr.Paused,
+		heading(tr.Paused),
+		actionButton("pause-resume", tr.Resume, menuButtonWidth, buttonColor, focus == 0, g.resume),
+		actionButton("pause-settings", tr.Settings, menuButtonWidth, secondaryColor, focus == 1, g.openSettings),
+		actionButton("pause-quit", tr.QuitToTitle, menuButtonWidth, dangerColor, focus == 2, g.requestQuitRun),
 	)
 }
 
-// settings is a placeholder until the settings screen edits saved settings.
-func (g *emberVigil) settings() core.Node {
-	return panel("settings",
-		heading("Settings"),
-		button("Back", menuButtonWidth, g.closeSettings),
+// settingsView edits audio volumes, screen shake, graphics quality and language, with Apply and Back actions.
+func (g *emberVigil) settingsView() core.Node {
+	cfg := g.settings.Get()
+	tr := g.tr()
+	focus := g.menuFocus.Get()
+
+	shakeLabel := tr.Off
+	shakeBg := secondaryColor
+	if cfg.ScreenShake {
+		shakeLabel = tr.On
+		shakeBg = buttonColor
+	}
+
+	qualityButtons := make([]core.Node, 0, len(qualityTiers))
+	for _, q := range qualityTiers {
+		tier := q
+		selected := cfg.Quality == tier
+		qualityButtons = append(qualityButtons, optionButton(
+			"settings-quality-"+string(tier),
+			qualityLabel(tr, tier),
+			selected,
+			func() { g.setQuality(tier) },
+		))
+	}
+
+	langButtons := []core.Node{
+		optionButton("settings-lang-en", tr.LanguageEN, cfg.Language == evstrings.EN, func() { g.setLanguage(evstrings.EN) }),
+		optionButton("settings-lang-zh-CN", tr.LanguageZhCN, cfg.Language == evstrings.ZhCN, func() { g.setLanguage(evstrings.ZhCN) }),
+	}
+
+	return core.View{
+		TestID: "settings",
+		Label:  tr.SettingsTitle,
+		Style: core.Style{
+			Position:       core.Absolute,
+			Top:            core.Pt(0),
+			Right:          core.Pt(0),
+			Bottom:         core.Pt(0),
+			Left:           core.Pt(0),
+			AlignItems:     core.AlignCenter,
+			JustifyContent: core.JustifyCenter,
+			Padding:        core.All(12),
+			PaddingEnv:     core.EnvAll(core.EnvSafeArea),
+			Background:     core.RGBA(0x020617, 0.65),
+		},
+		Children: []core.Node{
+			core.View{
+				Style: core.Style{
+					Background:   panelColor,
+					CornerRadius: 14,
+					Padding:      core.Symmetric(14, 20),
+					AlignItems:   core.AlignStretch,
+					Gap:          6,
+					MinWidth:     core.Pt(460),
+				},
+				Children: []core.Node{
+					core.Text{
+						TestID:  "settings-heading",
+						Content: tr.SettingsTitle,
+						Style:   core.Style{Color: textColor, FontSize: 22, FontWeight: core.FontWeightBold, TextAlign: core.TextAlignCenter},
+					},
+					g.volumeRow("master", tr.MasterVolume, cfg.MasterVolume, focus == 0, tr, g.adjustMasterVolume),
+					g.volumeRow("music", tr.MusicVolume, cfg.MusicVolume, focus == 1, tr, g.adjustMusicVolume),
+					g.volumeRow("sfx", tr.SFXVolume, cfg.SFXVolume, focus == 2, tr, g.adjustSFXVolume),
+					settingsRow(tr.ScreenShake, focus == 3,
+						actionButton("settings-shake", shakeLabel, 100, shakeBg, false, g.toggleShake),
+					),
+					settingsRow(tr.Quality, focus == 4,
+						core.View{
+							Style:    core.Style{Direction: core.Row, Gap: 6},
+							Children: qualityButtons,
+						},
+					),
+					settingsRow(tr.Language, focus == 5,
+						core.View{
+							Style:    core.Style{Direction: core.Row, Gap: 8},
+							Children: langButtons,
+						},
+					),
+					core.View{
+						Style: core.Style{
+							Direction:      core.Row,
+							JustifyContent: core.JustifyCenter,
+							Gap:            12,
+							Margin:         core.Edges{Top: 6},
+						},
+						Children: []core.Node{
+							actionButton("settings-apply", tr.Apply, menuButtonWidth, buttonColor, focus == 6, g.applySettings),
+							actionButton("settings-back", tr.Back, menuButtonWidth, secondaryColor, focus == 7, g.closeSettings),
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// volumeRow renders one volume setting with - / + buttons and a percentage readout.
+func (g *emberVigil) volumeRow(key, name string, value float64, focused bool, tr evstrings.Table, adjust func(float64)) core.Node {
+	pct := strconv.Itoa(int(math.Round(value*100))) + "%"
+	return settingsRow(name, focused,
+		core.View{
+			Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8},
+			Children: []core.Node{
+				stepButton("settings-"+key+"-dec", "-", tr.DecreaseLabel(name), func() { adjust(-volumeStep) }),
+				core.Text{
+					TestID:  "settings-" + key + "-value",
+					Content: pct,
+					Style:   core.Style{Color: textColor, FontSize: 14, FontWeight: core.FontWeightBold, Width: core.Pt(48), TextAlign: core.TextAlignCenter},
+				},
+				stepButton("settings-"+key+"-inc", "+", tr.IncreaseLabel(name), func() { adjust(volumeStep) }),
+			},
+		},
 	)
+}
+
+// settingsRow pairs a setting label on the left with its control on the right.
+func settingsRow(name string, focused bool, control core.Node) core.Node {
+	border := core.RGBA(0, 0)
+	if focused {
+		border = xpColor
+	}
+	return core.View{
+		Style: core.Style{
+			Direction:      core.Row,
+			AlignItems:     core.AlignCenter,
+			JustifyContent: core.JustifySpaceBetween,
+			Gap:            12,
+			Padding:        core.Symmetric(2, 6),
+			CornerRadius:   8,
+			BorderWidth:    2,
+			BorderColor:    border,
+		},
+		Children: []core.Node{
+			core.Text{
+				Content: name,
+				Style:   core.Style{Color: textColor, FontSize: 14, FontWeight: core.FontWeightBold, MinWidth: core.Pt(124)},
+			},
+			control,
+		},
+	}
+}
+
+// qualityLabel returns the localized name of a quality tier.
+func qualityLabel(tr evstrings.Table, q Quality) string {
+	switch q {
+	case QualityLow:
+		return tr.QualityLow
+	case QualityMedium:
+		return tr.QualityMedium
+	case QualityHigh:
+		return tr.QualityHigh
+	default:
+		return tr.QualityAuto
+	}
 }
 
 // panel centers a card of children over the arena, padded clear of the safe area, and takes the presses that land on it.
-func panel(id string, children ...core.Node) core.Node {
+func panel(id, accessibleLabel string, children ...core.Node) core.Node {
 	return core.View{
 		TestID: id,
+		Label:  accessibleLabel,
 		Style: core.Style{
 			Position:       core.Absolute,
 			Top:            core.Pt(0),
@@ -600,15 +896,22 @@ func wideMeter(id string, width, height core.Points, fraction float64, color cor
 	}
 }
 
-// button is a native button called label that runs onPress when pressed by pointer, keyboard or screen reader.
-func button(label string, minWidth core.Points, onPress func()) core.Node {
+// actionButton is a touch-friendly native button with an accessible label, TestID and optional focus ring.
+func actionButton(id, text string, minWidth core.Points, bg core.Color, focused bool, onPress func()) core.Node {
+	border := core.RGBA(0, 0)
+	if focused {
+		border = xpColor
+	}
 	return base.Button{
-		Label:   label,
+		TestID:  id,
+		Label:   text,
 		OnPress: func(core.PressEvent) { onPress() },
 		Style: core.Style{
-			Background:     buttonColor,
+			Background:     bg,
+			BorderWidth:    2,
+			BorderColor:    border,
 			CornerRadius:   10,
-			Padding:        core.Symmetric(10, 16),
+			Padding:        core.Symmetric(8, 16),
 			MinWidth:       core.Pt(minWidth),
 			MinHeight:      core.Pt(buttonSide),
 			AlignItems:     core.AlignCenter,
@@ -616,7 +919,59 @@ func button(label string, minWidth core.Points, onPress func()) core.Node {
 			Active:         &core.Style{Opacity: core.Alpha(0.8)},
 		},
 		Children: []core.Node{
-			core.Text{Content: label, Style: core.Style{Color: textColor, FontSize: 15, FontWeight: core.FontWeightBold}},
+			core.Text{Content: text, Style: core.Style{Color: textColor, FontSize: 15, FontWeight: core.FontWeightBold}},
+		},
+	}
+}
+
+// stepButton is a square touch-friendly stepper button used for volume adjustments.
+func stepButton(id, glyph, accessibleLabel string, onPress func()) core.Node {
+	return base.Button{
+		TestID:  id,
+		Label:   accessibleLabel,
+		OnPress: func(core.PressEvent) { onPress() },
+		Style: core.Style{
+			Background:     secondaryColor,
+			CornerRadius:   8,
+			MinWidth:       core.Pt(buttonSide),
+			MinHeight:      core.Pt(buttonSide),
+			AlignItems:     core.AlignCenter,
+			JustifyContent: core.JustifyCenter,
+			Active:         &core.Style{Opacity: core.Alpha(0.8)},
+		},
+		Children: []core.Node{
+			core.Text{Content: glyph, Style: core.Style{Color: textColor, FontSize: 16, FontWeight: core.FontWeightBold}},
+		},
+	}
+}
+
+// optionButton is a selectable choice pill for quality tiers and languages.
+func optionButton(id, text string, selected bool, onPress func()) core.Node {
+	bg := secondaryColor
+	border := cardBorder
+	if selected {
+		bg = buttonColor
+		border = xpColor
+	}
+	return base.Button{
+		TestID:   id,
+		Label:    text,
+		Selected: func() bool { return selected },
+		OnPress:  func(core.PressEvent) { onPress() },
+		Style: core.Style{
+			Background:     bg,
+			BorderWidth:    2,
+			BorderColor:    border,
+			CornerRadius:   8,
+			Padding:        core.Symmetric(6, 12),
+			MinWidth:       core.Pt(64),
+			MinHeight:      core.Pt(buttonSide),
+			AlignItems:     core.AlignCenter,
+			JustifyContent: core.JustifyCenter,
+			Active:         &core.Style{Opacity: core.Alpha(0.8)},
+		},
+		Children: []core.Node{
+			core.Text{Content: text, Style: core.Style{Color: textColor, FontSize: 13, FontWeight: core.FontWeightBold}},
 		},
 	}
 }

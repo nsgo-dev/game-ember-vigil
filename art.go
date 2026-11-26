@@ -23,6 +23,9 @@ var embeddedSprites embed.FS
 //go:embed assets/icons/*.png
 var embeddedIcons embed.FS
 
+//go:embed assets/Title.png
+var embeddedTitleArt embed.FS
+
 // The palette's sixteen indices, from the night's ink to the rust of the Cinderwood's floor. A picture names an index and never a colour.
 const (
 	palInk uint8 = iota
@@ -511,19 +514,23 @@ var sheetSpecs = []sheetSpec{
 	},
 }
 
-// art holds the procedural fallback atlas, the packed stylized sprite-sheet atlas, and embedded upgrade card icons.
+// art holds the procedural fallback atlas, the packed stylized sprite-sheet atlas, embedded upgrade card icons and title key art.
 type art struct {
-	atlas      *sprite.Atlas
-	frames     frames
-	pixels     map[string]*pixels
-	sheetAtlas *sprite.Atlas
-	sheets     sheetFrames
-	icons      map[string]core.ImageSource
+	atlas       *sprite.Atlas
+	frames      frames
+	pixels      map[string]*pixels
+	sheetAtlas  *sprite.Atlas
+	sheets      sheetFrames
+	icons       map[string]core.ImageSource
+	titleArt    core.ImageSource
+	hasTitleArt bool
 }
 
-// newArt builds the procedural fallback atlas and loads all embedded sprite sheets and upgrade card icons.
+// newArt builds the procedural fallback atlas and loads all embedded sprite sheets, upgrade card icons and title key art.
 func newArt() *art {
-	return newArtFromFS(embeddedSprites, embeddedIcons)
+	a := newArtFromFS(embeddedSprites, embeddedIcons)
+	a.loadTitleArt(embeddedTitleArt)
+	return a
 }
 
 // newArtFromFS builds the procedural fallback atlas and loads any available sprite sheets and icons from spriteFS and iconFS.
@@ -561,6 +568,34 @@ func (a *art) cardIcon(id string) (core.ImageSource, bool) {
 	}
 	src, ok := a.icons[strings.ReplaceAll(id, "-", "_")]
 	return src, ok
+}
+
+// titleKeyArt returns the embedded title screen key art, or false when absent so the title falls back to a dark backdrop.
+func (a *art) titleKeyArt() (core.ImageSource, bool) {
+	if a == nil || !a.hasTitleArt {
+		return core.ImageSource{}, false
+	}
+	return a.titleArt, true
+}
+
+// loadTitleArt reads assets/Title.png from fsys and records its encoded bytes and dimensions for native decoding.
+func (a *art) loadTitleArt(fsys fs.FS) {
+	if fsys == nil {
+		return
+	}
+	raw, err := fs.ReadFile(fsys, "assets/Title.png")
+	if err != nil || len(raw) == 0 {
+		return
+	}
+	cfg, err := png.DecodeConfig(bytes.NewReader(raw))
+	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
+		return
+	}
+	a.titleArt = core.ImageSource{
+		Data: raw,
+		Size: core.Size{Width: core.Points(cfg.Width), Height: core.Points(cfg.Height)},
+	}
+	a.hasTitleArt = true
 }
 
 // decodedSheet is one sprite sheet decoded into premultiplied RGBA and validated against its uniform grid.
