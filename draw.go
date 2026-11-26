@@ -182,8 +182,9 @@ type arenaRenderer struct {
 	keeperAnimMoving  bool
 	keeperFacingRight bool
 
-	fx        effects
-	cosmetics *random.Stream
+	fx           effects
+	shakeEnabled bool
+	cosmetics    *random.Stream
 
 	// fresh is whether a step arrived since the last frame, which a paused run does not do: a frame between steps blends, a frame without a step holds still.
 	fresh bool
@@ -210,6 +211,7 @@ func newArenaRenderer(a *art) *arenaRenderer {
 		before:            map[uint64]prevState{},
 		spare:             map[uint64]prevState{},
 		keeperFacingRight: true,
+		shakeEnabled:      true,
 		cosmetics:         random.NewStreams(0).Stream("cosmetics"),
 		fx:                effects{flash: map[uint64]float64{}},
 		lantern:           lights2d.NewLight(0, 0, lanternRadius, core.RGB(0xffb347)),
@@ -438,6 +440,16 @@ func growActors(a []actor, n int) []actor {
 	return a[:n]
 }
 
+// setShakeEnabled turns camera shake on or off immediately, clearing any active shake when disabled.
+func (r *arenaRenderer) setShakeEnabled(enabled bool) {
+	r.shakeEnabled = enabled
+	if !enabled {
+		r.fx.shake = 0
+		r.fx.shakeX = 0
+		r.fx.shakeY = 0
+	}
+}
+
 // stepEffects moves the particles, fades the flashes and shakes the frame, then adds what this step's events caused.
 func (r *arenaRenderer) stepEffects(events []Event, dt float64) {
 	fx := &r.fx
@@ -462,10 +474,16 @@ func (r *arenaRenderer) stepEffects(events []Event, dt float64) {
 			fx.flash[id] = left
 		}
 	}
-	fx.shake = math.Max(0, fx.shake-2.5*dt)
-	amp := shakePixels * fx.shake * fx.shake
-	fx.shakeX = amp * math.Sin(fx.time*97)
-	fx.shakeY = amp * math.Cos(fx.time*131)
+	if r.shakeEnabled {
+		fx.shake = math.Max(0, fx.shake-2.5*dt)
+		amp := shakePixels * fx.shake * fx.shake
+		fx.shakeX = amp * math.Sin(fx.time*97)
+		fx.shakeY = amp * math.Cos(fx.time*131)
+	} else {
+		fx.shake = 0
+		fx.shakeX = 0
+		fx.shakeY = 0
+	}
 
 	for _, e := range events {
 		switch e.Kind {
@@ -473,21 +491,31 @@ func (r *arenaRenderer) stepEffects(events []Event, dt float64) {
 			fx.flash[e.ID] = flashSeconds
 		case EventKill:
 			r.burst(e.Pos, particlePuff, 4, 22, puffSeconds)
-			fx.shake = math.Min(1, fx.shake+0.12)
+			if r.shakeEnabled {
+				fx.shake = math.Min(1, fx.shake+0.12)
+			}
 		case EventEmber:
 			r.burst(e.Pos, particleSpark, 2, 30, sparkSeconds)
 		case EventBossSpawn:
 			r.burst(e.Pos, particlePuff, 14, 48, puffSeconds*1.3)
 			r.burst(e.Pos, particleSpark, 10, 56, sparkSeconds*1.4)
-			fx.shake = 0.9
+			if r.shakeEnabled {
+				fx.shake = 0.9
+			}
 		case EventBossPhase:
 			r.burst(e.Pos, particleSpark, 12, 60, sparkSeconds*1.3)
-			fx.shake = math.Min(1, fx.shake+0.65)
+			if r.shakeEnabled {
+				fx.shake = math.Min(1, fx.shake+0.65)
+			}
 		case EventVictory:
 			r.burst(e.Pos, particleSpark, 24, 70, sparkSeconds*1.6)
-			fx.shake = 0.85
+			if r.shakeEnabled {
+				fx.shake = 0.85
+			}
 		case EventDefeat:
-			fx.shake = 1
+			if r.shakeEnabled {
+				fx.shake = 1
+			}
 		}
 	}
 }
