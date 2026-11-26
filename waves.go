@@ -58,12 +58,16 @@ func (d *director) step(r *Run) {
 		}
 	}
 
-	// Scheduled surges spawn a burst around the ring, respecting the global alive cap.
+	// Scheduled surges spawn a burst or full 360-degree encircling wave around the ring, respecting the global alive cap.
 	for d.nextSurge < len(d.waves.Surges) && r.time >= d.waves.Surges[d.nextSurge].At {
 		s := &d.waves.Surges[d.nextSurge]
 		d.nextSurge++
 		if kind, ok := r.data.enemyIndex(s.Enemy); ok {
 			def := &r.data.enemies.Enemies[kind]
+			if s.Surround {
+				r.spawnSurround(kind, def.Radius, s.Count, s.Health, s.Damage)
+				continue
+			}
 			for range s.Count {
 				if len(r.enemies) >= d.waves.MaxAlive {
 					break
@@ -114,6 +118,26 @@ func (r *Run) spawnPos(radius float64) (Vec2, bool) {
 		}
 	}
 	return Vec2{}, false
+}
+
+// spawnSurround places count enemies evenly around a full 360-degree ring outside the view, enclosing the keeper from every direction.
+func (r *Run) spawnSurround(kind int, radius float64, count int, healthMul, damageMul float64) {
+	if count <= 0 {
+		return
+	}
+	ring := r.data.waves.Ring
+	baseAngle := r.spawns.Range(0, 2*math.Pi)
+	step := 2 * math.Pi / float64(count)
+	for i := range count {
+		if len(r.enemies) >= r.data.waves.MaxAlive {
+			break
+		}
+		ang := baseAngle + float64(i)*step
+		dist := r.spawns.Range(ring.Min, ring.Min+(ring.Max-ring.Min)*0.45)
+		dir := Vec2{X: math.Cos(ang), Y: math.Sin(ang)}
+		pos := r.clamp(r.keeper.pos.Add(dir.Scale(dist)), radius)
+		r.addEnemy(kind, pos, healthMul, damageMul)
+	}
 }
 
 // fallbackRingPos places a guaranteed spawn (elite or boss) toward the arena center when random ring attempts fall inside the view.
@@ -175,6 +199,7 @@ func (r *Run) addEnemy(kind int, pos Vec2, healthMul, damageMul float64) {
 		shotRadius:      def.Shot.Radius,
 		shotLife:        def.Shot.Life,
 		shotDamage:      def.Shot.Damage * damageMul,
+		shotBurst:       def.Shot.Burst,
 		splitKind:       splitKind,
 		splitCount:      def.Split.Count,
 		healDrop:        def.HealDrop,

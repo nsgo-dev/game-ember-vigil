@@ -217,7 +217,7 @@ type orbitDef struct {
 	Radius float64 `yaml:"radius"`
 }
 
-// enemyShotDef is the projectile a ranged or orbiting enemy fires toward the keeper.
+// enemyShotDef is the projectile a ranged, orbiting or elite enemy fires toward the keeper.
 type enemyShotDef struct {
 	Range    float64 `yaml:"range"`
 	Cooldown float64 `yaml:"cooldown"`
@@ -225,6 +225,7 @@ type enemyShotDef struct {
 	Radius   float64 `yaml:"radius"`
 	Life     float64 `yaml:"life"`
 	Damage   float64 `yaml:"damage"`
+	Burst    int     `yaml:"burst,omitempty"`
 }
 
 // splitDef is what an enemy breaks into when it dies.
@@ -245,12 +246,14 @@ type waveFile struct {
 }
 
 // surgeDef is a scheduled burst of enemies at a fixed second on the run clock.
+// When Surround is true, the wave spawns evenly around a full 360-degree ring enclosing the keeper.
 type surgeDef struct {
-	At     float64 `yaml:"at"`
-	Enemy  string  `yaml:"enemy"`
-	Count  int     `yaml:"count"`
-	Health float64 `yaml:"health"`
-	Damage float64 `yaml:"damage"`
+	At       float64 `yaml:"at"`
+	Enemy    string  `yaml:"enemy"`
+	Count    int     `yaml:"count"`
+	Health   float64 `yaml:"health"`
+	Damage   float64 `yaml:"damage"`
+	Surround bool    `yaml:"surround,omitempty"`
 }
 
 // eliteSpawnDef is a scheduled elite spawn at a fixed second on the run clock.
@@ -845,8 +848,13 @@ func (e *enemyDef) validate() error {
 			return fail("sets fields for another motion kind")
 		}
 	case motionChase:
-		if e.Drift != (driftDef{}) || e.Ranged != (rangedDef{}) || e.Orbit != (orbitDef{}) || e.Shot != (enemyShotDef{}) {
+		if e.Drift != (driftDef{}) || e.Ranged != (rangedDef{}) || e.Orbit != (orbitDef{}) {
 			return fail("a chasing enemy sets fields for another motion kind")
+		}
+		if e.Shot != (enemyShotDef{}) {
+			if err := e.Shot.validate(); err != nil {
+				return fail("shot: %v", err)
+			}
 		}
 	case motionRanged:
 		if !positive(e.Ranged.KeepDistance) {
@@ -886,6 +894,8 @@ func (s *enemyShotDef) validate() error {
 		return fmt.Errorf("life %v is not above 0", s.Life)
 	case !positive(s.Damage):
 		return fmt.Errorf("damage %v is not above 0", s.Damage)
+	case s.Burst < 0:
+		return fmt.Errorf("burst %d is negative", s.Burst)
 	}
 	return nil
 }
