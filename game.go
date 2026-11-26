@@ -7,6 +7,7 @@ import (
 
 	"github.com/nsgo-dev/game/packages/game"
 	"github.com/nsgo-dev/game/packages/game/input"
+	"github.com/nsgo-dev/game/packages/game/quality"
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/desktop"
 	evstrings "me.oneo/embervigil/strings"
@@ -61,6 +62,8 @@ type emberVigil struct {
 	actions *input.Actions
 	art     *art
 	scene   *arenaRenderer
+	audio   *audioController
+	quality *quality.Selector
 	run     *Run
 
 	// seed is the run's seed, which the arena's ground decoration is drawn from, so it stays put for the whole run.
@@ -122,7 +125,14 @@ func newEmberVigil(cx *core.Scope) *emberVigil {
 		menuFocus:      core.NewSignal(cx, 0),
 	}
 	g.scene = newArenaRenderer(g.art)
-	g.scene.setShakeEnabled(saved.ScreenShake)
+	g.audio = newAudioController(cx, saved)
+	if sel, err := quality.NewSelector(emberQualityConfig(), quality.DeviceFromEnv(cx.Env())); err == nil {
+		g.quality = sel
+		g.quality.OnChange = func(l quality.Level, p quality.Preset) {
+			g.scene.setQuality(qualityProfileFor(l, p))
+		}
+	}
+	g.applyLiveSettings(saved)
 
 	// Touches and clicks arrive in the view's points; game.yaml's regions are in virtual pixels.
 	g.actions.MapPoint = func(p core.Point) (core.Point, bool) { return viewport.ViewToGame(g.size, p) }
@@ -133,6 +143,11 @@ func newEmberVigil(cx *core.Scope) *emberVigil {
 	g.loop = &game.Loop{
 		Rate:   rate,
 		Update: g.update,
+		FrameTime: func(dt time.Duration) {
+			if g.quality != nil && g.phase.GetUntracked() == phaseArena && g.run != nil && g.run.Snapshot().Phase == PhasePlaying {
+				g.quality.Observe(dt)
+			}
+		},
 		Draw: func(alpha float64) {
 			g.alpha = alpha
 			g.frame.Update(func(n uint64) uint64 { return n + 1 })
@@ -140,6 +155,20 @@ func newEmberVigil(cx *core.Scope) *emberVigil {
 	}
 	g.loop.Run(cx)
 	return g
+}
+
+// applyLiveSettings pushes volume, screen shake, quality preset and window title updates to the shell's subsystems.
+func (g *emberVigil) applyLiveSettings(s Settings) {
+	s = normalizeSettings(s)
+	g.scene.setShakeEnabled(s.ScreenShake)
+	if g.audio != nil {
+		g.audio.applySettings(s)
+	}
+	if g.quality != nil {
+		_ = g.quality.SetSetting(string(s.Quality))
+		g.scene.setQuality(qualityProfileFor(g.quality.Level(), g.quality.Preset()))
+	}
+	desktop.SetTitle(g.cx, evstrings.For(s.Language).GameTitle)
 }
 
 // tr returns the active language's string table, subscribing the caller to language changes.
@@ -167,9 +196,11 @@ func (g *emberVigil) update(dt time.Duration) {
 			return
 		case g.actions.JustPressed(actionLeft):
 			g.cardFocus = (g.cardFocus + offerCount - 1) % offerCount
+			g.audio.playCue(cueUIClick)
 			g.publishHUD()
 		case g.actions.JustPressed(actionRight):
 			g.cardFocus = (g.cardFocus + 1) % offerCount
+			g.audio.playCue(cueUIClick)
 			g.publishHUD()
 		case g.actions.JustPressed(actionConfirm):
 			g.choose(g.cardFocus)
@@ -180,11 +211,14 @@ func (g *emberVigil) update(dt time.Duration) {
 	}
 
 	if g.phase.GetUntracked() == phaseArena && g.run != nil {
-		prevPhase := g.run.Snapshot().Phase
+		prev := g.run.Snapshot()
 		g.run.Step(dt, Controls{Move: Vec2{X: g.actions.Axis(axisMoveX), Y: g.actions.Axis(axisMoveY)}})
 		snap := g.run.Snapshot()
-		g.scene.sync(snap, g.run.Events(), dt.Seconds())
-		if snap.Phase != prevPhase {
+		events := g.run.Events()
+		keeperDamaged := snap.Health < prev.Health-1e-6
+		g.scene.sync(snap, events, dt.Seconds())
+		g.audio.playRunEvents(events, keeperDamaged)
+		if snap.Phase != prev.Phase {
 			if snap.Phase == PhaseLevelUp {
 				g.cardFocus = 0
 			}
@@ -266,6 +300,9 @@ func (g *emberVigil) moveFocus(delta, count int) {
 	}
 	cur := g.menuFocus.GetUntracked()
 	next := (cur + delta%count + count) % count
+	if next != cur {
+		g.audio.playCue(cueUIClick)
+	}
 	g.menuFocus.Set(next)
 }
 
@@ -367,13 +404,16 @@ func (g *emberVigil) start() {
 	g.seed = uint64(time.Now().UnixNano())
 	g.run = NewRun(g.seed)
 	g.scene.startRun(g.seed)
-	g.scene.setShakeEnabled(g.settings.GetUntracked().ScreenShake)
+	g.applyLiveSettings(g.settings.GetUntracked())
 	g.hudClock = 0
 	g.cardFocus = 0
 	g.runRecorded = false
 	g.lastNewRecord = false
 	g.confirmQuit.Set(false)
 	g.setPhase(phaseArena)
+	g.audio.setPaused(false)
+	g.audio.playCue(cueUISelect)
+	g.audio.ensureMusic()
 	g.publishHUD()
 }
 
@@ -382,6 +422,7 @@ func (g *emberVigil) choose(index int) {
 	if g.run != nil && g.run.Choose(index) {
 		g.cardFocus = 0
 		g.actions.Reset()
+		g.audio.playCue(cueUISelect)
 		g.publishHUD()
 	}
 }
@@ -391,6 +432,8 @@ func (g *emberVigil) pause() {
 	if g.phase.GetUntracked() == phaseArena && g.run != nil && g.run.Snapshot().Phase == PhasePlaying {
 		g.confirmQuit.Set(false)
 		g.setPhase(phasePaused)
+		g.audio.setPaused(true)
+		g.audio.playCue(cueUIClick)
 	}
 }
 
@@ -399,6 +442,8 @@ func (g *emberVigil) resume() {
 	if g.phase.GetUntracked() == phasePaused {
 		g.confirmQuit.Set(false)
 		g.setPhase(phaseArena)
+		g.audio.setPaused(false)
+		g.audio.playCue(cueUISelect)
 	}
 }
 
@@ -423,6 +468,7 @@ func (g *emberVigil) requestQuitRun() {
 	if g.phase.GetUntracked() == phasePaused {
 		g.confirmQuit.Set(true)
 		g.menuFocus.Set(0)
+		g.audio.playCue(cueUIClick)
 	}
 }
 
@@ -431,6 +477,7 @@ func (g *emberVigil) cancelQuitRun() {
 	if g.phase.GetUntracked() == phasePaused {
 		g.confirmQuit.Set(false)
 		g.menuFocus.Set(0)
+		g.audio.playCue(cueUIClick)
 	}
 }
 
@@ -440,6 +487,9 @@ func (g *emberVigil) quitRun() {
 	g.run = nil
 	g.runRecorded = false
 	g.setPhase(phaseTitle)
+	g.audio.setPaused(false)
+	g.audio.stopMusic()
+	g.audio.playCue(cueUIClick)
 	g.publishHUD()
 }
 
@@ -453,16 +503,17 @@ func (g *emberVigil) openSettings() {
 	g.savedSettings = g.settings.GetUntracked()
 	g.confirmQuit.Set(false)
 	g.setPhase(phaseSettings)
+	g.audio.playCue(cueUISelect)
 }
 
-// updateDraft mutates the live settings draft and immediately applies renderer shake and window title updates.
+// updateDraft mutates the live settings draft and immediately applies audio, quality, shake and window title updates.
 func (g *emberVigil) updateDraft(edit func(*Settings)) {
 	cur := g.settings.GetUntracked()
 	edit(&cur)
 	cur = normalizeSettings(cur)
 	g.settings.Set(cur)
-	g.scene.setShakeEnabled(cur.ScreenShake)
-	desktop.SetTitle(g.cx, evstrings.For(cur.Language).GameTitle)
+	g.applyLiveSettings(cur)
+	g.audio.playCue(cueUIClick)
 }
 
 func (g *emberVigil) adjustMasterVolume(delta float64) {
@@ -524,8 +575,8 @@ func (g *emberVigil) applySettings() {
 	_ = saveSettings(g.storage, cur)
 	g.savedSettings = cur
 	g.settings.Set(cur)
-	g.scene.setShakeEnabled(cur.ScreenShake)
-	desktop.SetTitle(g.cx, evstrings.For(cur.Language).GameTitle)
+	g.applyLiveSettings(cur)
+	g.audio.playCue(cueUISelect)
 	g.setPhase(g.settingsReturn)
 }
 
@@ -535,8 +586,8 @@ func (g *emberVigil) closeSettings() {
 		return
 	}
 	g.settings.Set(g.savedSettings)
-	g.scene.setShakeEnabled(g.savedSettings.ScreenShake)
-	desktop.SetTitle(g.cx, evstrings.For(g.savedSettings.Language).GameTitle)
+	g.applyLiveSettings(g.savedSettings)
+	g.audio.playCue(cueUIClick)
 	g.setPhase(g.settingsReturn)
 }
 

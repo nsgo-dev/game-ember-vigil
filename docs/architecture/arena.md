@@ -20,11 +20,11 @@ The camera eases toward the keeper at a rate independent of frame length, then c
 
 ## Light
 
-`lights2d` lays an ambient darkness over the whole canvas and adds a flickering lantern on the keeper plus additive glows for shots and embers. This version has no occluders, so the scene disables shadows: nothing should pay for visibility polygons until something casts a shadow.
+`lights2d` lays a light moonlit twilight tint over the canvas and screen-blends a wide, flickering warm lantern on the keeper plus glows for shots, patches, pickups and embers. The active quality preset caps glow light count and controls shadow casting.
 
 ## Effects
 
-Hit flashes, death puffs, ember trails and the screen's shake all run on the cosmetic stream, never on the run's streams. Every list is capped, so a burst of kills cannot grow a frame without a limit. Ember trails are decoration only: they leave where an ember already is and cannot move it.
+Hit flashes, hit sparks, death puffs, ember trails, the level-up flourish, the crimson damage vignette and restrained screen shake all run on the cosmetic stream, never on the run's streams. Every list is capped by the active quality preset (`low`, `medium`, `high`, or adaptive `auto`), and screen shake strictly follows the settings toggle. Ember trails are decoration only: they leave where an ember already is and cannot move it.
 
 ## HUD
 

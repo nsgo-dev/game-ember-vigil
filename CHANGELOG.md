@@ -9,3 +9,4 @@
 - Complete the twelve-minute wave timeline with Thornling, Wisp, Shade, the Gloomwarden elite, the three-phase Hollow King boss, boss telegraphs and health bar, and the victory/defeat results screen (#5, #18 by @oneo-me).
 - Integrate animated stylized 2D sprite sheets with idle/walk transitions, facing flips, projectile rotation and embedded upgrade card icons, keeping procedural art as a clean fallback (#15, #21 by @oneo-me).
 - Add the title screen with embedded key art and best records, persistent versioned settings and records in `core.Storage`, pause settings and quit confirmation, and live English and Simplified Chinese localization (#6, #22 by @oneo-me).
+- Add the sound mixer, CC0 placeholder music and SFX cues, brighter moonlit arena lighting and forest floor readability, level-up flourish, damage vignette, and adaptive low/medium/high quality presets (#7, #23 by @oneo-me).

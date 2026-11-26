@@ -916,23 +916,33 @@ func packFrames(ras []*pixels) ([]sprite.Frame, int, int) {
 // frameGap is the clear pixels the atlas leaves between two pictures.
 const frameGap = 1
 
-// The ground's look: the size of a soil block, and how many pieces of decor the run's cosmetic stream scatters over the arena.
+// The ground's look: the size of a soil block, how many pieces of decor the run's cosmetic stream scatters over the arena,
+// and the moonlit twilight soil shades so the forest floor reads clearly even outside the lantern's warm core.
 const (
 	soilBlock  = 4
-	decorSpots = 900
+	decorSpots = 1100
 )
 
-// newGround paints the arena's ground once per run: mottled soil, and the decor the run's cosmetic stream scatters over it. Two runs with one seed paint the same ground.
+var (
+	groundSoilBase      = core.RGB(0x283246)
+	groundSoilMoss      = core.RGB(0x2f483a)
+	groundSoilShadow    = core.RGB(0x202838)
+	groundSoilHighlight = core.RGB(0x344159)
+)
+
+// newGround paints the arena's ground once per run: mottled moonlit soil, and the decor the run's cosmetic stream scatters over it. Two runs with one seed paint the same ground.
 func (a *art) newGround(seed uint64, width, height int) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	for y := 0; y < height; y += soilBlock {
 		for x := 0; x < width; x += soilBlock {
-			soil := palette[palNight]
+			soil := groundSoilBase
 			switch mottle(seed, x/soilBlock, y/soilBlock) & 31 {
-			case 0:
-				soil = palette[palMoss]
-			case 1:
-				soil = palette[palInk]
+			case 0, 1:
+				soil = groundSoilMoss
+			case 2, 3:
+				soil = groundSoilShadow
+			case 4:
+				soil = groundSoilHighlight
 			}
 			fillInto(img, x, y, soilBlock, soilBlock, soil)
 		}
@@ -941,7 +951,7 @@ func (a *art) newGround(seed uint64, width, height int) *image.RGBA {
 	decor := a.frames.decor()
 	s := random.NewStreams(seed).Stream("ground")
 	for range decorSpots {
-		p := a.pixels[pictures[decorChoice(s, len(decor))].name]
+		p := a.pixels[decor[decorChoice(s, len(decor))].Name]
 		x, y := s.Intn(width)-p.w/2, s.Intn(height)-p.h/2
 		p.drawInto(img, x, y)
 	}

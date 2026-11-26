@@ -721,7 +721,7 @@ func TestRecordsUpdateOncePerRunAndPersist(t *testing.T) {
 // TestScreenShakeToggleStopsRendererShake checks that disabling screen shake clears shake immediately and ignores subsequent shake events.
 func TestScreenShakeToggleStopsRendererShake(t *testing.T) {
 	r := newArenaRenderer(newArt())
-	r.stepEffects([]Event{{Kind: EventDefeat}}, 0.016)
+	r.stepEffects([]Event{{Kind: EventDefeat}}, false, 0.016)
 	if r.fx.shake <= 0 {
 		t.Fatalf("shake after EventDefeat with shake enabled = %v, want > 0", r.fx.shake)
 	}
@@ -729,7 +729,7 @@ func TestScreenShakeToggleStopsRendererShake(t *testing.T) {
 	if r.fx.shake != 0 || r.fx.shakeX != 0 || r.fx.shakeY != 0 {
 		t.Fatalf("setShakeEnabled(false) did not clear shake: %+v", r.fx)
 	}
-	r.stepEffects([]Event{{Kind: EventDefeat}, {Kind: EventBossSpawn}}, 0.016)
+	r.stepEffects([]Event{{Kind: EventDefeat}, {Kind: EventBossSpawn}}, false, 0.016)
 	if r.fx.shake != 0 || r.fx.shakeX != 0 || r.fx.shakeY != 0 {
 		t.Fatalf("shake occurred while disabled: %+v", r.fx)
 	}

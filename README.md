@@ -66,4 +66,4 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ## License
 
-Ember Vigil is released under the [MIT License](LICENSE).
+Ember Vigil is released under the [MIT License](LICENSE). Placeholder audio uses the `nsgo-dev/game` placeholder pack (Placeholder art and sound: NSGo Game contributors, CC0).
