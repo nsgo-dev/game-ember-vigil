@@ -734,3 +734,129 @@ func TestScreenShakeToggleStopsRendererShake(t *testing.T) {
 		t.Fatalf("shake occurred while disabled: %+v", r.fx)
 	}
 }
+
+// TestVirtualStickMovesKeeperAndRespectsSafeArea checks that the bottom-left virtual stick stays clear of phone safe areas, renders feedback and drives move_x/move_y.
+func TestVirtualStickMovesKeeperAndRespectsSafeArea(t *testing.T) {
+	const width, height = 844, 390
+	safe := core.Edges{Top: 12, Right: 44, Bottom: 21, Left: 44}
+	env := core.Environment{
+		Idiom:    core.IdiomPhone,
+		Pointer:  core.PointerCoarse,
+		SafeArea: safe,
+	}
+	app, g := startEmberVigil(t, nsgotest.Size(width, height), nsgotest.Environment(env))
+	press(t, app, "id:title-start")
+
+	if !g.showTouchStick() {
+		t.Fatal("showTouchStick() = false on a phone with coarse pointer, want true")
+	}
+	base := g.stick.BasePosition()
+	stickR := core.Points(g.stick.Radius)
+	if base.X-stickR < safe.Left || base.Y+stickR > height-safe.Bottom {
+		t.Fatalf("stick resting circle (center=%v, r=%v) intrudes into safe area %+v", base, stickR, safe)
+	}
+
+	before := g.run.Snapshot().Keeper
+	finger := app.Touch("id:arena-view", base)
+	app.Advance(2 * frame)
+	if !g.stick.Active() {
+		t.Fatal("virtual stick did not activate on touch inside its bottom-left zone")
+	}
+
+	finger.Move(core.Point{X: base.X + stickR, Y: base.Y - stickR*0.5})
+	app.Advance(30 * frame)
+
+	if ax := g.actions.Axis(axisMoveX); ax <= 0.5 {
+		t.Fatalf("move_x while dragging stick right = %v, want > 0.5", ax)
+	}
+	if ay := g.actions.Axis(axisMoveY); ay >= -0.2 {
+		t.Fatalf("move_y while dragging stick up = %v, want < -0.2", ay)
+	}
+	after := g.run.Snapshot().Keeper
+	if after.X <= before.X || after.Y >= before.Y {
+		t.Fatalf("keeper moved from %+v to %+v while dragging stick up-right", before, after)
+	}
+
+	// Verify the virtual stick drew its base and knob on the arena canvas.
+	ops := app.Find("id:arena").Ops
+	fillCount := 0
+	for _, op := range ops {
+		if op.Kind == core.DrawFill {
+			fillCount++
+		}
+	}
+	if fillCount < 2 {
+		t.Fatalf("arena canvas drew %d fill ops with active stick, want at least 2 for stick base and knob", fillCount)
+	}
+
+	finger.Lift()
+	app.Advance(3 * frame)
+	if g.stick.Active() {
+		t.Fatal("virtual stick remained active after finger lifted")
+	}
+	if ax, ay := g.actions.Axis(axisMoveX), g.actions.Axis(axisMoveY); ax != 0 || ay != 0 {
+		t.Fatalf("move axes after releasing stick = (%v, %v), want (0, 0)", ax, ay)
+	}
+}
+
+// TestTouchLayoutAndSafeAreaOnPhoneLandscape checks that HUD pause, level-up cards and menu buttons stay >= 44pt and clear of phone safe areas.
+func TestTouchLayoutAndSafeAreaOnPhoneLandscape(t *testing.T) {
+	const width, height = 844, 390
+	safe := core.Edges{Top: 12, Right: 44, Bottom: 21, Left: 44}
+	env := core.Environment{
+		Idiom:    core.IdiomPhone,
+		Pointer:  core.PointerCoarse,
+		SafeArea: safe,
+	}
+	app, g := startEmberVigil(t, nsgotest.Size(width, height), nsgotest.Environment(env))
+
+	checkSafe := func(screen string) {
+		t.Helper()
+		buttons := app.Query("role:button")
+		if len(buttons) == 0 {
+			t.Fatalf("the %s screen shows no button", screen)
+		}
+		for _, b := range buttons {
+			bounds := b.Bounds()
+			if bounds.Size.Width < buttonSide || bounds.Size.Height < buttonSide {
+				t.Fatalf("%s button %q is %v, smaller than %vpt", screen, b.Text, bounds.Size, buttonSide)
+			}
+			if bounds.Origin.X < safe.Left-0.5 || bounds.Origin.Y < safe.Top-0.5 ||
+				bounds.Origin.X+bounds.Size.Width > width-safe.Right+0.5 ||
+				bounds.Origin.Y+bounds.Size.Height > height-safe.Bottom+0.5 {
+				t.Fatalf("%s button %q bounds %v intrude outside phone safe area %+v on %vx%v", screen, b.Text, bounds, safe, width, height)
+			}
+		}
+	}
+
+	checkSafe("title")
+	press(t, app, "id:title-start")
+	checkSafe("arena")
+
+	// Verify pause button sits in the top-right quadrant clear of the right safe area.
+	pauseBounds := app.Find("id:hud-pause").Bounds()
+	if pauseBounds.Origin.X < width/2 {
+		t.Fatalf("hud-pause X = %v, want top-right quadrant (>= %v)", pauseBounds.Origin.X, width/2)
+	}
+
+	press(t, app, "id:hud-pause")
+	checkSafe("pause")
+	press(t, app, "id:pause-quit")
+	checkSafe("pause-confirm-quit")
+	press(t, app, "id:pause-confirm-quit-no")
+	press(t, app, "id:pause-resume")
+
+	// Trigger level-up and check all three cards fit within the safe area and respond to tap.
+	g.run.xp = g.run.xpNeeded()
+	app.Advance(2 * frame)
+	checkSafe("level-up")
+	press(t, app, "id:level-up-card-0")
+	if g.run.Snapshot().Phase != PhasePlaying {
+		t.Fatalf("phase after tapping level-up card on phone = %v, want PhasePlaying", g.run.Snapshot().Phase)
+	}
+
+	// Trigger defeat and check results buttons stay inside safe area.
+	g.run.keeper.health = 0
+	app.Advance(8 * frame)
+	checkSafe("results")
+}

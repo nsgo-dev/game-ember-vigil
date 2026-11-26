@@ -16,6 +16,10 @@
   一款十二分钟的类幸存者 2D 游戏：在灰烬森林里守住最后一簇余烬，烧尽扑向它的暗影，活到天亮。使用 Go、<a href="https://github.com/nsgo-dev/nsgo">NSGo</a> 和 <a href="https://github.com/nsgo-dev/game">nsgo-dev/game</a> 构建。
 </p>
 
+<p align="center">
+  <img alt="余烬守望实机截图：守夜人提灯光影、灰烬森林手绘场景、动画怪物、余烬箭与 HUD" src="docs/screenshot.png" width="760">
+</p>
+
 ## 功能
 
 - 一局十二分钟，暗影生物越聚越多，黎明时直面空洞之王。
@@ -26,7 +30,7 @@
 - 保存最佳记录和设置。
 - 可构建到 macOS、Windows、Linux 和 Web。
 
-首版正在开发中，[路线图](docs/roadmap.md)列出每个里程碑的内容。
+首版已完成，各里程碑的交付内容与后续计划见[路线图](docs/roadmap.md)。
 
 ## 安装
 
@@ -38,10 +42,11 @@ cd test-game-2
 go tool nsgo dev
 ```
 
-窗口以 960×540 打开。想在浏览器里玩：
+窗口以 960×540 打开。在浏览器里运行，或将多平台构建产物打包到 `dist/`：
 
 ```sh
 go tool nsgo dev -target web
+go tool nsgo build
 ```
 
 ## 开始游玩

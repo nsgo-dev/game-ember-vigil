@@ -1,8 +1,8 @@
 # Roadmap
 
-The first version ships in three milestones. The developer closes one issue before starting the next; the art issues can run beside them.
+The first version ships in three completed milestones (M1–M3); all issues below are delivered on `main` as of #8.
 
-## M1: Playable slice
+## M1: Playable slice (done)
 
 | Issue | Delivers | Depends on |
 | --- | --- | --- |
@@ -11,7 +11,7 @@ The first version ships in three milestones. The developer closes one issue befo
 | [#3](https://github.com/oneo-me/test-game-2/issues/3) | Arena rendering, camera, lantern lighting and HUD | #1, #2 |
 | [#4](https://github.com/oneo-me/test-game-2/issues/4) | Four weapons, eight passives and level-up cards | #2, #3 |
 
-## M2: Complete run
+## M2: Complete run (done)
 
 | Issue | Delivers | Depends on |
 | --- | --- | --- |
@@ -19,7 +19,7 @@ The first version ships in three milestones. The developer closes one issue befo
 | [#6](https://github.com/oneo-me/test-game-2/issues/6) | Menus, settings, localization and saved records | #1, #3, #5 |
 | [#15](https://github.com/oneo-me/test-game-2/issues/15) | Animated sprite sheets and card icons integration | #3, #13 |
 
-## M3: Ship
+## M3: Ship (done)
 
 | Issue | Delivers | Depends on |
 | --- | --- | --- |

@@ -101,6 +101,7 @@ func (g *emberVigil) view() core.Node {
 			},
 		},
 	}
+	arena.OnTouch = g.onArenaTouch
 	g.actions.Attach(&arena)
 
 	return core.View{
@@ -276,6 +277,8 @@ func (g *emberVigil) levelUp() core.Node {
 				AlignItems:     core.AlignStretch,
 				JustifyContent: core.JustifyCenter,
 				Gap:            12,
+				Width:          core.Pct(100),
+				MaxWidth:       core.Pt(cardWidth*offerCount + 24),
 			},
 			Children: cards,
 		},
@@ -342,9 +345,11 @@ func (g *emberVigil) upgradeCard(index int, c hudCard, focused bool, tr evstring
 		Label:   copyText.Name,
 		OnPress: func(core.PressEvent) { g.choose(index) },
 		Style: core.Style{
-			Width:          core.Pt(cardWidth),
-			MinWidth:       core.Pt(buttonSide),
-			MinHeight:      core.Pt(cardMinHeight),
+			FlexGrow:       1,
+			FlexShrink:     1,
+			MinWidth:       core.Pt(132),
+			MaxWidth:       core.Pt(cardWidth),
+			MinHeight:      core.Pt(156),
 			Background:     cardColor,
 			BorderWidth:    2,
 			BorderColor:    border,
@@ -600,12 +605,12 @@ func (g *emberVigil) title() core.Node {
 					MaxWidth:       core.Pt(380),
 					Height:         core.Pct(100),
 					Background:     titleScrim,
-					Padding:        core.Symmetric(20, 24),
+					Padding:        core.Symmetric(14, 20),
 					PaddingEnv:     core.EnvAll(core.EnvSafeArea),
 					Direction:      core.Column,
 					AlignItems:     core.AlignStart,
 					JustifyContent: core.JustifyCenter,
-					Gap:            12,
+					Gap:            10,
 				},
 				Children: []core.Node{
 					core.Text{
@@ -720,49 +725,58 @@ func (g *emberVigil) settingsView() core.Node {
 			Background:     core.RGBA(0x020617, 0.65),
 		},
 		Children: []core.Node{
-			core.View{
+			core.Scroll{
 				Style: core.Style{
-					Background:   panelColor,
-					CornerRadius: 14,
-					Padding:      core.Symmetric(14, 20),
-					AlignItems:   core.AlignStretch,
-					Gap:          6,
-					MinWidth:     core.Pt(460),
+					MaxWidth:  core.Pct(100),
+					MaxHeight: core.Pct(100),
 				},
 				Children: []core.Node{
-					core.Text{
-						TestID:  "settings-heading",
-						Content: tr.SettingsTitle,
-						Style:   core.Style{Color: textColor, FontSize: 22, FontWeight: core.FontWeightBold, TextAlign: core.TextAlignCenter},
-					},
-					g.volumeRow("master", tr.MasterVolume, cfg.MasterVolume, focus == 0, tr, g.adjustMasterVolume),
-					g.volumeRow("music", tr.MusicVolume, cfg.MusicVolume, focus == 1, tr, g.adjustMusicVolume),
-					g.volumeRow("sfx", tr.SFXVolume, cfg.SFXVolume, focus == 2, tr, g.adjustSFXVolume),
-					settingsRow(tr.ScreenShake, focus == 3,
-						actionButton("settings-shake", shakeLabel, 100, shakeBg, false, g.toggleShake),
-					),
-					settingsRow(tr.Quality, focus == 4,
-						core.View{
-							Style:    core.Style{Direction: core.Row, Gap: 6},
-							Children: qualityButtons,
-						},
-					),
-					settingsRow(tr.Language, focus == 5,
-						core.View{
-							Style:    core.Style{Direction: core.Row, Gap: 8},
-							Children: langButtons,
-						},
-					),
 					core.View{
 						Style: core.Style{
-							Direction:      core.Row,
-							JustifyContent: core.JustifyCenter,
-							Gap:            12,
-							Margin:         core.Edges{Top: 6},
+							Background:   panelColor,
+							CornerRadius: 14,
+							Padding:      core.Symmetric(14, 20),
+							AlignItems:   core.AlignStretch,
+							Gap:          6,
+							MinWidth:     core.Pt(460),
+							MaxWidth:     core.Pt(520),
 						},
 						Children: []core.Node{
-							actionButton("settings-apply", tr.Apply, menuButtonWidth, buttonColor, focus == 6, g.applySettings),
-							actionButton("settings-back", tr.Back, menuButtonWidth, secondaryColor, focus == 7, g.closeSettings),
+							core.Text{
+								TestID:  "settings-heading",
+								Content: tr.SettingsTitle,
+								Style:   core.Style{Color: textColor, FontSize: 22, FontWeight: core.FontWeightBold, TextAlign: core.TextAlignCenter},
+							},
+							g.volumeRow("master", tr.MasterVolume, cfg.MasterVolume, focus == 0, tr, g.adjustMasterVolume),
+							g.volumeRow("music", tr.MusicVolume, cfg.MusicVolume, focus == 1, tr, g.adjustMusicVolume),
+							g.volumeRow("sfx", tr.SFXVolume, cfg.SFXVolume, focus == 2, tr, g.adjustSFXVolume),
+							settingsRow(tr.ScreenShake, focus == 3,
+								actionButton("settings-shake", shakeLabel, 100, shakeBg, false, g.toggleShake),
+							),
+							settingsRow(tr.Quality, focus == 4,
+								core.View{
+									Style:    core.Style{Direction: core.Row, Gap: 6},
+									Children: qualityButtons,
+								},
+							),
+							settingsRow(tr.Language, focus == 5,
+								core.View{
+									Style:    core.Style{Direction: core.Row, Gap: 8},
+									Children: langButtons,
+								},
+							),
+							core.View{
+								Style: core.Style{
+									Direction:      core.Row,
+									JustifyContent: core.JustifyCenter,
+									Gap:            12,
+									Margin:         core.Edges{Top: 6},
+								},
+								Children: []core.Node{
+									actionButton("settings-apply", tr.Apply, menuButtonWidth, buttonColor, focus == 6, g.applySettings),
+									actionButton("settings-back", tr.Back, menuButtonWidth, secondaryColor, focus == 7, g.closeSettings),
+								},
+							},
 						},
 					},
 				},
@@ -856,6 +870,7 @@ func panel(id, accessibleLabel string, children ...core.Node) core.Node {
 					Padding:      core.Symmetric(20, 28),
 					AlignItems:   core.AlignCenter,
 					Gap:          12,
+					MaxWidth:     core.Pct(100),
 				},
 				Children: children,
 			},
