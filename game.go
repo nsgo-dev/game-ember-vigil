@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"math"
 	"time"
 
 	"github.com/nsgo-dev/game/packages/game"
@@ -9,8 +11,11 @@ import (
 	"github.com/nsgo-dev/nsgo/desktop"
 )
 
-// rate is how many times a second the game steps its run, whatever the display's refresh rate.
-const rate = 60
+// rate is how many times a second the game steps its run, whatever the display's refresh rate, and hudRate how often the native HUD reads the run.
+const (
+	rate    = 60
+	hudRate = 100 * time.Millisecond
+)
 
 // The actions game.yaml binds, which the shell reads by name.
 const (
@@ -35,11 +40,21 @@ type emberVigil struct {
 	cx      *core.Scope
 	loop    *game.Loop
 	actions *input.Actions
+	art     *art
+	scene   *arenaRenderer
 	run     *Run
+
+	// seed is the run's seed, which the arena's ground decoration is drawn from, so it stays put for the whole run.
+	seed uint64
+	// alpha is how far the last step's frame falls between the run's last two steps, which Draw blends by.
+	alpha float64
 
 	// phase is the screen that shows; frame changes on every draw so the canvas draws again.
 	phase *core.Signal[phase]
 	frame *core.Signal[uint64]
+	// hud is what the native views show, published at hudRate rather than every step; hudClock is how long since the last time.
+	hud      *core.Signal[hudState]
+	hudClock time.Duration
 
 	// size is the arena canvas's size when it last drew, which input maps into virtual pixels.
 	size core.Size
@@ -58,9 +73,12 @@ func newEmberVigil(cx *core.Scope) *emberVigil {
 	g := &emberVigil{
 		cx:      cx,
 		actions: input.NewActions(),
+		art:     newArt(),
 		phase:   core.NewSignal(cx, phaseTitle),
 		frame:   core.NewSignal(cx, uint64(0)),
+		hud:     core.NewSignal(cx, hudState{}),
 	}
+	g.scene = newArenaRenderer(g.art)
 
 	// Touches and clicks arrive in the view's points; game.yaml's regions are in virtual pixels.
 	g.actions.MapPoint = func(p core.Point) (core.Point, bool) { return viewport.ViewToGame(g.size, p) }
@@ -71,7 +89,8 @@ func newEmberVigil(cx *core.Scope) *emberVigil {
 	g.loop = &game.Loop{
 		Rate:   rate,
 		Update: g.update,
-		Draw: func(float64) {
+		Draw: func(alpha float64) {
+			g.alpha = alpha
 			g.frame.Update(func(n uint64) uint64 { return n + 1 })
 		},
 	}
@@ -90,7 +109,43 @@ func (g *emberVigil) update(dt time.Duration) {
 	}
 	if g.phase.GetUntracked() == phaseArena && g.run != nil {
 		g.run.Step(dt, Controls{Move: Vec2{X: g.actions.Axis(axisMoveX), Y: g.actions.Axis(axisMoveY)}})
+		g.scene.sync(g.run.Snapshot(), g.run.Events(), dt.Seconds())
+		if g.hudClock += dt; g.hudClock >= hudRate {
+			g.hudClock = 0
+			g.publishHUD()
+		}
 	}
+}
+
+// publishHUD tells the native HUD what the run shows now: its clock, health, XP, level, kills and cards, or nothing when no run is on.
+func (g *emberVigil) publishHUD() {
+	if g.run == nil {
+		g.hud.Set(hudState{})
+		return
+	}
+	s := g.run.Snapshot()
+	st := hudState{
+		phase:     s.Phase,
+		time:      clockText(s.Time),
+		health:    max(0, int(math.Ceil(s.Health))),
+		maxHealth: int(math.Round(s.MaxHealth)),
+		xp:        int(math.Round(s.XP)),
+		xpNeeded:  int(math.Ceil(s.XPNeeded)),
+		level:     s.Level,
+		kills:     s.Kills,
+	}
+	for i := range st.offers {
+		if i < len(s.Offers) {
+			st.offers[i] = s.Offers[i].Name
+		}
+	}
+	g.hud.Set(st)
+}
+
+// clockText writes a run's time as the minutes and seconds it has lasted.
+func clockText(seconds float64) string {
+	t := int(math.Max(0, seconds))
+	return fmt.Sprintf("%02d:%02d", t/60, t%60)
 }
 
 // setPhase shows p's screen and drops held input, so a press on a menu does not reach the arena.
@@ -99,15 +154,26 @@ func (g *emberVigil) setPhase(p phase) {
 	g.actions.Reset()
 }
 
-// start begins a run from the wall clock's seed, which the run itself never reads.
+// start begins a run from the wall clock's seed, which the run itself never reads, and keeps that seed for the arena's ground.
 func (g *emberVigil) start() {
-	g.run = NewRun(uint64(time.Now().UnixNano()))
+	g.seed = uint64(time.Now().UnixNano())
+	g.run = NewRun(g.seed)
+	g.scene.startRun(g.seed)
+	g.hudClock = 0
 	g.setPhase(phaseArena)
+	g.publishHUD()
 }
 
-// pause stops the run under the pause overlay.
+// choose takes card index of a level-up and resumes the run behind it.
+func (g *emberVigil) choose(index int) {
+	if g.run != nil && g.run.Choose(index) {
+		g.publishHUD()
+	}
+}
+
+// pause stops a run that is being played under the pause overlay, leaving one that is over or waiting for a card as it is.
 func (g *emberVigil) pause() {
-	if g.phase.GetUntracked() == phaseArena {
+	if g.phase.GetUntracked() == phaseArena && g.run != nil && g.run.Snapshot().Phase == PhasePlaying {
 		g.setPhase(phasePaused)
 	}
 }
@@ -133,6 +199,7 @@ func (g *emberVigil) togglePause() {
 func (g *emberVigil) quitRun() {
 	g.run = nil
 	g.setPhase(phaseTitle)
+	g.publishHUD()
 }
 
 // openSettings shows the settings screen, a placeholder until it has settings to edit.
@@ -152,8 +219,12 @@ func (g *emberVigil) closeSettings() {
 // quitApp ends the app.
 func (g *emberVigil) quitApp() { g.cx.Quit() }
 
-// confirm presses the screen's default button.
+// confirm presses the screen's default button, which takes the first card while a level-up waits.
 func (g *emberVigil) confirm() {
+	if g.phase.GetUntracked() == phaseArena && g.run != nil && g.run.Snapshot().Phase == PhaseLevelUp {
+		g.choose(0)
+		return
+	}
 	switch g.phase.GetUntracked() {
 	case phaseTitle:
 		g.start()
@@ -168,5 +239,6 @@ func (g *emberVigil) confirm() {
 func (g *emberVigil) draw(d *core.Drawing, size core.Size) {
 	_ = g.frame.Get()
 	g.size = size
-	viewport.Draw(d, size, drawArena)
+	alpha := g.alpha
+	viewport.Draw(d, size, func(d *core.Drawing, _ core.Size) { g.scene.draw(d, alpha) })
 }
