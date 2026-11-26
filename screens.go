@@ -39,18 +39,12 @@ const (
 	maxHUDWeapons   = 4
 )
 
-// The HUD's sizes in points.
-const (
-	meterWidth  = 120
-	meterHeight = 8
-	hudGap      = 6
-)
-
 // hudSlot is one equipped weapon shown on the HUD.
 type hudSlot struct {
-	id    string
-	name  string
-	level int
+	id       string
+	name     string
+	level    int
+	maxLevel int
 }
 
 // hudCard is one level-up card shown in the level-up modal.
@@ -64,19 +58,23 @@ type hudCard struct {
 	heal        bool
 }
 
-// hudState is what the native HUD shows, which the shell publishes at hudRate instead of reading the run every frame.
+// hudState is what the HUD and the native overlays show, which the shell publishes at hudRate instead of reading the run every frame.
 type hudState struct {
 	phase Phase
 	// time is the run's clock as minutes and seconds.
-	time          string
-	health        int
-	maxHealth     int
-	xp            int
-	xpNeeded      int
-	level         int
-	kills         int
-	cardFocus     int
-	bossActive    bool
+	time      string
+	health    int
+	maxHealth int
+	// lowHealthAt is the health fraction at or under which the lantern flickers, from the run's data.
+	lowHealthAt float64
+	xp          int
+	xpNeeded    int
+	level       int
+	kills       int
+	cardFocus   int
+	bossActive  bool
+	// bossElite says the bar shows a Gloomwarden rather than the Hollow King.
+	bossElite     bool
 	bossName      string
 	bossHealth    int
 	bossMaxHealth int
@@ -95,20 +93,21 @@ func (g *emberVigil) view() core.Node {
 		Children: []core.Node{
 			core.Canvas{
 				TestID:    "arena",
-				LabelFunc: func() string { return g.tr().ArenaLabel },
+				LabelFunc: func() string { return hudLabel(g.tr(), g.hud.Get()) },
 				Style:     fill(),
 				Draw:      g.draw,
 			},
 		},
 	}
 	arena.OnTouch = g.onArenaTouch
+	arena.OnPressDown = g.onArenaPressDown
+	arena.OnPressUp = g.onArenaPressUp
 	g.actions.Attach(&arena)
 
 	return core.View{
 		Style: core.Style{FlexGrow: 1, FlexShrink: 1, Background: barColor},
 		Children: []core.Node{
 			arena,
-			g.when(phaseArena, func() core.Node { return dynamic(g.hudView) }),
 			g.show(func() bool { return g.inRun(PhaseLevelUp) }, func() core.Node { return dynamic(g.levelUp) }),
 			g.show(func() bool { return g.inRun(PhaseVictory) || g.inRun(PhaseDefeat) }, func() core.Node { return dynamic(g.resultsOverlay) }),
 			g.when(phaseTitle, func() core.Node { return dynamic(g.title) }),
@@ -138,121 +137,6 @@ func (g *emberVigil) show(when func() bool, screen func() core.Node) core.Node {
 	return core.Show{
 		When: when,
 		Then: func(*core.Scope) core.Node { return screen() },
-	}
-}
-
-// hudView is the native bar over the arena: the run's clock, health and XP, its level, kills and weapons, and the pause button. Touches elsewhere reach the arena.
-func (g *emberVigil) hudView() core.Node {
-	st := g.hud.Get()
-	tr := g.tr()
-	health := float64(1)
-	if st.maxHealth > 0 {
-		health = float64(st.health) / float64(st.maxHealth)
-	}
-	xp := float64(0)
-	if st.xpNeeded > 0 {
-		xp = float64(st.xp) / float64(st.xpNeeded)
-	}
-
-	topChildren := []core.Node{
-		core.View{
-			Style: core.Style{Direction: core.Column, AlignItems: core.AlignStart, Gap: hudGap},
-			Children: []core.Node{
-				core.Text{TestID: "hud-timer", Content: st.time, Style: core.Style{Color: textColor, FontSize: 18, FontWeight: core.FontWeightBold}},
-				meter("hud-health", health, healthColor),
-				meter("hud-xp", xp, xpColor),
-				core.View{
-					Style: core.Style{Direction: core.Row, Gap: 12},
-					Children: []core.Node{
-						label("hud-level", tr.Level(st.level), 12, textColor),
-						label("hud-kills", tr.Kills(st.kills), 12, dimColor),
-					},
-				},
-				g.weaponSlots(st.weapons, tr),
-			},
-		},
-	}
-	if st.bossActive {
-		bossFrac := float64(0)
-		if st.bossMaxHealth > 0 {
-			bossFrac = float64(st.bossHealth) / float64(st.bossMaxHealth)
-		}
-		topChildren = append(topChildren, core.View{
-			TestID: "hud-boss",
-			Style: core.Style{
-				Direction:    core.Column,
-				AlignItems:   core.AlignCenter,
-				Gap:          4,
-				Background:   panelColor,
-				CornerRadius: 8,
-				Padding:      core.Symmetric(6, 12),
-			},
-			Children: []core.Node{
-				core.View{
-					Style: core.Style{Direction: core.Row, Gap: 8, AlignItems: core.AlignCenter},
-					Children: []core.Node{
-						label("hud-boss-name", tr.BossDisplayName(st.bossName), 13, textColor),
-						label("hud-boss-phase", tr.BossPhaseLabel(st.bossPhase), 11, xpColor),
-					},
-				},
-				wideMeter("hud-boss-health", 220, 10, bossFrac, healthColor),
-			},
-		})
-	}
-	topChildren = append(topChildren, actionButton("hud-pause", tr.Pause, buttonSide, buttonColor, false, g.pause))
-
-	return core.View{
-		TestID:        "hud",
-		PointerEvents: core.PointerEventsBoxNone,
-		Style: core.Style{
-			Position:       core.Absolute,
-			Top:            core.Pt(0),
-			Left:           core.Pt(0),
-			Right:          core.Pt(0),
-			Direction:      core.Row,
-			AlignItems:     core.AlignStart,
-			JustifyContent: core.JustifySpaceBetween,
-			Padding:        core.All(12),
-			PaddingEnv:     core.EnvAll(core.EnvSafeArea),
-		},
-		Children: topChildren,
-	}
-}
-
-// weaponSlots shows the keeper's equipped weapons, keeping the starter slot identifiable as hud-weapon / hud-weapon-name.
-func (g *emberVigil) weaponSlots(slots [maxHUDWeapons]hudSlot, tr evstrings.Table) core.Node {
-	var children []core.Node
-	for i, slot := range slots {
-		if slot.name == "" {
-			continue
-		}
-		boxID, nameID := "hud-weapon-"+strconv.Itoa(i), "hud-weapon-name-"+strconv.Itoa(i)
-		if i == 0 {
-			boxID, nameID = "hud-weapon", "hud-weapon-name"
-		}
-		displayName := tr.Card(slot.id, slot.name, "").Name
-		children = append(children, core.View{
-			TestID: boxID,
-			Style: core.Style{
-				Direction:    core.Row,
-				AlignItems:   core.AlignCenter,
-				Gap:          hudGap,
-				Background:   panelColor,
-				CornerRadius: 6,
-				Padding:      core.Symmetric(4, 8),
-			},
-			Children: []core.Node{
-				core.View{Style: core.Style{Width: core.Pt(10), Height: core.Pt(10), CornerRadius: 5, Background: cardAccent(slot.id, offerWeapon)}},
-				label(nameID, displayName, 12, textColor),
-			},
-		})
-	}
-	if len(children) == 0 {
-		return core.View{}
-	}
-	return core.View{
-		Style:    core.Style{Direction: core.Row, Gap: hudGap, Wrap: core.Wrap},
-		Children: children,
 	}
 }
 
@@ -886,29 +770,6 @@ func heading(text string) core.Node {
 // label is a small HUD text, which tests find by id.
 func label(id, text string, size core.Points, color core.Color) core.Node {
 	return core.Text{TestID: id, Content: text, Style: core.Style{Color: color, FontSize: size, FontWeight: core.FontWeightBold}}
-}
-
-// meter is a bar that fills by fraction, from 0 to 1.
-func meter(id string, fraction float64, color core.Color) core.Node {
-	return wideMeter(id, meterWidth, meterHeight, fraction, color)
-}
-
-// wideMeter is a bar of explicit size that fills by fraction, from 0 to 1.
-func wideMeter(id string, width, height core.Points, fraction float64, color core.Color) core.Node {
-	f := float32(min(max(fraction, 0), 1)) * 100
-	return core.View{
-		TestID: id,
-		Style: core.Style{
-			Width:        core.Pt(width),
-			Height:       core.Pt(height),
-			CornerRadius: 4,
-			Overflow:     core.Hidden,
-			Background:   core.RGBA(0x020617, 0.7),
-		},
-		Children: []core.Node{
-			core.View{Style: core.Style{Width: core.Pct(f), Height: core.Pt(height), Background: color}},
-		},
-	}
 }
 
 // actionButton is a touch-friendly native button with an accessible label, TestID and optional focus ring.

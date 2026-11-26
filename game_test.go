@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -39,6 +40,35 @@ func press(t *testing.T, app *nsgotest.App, selector string) {
 	app.Advance(frame)
 }
 
+// pauseCenter is the middle of the pause button the HUD draws on the arena canvas.
+func pauseCenter(g *emberVigil) core.Point {
+	x, y := layoutHUD(g.canvasSize(), g.cx.Env().SafeArea()).pauseHit.center()
+	return core.Point{X: core.Points(x), Y: core.Points(y)}
+}
+
+// pressPause clicks the canvas pause button and runs a frame.
+func pressPause(t *testing.T, app *nsgotest.App, g *emberVigil) {
+	t.Helper()
+	app.PressAt("id:arena-view", pauseCenter(g))
+	app.Advance(frame)
+}
+
+// arenaLabel is what the arena canvas tells assistive technology, the HUD's values included.
+func arenaLabel(app *nsgotest.App) string {
+	return app.Find("id:arena").Props.Label
+}
+
+// wantLabel fails t unless the arena's label holds every part.
+func wantLabel(t *testing.T, app *nsgotest.App, parts ...string) {
+	t.Helper()
+	label := arenaLabel(app)
+	for _, part := range parts {
+		if !strings.Contains(label, part) {
+			t.Fatalf("the arena's label %q lacks %q", label, part)
+		}
+	}
+}
+
 func TestTitleArenaPauseAndQuitFlow(t *testing.T) {
 	app, g := startEmberVigil(t)
 	app.Find("id:title")
@@ -60,7 +90,7 @@ func TestTitleArenaPauseAndQuitFlow(t *testing.T) {
 		t.Fatalf("the run lasted %v seconds after ten frames, want more than %v", g.run.Snapshot().Time, before)
 	}
 
-	press(t, app, "role:button Pause")
+	pressPause(t, app, g)
 	app.Find("id:pause")
 	app.Find("text:Paused")
 	paused := g.run.Snapshot().Time
@@ -78,7 +108,7 @@ func TestTitleArenaPauseAndQuitFlow(t *testing.T) {
 		t.Fatalf("the run lasted %v seconds after resuming, want more than %v", g.run.Snapshot().Time, paused)
 	}
 
-	press(t, app, "role:button Pause")
+	pressPause(t, app, g)
 	press(t, app, "id:pause-quit")
 	app.Find("id:pause-confirm-quit")
 	// Cancel keeps the run paused.
@@ -260,8 +290,8 @@ func TestButtonsAreTouchFriendly(t *testing.T) {
 	check("settings")
 	press(t, app, "role:button Back")
 	press(t, app, "role:button Start")
-	check("arena")
-	press(t, app, "role:button Pause")
+	// The arena has no native button: its pause is drawn on the canvas, which TestHUDLayoutStaysInsideTheSafeAreaAndOffTheStick sizes.
+	pressPause(t, app, g)
 	check("pause")
 	press(t, app, "id:pause-quit")
 	check("pause-confirm-quit")
@@ -272,31 +302,29 @@ func TestButtonsAreTouchFriendly(t *testing.T) {
 	check("level-up")
 }
 
-// TestTheHUDFollowsTheRun checks that the native HUD shows the run's clock, level, kills and starter weapon, and keeps up with them.
+// TestTheHUDFollowsTheRun checks that the canvas HUD shows the run's clock, health, level, kills and starter weapon, keeps up with them and tells assistive technology.
 func TestTheHUDFollowsTheRun(t *testing.T) {
 	app, g := startEmberVigil(t)
 	press(t, app, "role:button Start")
 
-	if got := app.Find("id:hud-timer").Text; got != "00:00" {
-		t.Fatalf("the HUD's clock reads %q at the start, want 00:00", got)
+	st := g.hud.Get()
+	if st.time != "00:00" || st.level != 1 || st.kills != 0 || st.health != st.maxHealth || st.maxHealth <= 0 {
+		t.Fatalf("the HUD starts at %+v, want 00:00, level 1, no kills and full health", st)
 	}
-	if got := app.Find("id:hud-level").Text; got != "Level 1" {
-		t.Fatalf("the HUD's level reads %q, want Level 1", got)
+	if got := st.weapons[0]; got.id != "ember-bolt" || got.level != 1 || got.maxLevel <= 1 {
+		t.Fatalf("the HUD's first slot is %+v, want Ember Bolt at level 1 of several", got)
 	}
-	if got := app.Find("id:hud-kills").Text; got != "Kills 0" {
-		t.Fatalf("the HUD's kills read %q, want Kills 0", got)
+	wantLabel(t, app, "00:00", "Level 1", "Kills 0", "Health 100/100")
+	if !drewHUDPiece(app.Find("id:arena").Ops, g.hudArt, hudHealthFrame) {
+		t.Fatal("the arena canvas did not draw the HUD's lantern")
 	}
-	if got := app.Find("id:hud-weapon-name").Text; got != "Ember Bolt" {
-		t.Fatalf("the HUD's weapon slot reads %q, want Ember Bolt", got)
-	}
-	app.Find("id:hud-health")
-	app.Find("id:hud-xp")
 
 	app.Advance(70 * frame)
 	want := clockText(g.run.Snapshot().Time)
-	if got := app.Find("id:hud-timer").Text; got != want || got == "00:00" {
+	if got := g.hud.Get().time; got != want || got == "00:00" {
 		t.Fatalf("the HUD's clock reads %q after a second, want %q", got, want)
 	}
+	wantLabel(t, app, want)
 }
 
 // TestALevelUpCardIsChosenFromThePrompt checks that a level-up shows three rich cards (name, description, pips), pauses the run, and resumes after a tap.
@@ -427,16 +455,18 @@ func TestResultsScreenForDefeatAndVictory(t *testing.T) {
 	if app.Exists("id:results") {
 		t.Fatal("the results screen stayed after Play Again")
 	}
-	app.Find("id:hud-timer")
+	wantLabel(t, app, "00:00")
 
 	// Spawn Hollow King and confirm boss health bar appears in the HUD.
 	g.run.spawnBoss()
 	app.Advance(8 * frame)
-	app.Find("id:hud-boss")
-	if got := app.Find("id:hud-boss-name").Text; got != "Hollow King" {
-		t.Fatalf("boss HUD name = %q, want Hollow King", got)
+	if st := g.hud.Get(); !st.bossActive || st.bossElite || st.bossName != "Hollow King" || st.bossMaxHealth <= 0 {
+		t.Fatalf("boss HUD = %+v, want the Hollow King's bar", st)
 	}
-	app.Find("id:hud-boss-health")
+	wantLabel(t, app, "Hollow King · Phase I")
+	if !drewHUDPiece(app.Find("id:arena").Ops, g.hudArt, hudBossFrame) {
+		t.Fatal("the arena canvas did not draw the boss bar")
+	}
 
 	// Defeat the Hollow King and confirm Victory results screen and Title action.
 	if be := g.run.bossEnemy(); be != nil {
@@ -570,7 +600,7 @@ func TestPauseSettingsRoundTripKeepsClockFrozen(t *testing.T) {
 	press(t, app, "id:title-start")
 	app.Advance(10 * frame)
 
-	press(t, app, "id:hud-pause")
+	pressPause(t, app, g)
 	if g.phase.Get() != phasePaused {
 		t.Fatalf("phase after Pause = %v, want phasePaused", g.phase.Get())
 	}
@@ -616,18 +646,10 @@ func TestLanguageSwitchUpdatesAllScreens(t *testing.T) {
 
 	// Arena HUD + Boss bar
 	press(t, app, "id:title-start")
-	if got := app.Find("id:hud-level").Text; got != "等级 1" {
-		t.Fatalf("zh-CN HUD level = %q, want 等级 1", got)
-	}
-	if got := app.Find("id:hud-kills").Text; got != "击杀 0" {
-		t.Fatalf("zh-CN HUD kills = %q, want 击杀 0", got)
-	}
-	if got := app.Find("id:hud-weapon-name").Text; got != "余烬箭" {
-		t.Fatalf("zh-CN HUD weapon = %q, want 余烬箭", got)
-	}
+	wantLabel(t, app, "余烬守望竞技场", "等级 1", "击杀 0", "生命 100/100")
 
 	// Pause + quit confirmation
-	press(t, app, "id:hud-pause")
+	pressPause(t, app, g)
 	app.Find("text:已暂停")
 	app.Find("role:button 继续")
 	press(t, app, "id:pause-quit")
@@ -654,12 +676,7 @@ func TestLanguageSwitchUpdatesAllScreens(t *testing.T) {
 	// Boss HUD + Victory results
 	g.run.spawnBoss()
 	app.Advance(8 * frame)
-	if got := app.Find("id:hud-boss-name").Text; got != "空洞之王" {
-		t.Fatalf("zh-CN boss name = %q, want 空洞之王", got)
-	}
-	if got := app.Find("id:hud-boss-phase").Text; got != "第一阶段" {
-		t.Fatalf("zh-CN boss phase = %q, want 第一阶段", got)
-	}
+	wantLabel(t, app, "空洞之王 · 第一阶段")
 	if be := g.run.bossEnemy(); be != nil {
 		be.hp = 0
 	}
@@ -831,15 +848,27 @@ func TestTouchLayoutAndSafeAreaOnPhoneLandscape(t *testing.T) {
 
 	checkSafe("title")
 	press(t, app, "id:title-start")
-	checkSafe("arena")
 
-	// Verify pause button sits in the top-right quadrant clear of the right safe area.
-	pauseBounds := app.Find("id:hud-pause").Bounds()
-	if pauseBounds.Origin.X < width/2 {
-		t.Fatalf("hud-pause X = %v, want top-right quadrant (>= %v)", pauseBounds.Origin.X, width/2)
+	// The canvas pause button sits top-right inside the safe area, takes a thumb, and stays off the stick's zone.
+	l := layoutHUD(core.Size{Width: width, Height: height}, safe)
+	hit := l.pauseHit
+	if hit.x < width/2 || hit.w < buttonSide || hit.h < buttonSide ||
+		hit.x+hit.w > width-float32(safe.Right) || hit.y < float32(safe.Top) {
+		t.Fatalf("pause hit area %+v, want >= %vpt in the top-right of the safe area %+v", hit, buttonSide, safe)
 	}
-
-	press(t, app, "id:hud-pause")
+	if zone := g.stick.Zone; float32(zone.Origin.Y) < l.bottom {
+		t.Fatalf("stick zone %+v starts above the HUD's bottom %v", zone, l.bottom)
+	}
+	finger := app.Touch("id:arena-view", pauseCenter(g))
+	app.Advance(frame)
+	if g.stick.Active() {
+		t.Fatal("a touch on the pause button woke the stick")
+	}
+	finger.Lift()
+	app.Advance(frame)
+	if g.phase.Get() != phasePaused {
+		t.Fatalf("phase after tapping the canvas pause = %v, want phasePaused", g.phase.Get())
+	}
 	checkSafe("pause")
 	press(t, app, "id:pause-quit")
 	checkSafe("pause-confirm-quit")

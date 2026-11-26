@@ -9,6 +9,7 @@ import (
 
 	"github.com/nsgo-dev/game/packages/game/quality"
 	"github.com/nsgo-dev/nsgo/core"
+	evstrings "me.oneo/embervigil/strings"
 )
 
 // newTestArena prepares an arena renderer on a run's arena, as the shell does when it starts one.
@@ -1057,6 +1058,12 @@ func BenchmarkWorstWave200Enemies(b *testing.B) {
 	a.sync(r.Snapshot(), r.Events(), stepSeconds)
 	a.fx.damageVignette = 0.7
 
+	// The frame includes the HUD at a 1280×720 window, with the boss bar up.
+	kit, l := newHUDArt(embeddedHUD), layoutHUD(core.Size{Width: 1280, Height: 720}, core.Edges{})
+	var motion hudMotion
+	tr := evstrings.For(evstrings.EN)
+	st := hudStateOf(r.Snapshot(), 0, false)
+
 	d := &core.Drawing{}
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -1068,6 +1075,8 @@ func BenchmarkWorstWave200Enemies(b *testing.B) {
 		a.sync(r.Snapshot(), r.Events(), stepSeconds)
 		d.Ops = d.Ops[:0]
 		a.draw(d, 0.5)
+		motion.step(st, stepSeconds)
+		drawHUD(d, l, st, &motion, kit, a.art, tr, string(evstrings.EN), false)
 	}
 }
 

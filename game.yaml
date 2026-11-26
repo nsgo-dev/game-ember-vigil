@@ -58,8 +58,6 @@ input:
           key: escape
         - kind: gamepadButton
           button: start
-        - kind: touchRegion
-          region: {x: 400, "y": 8, width: 72, height: 56}
     - name: confirm
       bindings:
         - kind: key
