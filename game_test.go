@@ -306,6 +306,11 @@ func TestALevelUpCardIsChosenFromThePrompt(t *testing.T) {
 		if o.MaxLevel > 0 {
 			app.Find("id:level-up-card-pips-" + string(rune('0'+i)))
 		}
+		if o.Heal {
+			app.Find("id:card-icon-fallback-" + o.ID)
+		} else {
+			app.Find("id:card-icon-" + o.ID)
+		}
 	}
 
 	// Run stays paused while the modal is open.

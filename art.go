@@ -1,14 +1,27 @@
 package main
 
 import (
+	"bytes"
+	"embed"
 	"image"
+	imagedraw "image/draw"
+	"image/png"
+	"io/fs"
 	"math"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/nsgo-dev/game/packages/game/random"
 	"github.com/nsgo-dev/game/packages/game/sprite"
 	"github.com/nsgo-dev/nsgo/core"
 )
+
+//go:embed assets/sprites/*.png
+var embeddedSprites embed.FS
+
+//go:embed assets/icons/*.png
+var embeddedIcons embed.FS
 
 // The palette's sixteen indices, from the night's ink to the rust of the Cinderwood's floor. A picture names an index and never a colour.
 const (
@@ -361,35 +374,380 @@ func (f frames) decor() []sprite.Frame {
 	return []sprite.Frame{f.grass, f.grass, f.fern, f.stone, f.twig, f.mushroom}
 }
 
-// art is the game's generated pixel art: one atlas for every sprite batch, and the pictures the ground paints from.
-type art struct {
-	atlas  *sprite.Atlas
-	frames frames
-	pixels map[string]*pixels
+// sheetActor holds one actor's sliced animations and logical scale from assets/sprites/.
+// When loaded is false, the renderer falls back to the procedural atlas frame.
+type sheetActor struct {
+	loaded           bool
+	scale            float32
+	defaultFacesLeft bool
+	idle             sprite.Animation
+	move             sprite.Animation
+	round            time.Duration
 }
 
-// newArt draws every picture into one atlas image, so startup costs a few thousand pixels and the repository carries no sprite sheet.
+// sheetFrames holds every actor's loaded sprite-sheet animations by field so drawing never allocates or hashes strings.
+type sheetFrames struct {
+	keeper      sheetActor
+	mite        sheetActor
+	moth        sheetActor
+	husk        sheetActor
+	thornling   sheetActor
+	wisp        sheetActor
+	shade       sheetActor
+	gloomwarden sheetActor
+	hollowking  sheetActor
+	ember       sheetActor
+	bolt        sheetActor
+	halo        sheetActor
+	thorn       sheetActor
+	bone        sheetActor
+	cache       sheetActor
+}
+
+// sheetSpec describes one uniform-grid PNG sprite sheet under assets/sprites/.
+type sheetSpec struct {
+	name             string
+	file             string
+	rows             int
+	cols             int
+	idleFrameTime    time.Duration
+	moveFrameTime    time.Duration
+	worldHeight      float32
+	defaultFacesLeft bool
+	target           func(*sheetFrames) *sheetActor
+}
+
+// sheetSpecs lists every stylized 2D sprite sheet the loader recognizes, including #14 sheets that fall back cleanly until added.
+var sheetSpecs = []sheetSpec{
+	{
+		name: "keeper", file: "assets/sprites/keeper.png",
+		rows: 2, cols: 4, idleFrameTime: 180 * time.Millisecond, moveFrameTime: 110 * time.Millisecond,
+		worldHeight: 28, defaultFacesLeft: true,
+		target: func(s *sheetFrames) *sheetActor { return &s.keeper },
+	},
+	{
+		name: "mite", file: "assets/sprites/mite.png",
+		rows: 1, cols: 4, moveFrameTime: 110 * time.Millisecond,
+		worldHeight: 20,
+		target:      func(s *sheetFrames) *sheetActor { return &s.mite },
+	},
+	{
+		name: "moth", file: "assets/sprites/moth.png",
+		rows: 1, cols: 4, moveFrameTime: 90 * time.Millisecond,
+		worldHeight: 20,
+		target:      func(s *sheetFrames) *sheetActor { return &s.moth },
+	},
+	{
+		name: "husk", file: "assets/sprites/husk.png",
+		rows: 1, cols: 4, moveFrameTime: 150 * time.Millisecond,
+		worldHeight: 30,
+		target:      func(s *sheetFrames) *sheetActor { return &s.husk },
+	},
+	{
+		name: "thornling", file: "assets/sprites/thornling.png",
+		rows: 1, cols: 4, moveFrameTime: 120 * time.Millisecond,
+		worldHeight: 24,
+		target:      func(s *sheetFrames) *sheetActor { return &s.thornling },
+	},
+	{
+		name: "wisp", file: "assets/sprites/wisp.png",
+		rows: 1, cols: 4, moveFrameTime: 100 * time.Millisecond,
+		worldHeight: 22,
+		target:      func(s *sheetFrames) *sheetActor { return &s.wisp },
+	},
+	{
+		name: "shade", file: "assets/sprites/shade.png",
+		rows: 1, cols: 4, moveFrameTime: 120 * time.Millisecond,
+		worldHeight: 26,
+		target:      func(s *sheetFrames) *sheetActor { return &s.shade },
+	},
+	{
+		name: "gloomwarden", file: "assets/sprites/gloomwarden.png",
+		rows: 1, cols: 4, moveFrameTime: 140 * time.Millisecond,
+		worldHeight: 38,
+		target:      func(s *sheetFrames) *sheetActor { return &s.gloomwarden },
+	},
+	{
+		name: "hollowking", file: "assets/sprites/hollowking.png",
+		rows: 1, cols: 4, moveFrameTime: 150 * time.Millisecond,
+		worldHeight: 52,
+		target:      func(s *sheetFrames) *sheetActor { return &s.hollowking },
+	},
+	{
+		name: "ember", file: "assets/sprites/ember.png",
+		rows: 1, cols: 4, moveFrameTime: 120 * time.Millisecond,
+		worldHeight: 10,
+		target:      func(s *sheetFrames) *sheetActor { return &s.ember },
+	},
+	{
+		name: "bolt", file: "assets/sprites/bolt.png",
+		rows: 1, cols: 4, moveFrameTime: 70 * time.Millisecond,
+		worldHeight: 14,
+		target:      func(s *sheetFrames) *sheetActor { return &s.bolt },
+	},
+	{
+		name: "halo", file: "assets/sprites/halo.png",
+		rows: 1, cols: 4, moveFrameTime: 100 * time.Millisecond,
+		worldHeight: 14,
+		target:      func(s *sheetFrames) *sheetActor { return &s.halo },
+	},
+	{
+		name: "thorn", file: "assets/sprites/thorn.png",
+		rows: 1, cols: 4, moveFrameTime: 80 * time.Millisecond,
+		worldHeight: 12,
+		target:      func(s *sheetFrames) *sheetActor { return &s.thorn },
+	},
+	{
+		name: "bone", file: "assets/sprites/bone.png",
+		rows: 1, cols: 4, moveFrameTime: 90 * time.Millisecond,
+		worldHeight: 14,
+		target:      func(s *sheetFrames) *sheetActor { return &s.bone },
+	},
+	{
+		name: "cache", file: "assets/sprites/cache.png",
+		rows: 1, cols: 4, moveFrameTime: 130 * time.Millisecond,
+		worldHeight: 16,
+		target:      func(s *sheetFrames) *sheetActor { return &s.cache },
+	},
+}
+
+// art holds the procedural fallback atlas, the packed stylized sprite-sheet atlas, and embedded upgrade card icons.
+type art struct {
+	atlas      *sprite.Atlas
+	frames     frames
+	pixels     map[string]*pixels
+	sheetAtlas *sprite.Atlas
+	sheets     sheetFrames
+	icons      map[string]core.ImageSource
+}
+
+// newArt builds the procedural fallback atlas and loads all embedded sprite sheets and upgrade card icons.
 func newArt() *art {
+	return newArtFromFS(embeddedSprites, embeddedIcons)
+}
+
+// newArtFromFS builds the procedural fallback atlas and loads any available sprite sheets and icons from spriteFS and iconFS.
+// Missing or unreadable files are skipped so callers always get a valid fallback.
+func newArtFromFS(spriteFS, iconFS fs.FS) *art {
 	ras := make([]*pixels, len(pictures))
 	for i, p := range pictures {
 		ras[i] = rasterize(p)
 	}
-	frames, width, height := packFrames(ras)
+	f, width, height := packFrames(ras)
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	for i := range pictures {
-		ras[i].drawInto(img, int(frames[i].X), int(frames[i].Y))
+		ras[i].drawInto(img, int(f[i].X), int(f[i].Y))
 	}
 
 	a := &art{
 		atlas:  &sprite.Atlas{Image: core.ImageSource{Pixels: img, Version: 1}, Frames: map[string]sprite.Frame{}},
 		pixels: make(map[string]*pixels, len(pictures)),
+		icons:  map[string]core.ImageSource{},
 	}
 	for i, p := range pictures {
-		a.atlas.Frames[p.name] = frames[i]
+		a.atlas.Frames[p.name] = f[i]
 		a.pixels[p.name] = ras[i]
 	}
 	a.frames = framesOf(a.atlas.Frames)
+	a.loadSheets(spriteFS)
+	a.loadIcons(iconFS)
 	return a
+}
+
+// cardIcon returns the embedded PNG icon for an upgrade card id (converting hyphens to underscores), or false when absent.
+func (a *art) cardIcon(id string) (core.ImageSource, bool) {
+	if a == nil || len(a.icons) == 0 {
+		return core.ImageSource{}, false
+	}
+	src, ok := a.icons[strings.ReplaceAll(id, "-", "_")]
+	return src, ok
+}
+
+// decodedSheet is one sprite sheet decoded into premultiplied RGBA and validated against its uniform grid.
+type decodedSheet struct {
+	spec         sheetSpec
+	img          *image.RGBA
+	cellW, cellH int
+}
+
+// loadSheets decodes every available sprite sheet from fsys, slices its uniform grid into frames, and packs all frames into one atlas with transparent padding between cells.
+func (a *art) loadSheets(fsys fs.FS) {
+	if fsys == nil {
+		return
+	}
+	var loaded []decodedSheet
+	for _, spec := range sheetSpecs {
+		raw, err := fs.ReadFile(fsys, spec.file)
+		if err != nil {
+			continue
+		}
+		rgba, err := decodePNGToRGBA(raw)
+		if err != nil {
+			continue
+		}
+		b := rgba.Bounds()
+		w, h := b.Dx(), b.Dy()
+		if spec.cols <= 0 || spec.rows <= 0 || w <= 0 || h <= 0 || w%spec.cols != 0 || h%spec.rows != 0 {
+			continue
+		}
+		loaded = append(loaded, decodedSheet{
+			spec:  spec,
+			img:   rgba,
+			cellW: w / spec.cols,
+			cellH: h / spec.rows,
+		})
+	}
+	if len(loaded) == 0 {
+		return
+	}
+
+	const (
+		sheetAtlasWidth = 512
+		sheetGap        = 2
+	)
+	type placement struct {
+		sheetIdx int
+		row, col int
+		x, y     int
+	}
+	var places []placement
+	x, y, shelf := 0, 0, 0
+	atlasW, atlasH := 0, 0
+	for si, ds := range loaded {
+		for row := 0; row < ds.spec.rows; row++ {
+			for col := 0; col < ds.spec.cols; col++ {
+				if x > 0 && x+ds.cellW > sheetAtlasWidth {
+					x, y = 0, y+shelf+sheetGap
+					shelf = 0
+				}
+				places = append(places, placement{sheetIdx: si, row: row, col: col, x: x, y: y})
+				x += ds.cellW + sheetGap
+				shelf = max(shelf, ds.cellH)
+				atlasW = max(atlasW, x-sheetGap)
+				atlasH = max(atlasH, y+shelf)
+			}
+		}
+	}
+
+	packed := image.NewRGBA(image.Rect(0, 0, atlasW, atlasH))
+	atlas := &sprite.Atlas{
+		Image:      core.ImageSource{Pixels: packed, Version: 1},
+		Frames:     make(map[string]sprite.Frame, len(places)),
+		Animations: make(map[string]sprite.Animation, len(loaded)*2),
+	}
+
+	// Copy each sliced cell into the packed atlas and index its Frame by sheet/row/col.
+	gridFrames := make([][][]sprite.Frame, len(loaded))
+	for si, ds := range loaded {
+		gridFrames[si] = make([][]sprite.Frame, ds.spec.rows)
+		for row := 0; row < ds.spec.rows; row++ {
+			gridFrames[si][row] = make([]sprite.Frame, ds.spec.cols)
+		}
+	}
+	for _, pl := range places {
+		ds := loaded[pl.sheetIdx]
+		srcMin := image.Pt(pl.col*ds.cellW, pl.row*ds.cellH)
+		dstRect := image.Rect(pl.x, pl.y, pl.x+ds.cellW, pl.y+ds.cellH)
+		imagedraw.Draw(packed, dstRect, ds.img, srcMin, imagedraw.Src)
+
+		name := ds.spec.name + "/" + strconv.Itoa(pl.row) + "/" + strconv.Itoa(pl.col)
+		fr := sprite.Frame{
+			Name:   name,
+			X:      float32(pl.x),
+			Y:      float32(pl.y),
+			W:      float32(ds.cellW),
+			H:      float32(ds.cellH),
+			Width:  float32(ds.cellW),
+			Height: float32(ds.cellH),
+			PivotX: float32(ds.cellW) / 2,
+			PivotY: float32(ds.cellH) / 2,
+		}
+		atlas.Frames[name] = fr
+		gridFrames[pl.sheetIdx][pl.row][pl.col] = fr
+	}
+
+	for si, ds := range loaded {
+		spec := ds.spec
+		actor := sheetActor{
+			loaded:           true,
+			scale:            spec.worldHeight / float32(ds.cellH),
+			defaultFacesLeft: spec.defaultFacesLeft,
+		}
+		if spec.rows >= 2 {
+			idleDur := spec.idleFrameTime
+			if idleDur <= 0 {
+				idleDur = spec.moveFrameTime
+			}
+			actor.idle = buildClip(gridFrames[si][0], idleDur)
+			actor.move = buildClip(gridFrames[si][1], spec.moveFrameTime)
+			actor.round = spec.moveFrameTime * time.Duration(spec.cols)
+			atlas.Animations[spec.name+":idle"] = actor.idle
+			atlas.Animations[spec.name+":walk"] = actor.move
+		} else {
+			clip := buildClip(gridFrames[si][0], spec.moveFrameTime)
+			actor.idle = clip
+			actor.move = clip
+			actor.round = spec.moveFrameTime * time.Duration(spec.cols)
+			atlas.Animations[spec.name] = clip
+		}
+		*spec.target(&a.sheets) = actor
+	}
+	a.sheetAtlas = atlas
+}
+
+// buildClip creates a looping sprite.Animation from a row of uniform frames.
+func buildClip(row []sprite.Frame, frameDuration time.Duration) sprite.Animation {
+	af := make([]sprite.AnimationFrame, len(row))
+	for i, fr := range row {
+		af[i] = sprite.AnimationFrame{Frame: fr, Duration: frameDuration}
+	}
+	return sprite.Animation{Frames: af, Loop: true}
+}
+
+// loadIcons decodes every PNG under assets/icons/ in fsys into premultiplied RGBA ImageSources keyed by filename stem.
+func (a *art) loadIcons(fsys fs.FS) {
+	if fsys == nil {
+		return
+	}
+	entries, err := fs.ReadDir(fsys, "assets/icons")
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".png") {
+			continue
+		}
+		raw, err := fs.ReadFile(fsys, "assets/icons/"+e.Name())
+		if err != nil {
+			continue
+		}
+		rgba, err := decodePNGToRGBA(raw)
+		if err != nil {
+			continue
+		}
+		b := rgba.Bounds()
+		stem := strings.TrimSuffix(e.Name(), ".png")
+		a.icons[stem] = core.ImageSource{
+			Pixels:  rgba,
+			Version: 1,
+			Size:    core.Size{Width: core.Points(b.Dx()), Height: core.Points(b.Dy())},
+		}
+	}
+}
+
+// decodePNGToRGBA decodes PNG bytes into a premultiplied *image.RGBA suitable for core.ImageSource.Pixels.
+func decodePNGToRGBA(raw []byte) (*image.RGBA, error) {
+	src, err := png.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	if rgba, ok := src.(*image.RGBA); ok && rgba.Bounds().Min == (image.Point{}) {
+		return rgba, nil
+	}
+	b := src.Bounds()
+	dst := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	imagedraw.Draw(dst, dst.Bounds(), src, b.Min, imagedraw.Src)
+	return dst, nil
 }
 
 // framesOf takes the frames the arena draws by name; a missing picture is a programming error, not a runtime state.

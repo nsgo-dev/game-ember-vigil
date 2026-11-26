@@ -2,11 +2,13 @@
 
 The arena draws one run into the 480×270 canvas and shows a native HUD, level-up prompt and defeat overlay above it. It reads a run only through `Snapshot`, `Events` and a copied seed, so nothing in drawing can change a run or its replay.
 
-The palette and the fallback atlas are generated at startup from `art.go`'s rows of palette indices, so one colour list governs the ground, the creatures and the native screens. Today the renderer draws that procedural atlas; once the stylized 2D sprite sheets land under `assets/sprites/`, `art.go` will load them into `sprite.Atlas` and drive actor frames through `sprite.Animation`, keeping the procedural atlas as fallback.
+The palette and the procedural fallback atlas are generated at startup from `art.go`'s rows of palette indices, so one colour list governs the ground, particles, fallback actors and native screens. Stylized 2D sprite sheets under `assets/sprites/` are embedded via `go:embed`, sliced from uniform grids into `sprite.Frame` and `sprite.Animation` clips, and packed into a single padded `sheetAtlas` (2 px transparent gaps prevent bilinear edge bleeding). Upgrade card icons under `assets/icons/` are embedded and decoded once at startup for the level-up overlay; any missing sheet or icon falls back cleanly to the procedural atlas or glyph badge without crashing.
 
 ## The frame
 
-A displayed frame draws, in order: the ground crop, one sprite batch of everything alive, the particles, and the darkness with the keeper's light over it. The batch is shared by all sprites, so a crowd costs one draw call; a struck enemy carries a `sprite.Effect` of its own and splits the batch for the tenth of a second it flashes.
+A displayed frame draws, in order: the ground crop (`SetImageSmoothing(false)`), ground patches and boss telegraphs, the smooth stylized sprite batch (`sheetAtlas` with `SetImageSmoothing(true)`), the crisp procedural batch (fallback actors and particles with `SetImageSmoothing(false)`), shockwave pulses, and the darkness with the keeper's light over it. Each batch shares one atlas, so a crowd costs one draw call per atlas; a struck enemy carries a `sprite.Effect` of its own and splits the batch for the tenth of a second it flashes.
+
+Animations advance on fixed steps only while `Phase == PhasePlaying`, freezing cleanly when paused or on the level-up modal. The keeper switches between `idle` and `walk` clips based on movement, enemies derive deterministic per-ID phase offsets so crowds do not march in lockstep, horizontal `FlipX` respects each sheet's default facing (`keeper.png` defaults left; enemy sheets default right), and projectiles rotate along their travel direction.
 
 Positions come from the shell's copy of the last two steps: the sprite batch places an actor between where it was and where it is by the loop's alpha, so movement stays smooth on displays faster than the fixed step. A frame with no step behind it, such as a paused run's, holds the last step's places instead of blending toward nothing.
 

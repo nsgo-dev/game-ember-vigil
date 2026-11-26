@@ -319,7 +319,7 @@ func (g *emberVigil) upgradeCard(index int, c hudCard, focused bool) core.Node {
 				},
 			},
 		},
-		cardIcon(c.id, c.kind),
+		g.cardIcon(c.id, c.kind),
 		core.Text{
 			TestID:  "level-up-card-name-" + strconv.Itoa(index),
 			Content: c.name,
@@ -358,20 +358,17 @@ func (g *emberVigil) upgradeCard(index int, c hudCard, focused bool) core.Node {
 	}
 }
 
-// cardIconImage is the hook where assets/icons/<id>.png will be returned once #13 and #15 embed stylized card icons.
-func cardIconImage(id string) (core.ImageSource, bool) {
-	return core.ImageSource{}, false
-}
-
-// cardIcon draws the card's embedded icon when available, or a procedural glyph badge as fallback.
-func cardIcon(id, kind string) core.Node {
-	if img, ok := cardIconImage(id); ok {
+// cardIcon draws the card's embedded PNG icon when available, or a procedural glyph badge as fallback.
+func (g *emberVigil) cardIcon(id, kind string) core.Node {
+	if img, ok := g.art.cardIcon(id); ok {
 		return core.Image{
+			TestID: "card-icon-" + id,
 			Source: img,
 			Style:  core.Style{Width: core.Pt(cardIconSize), Height: core.Pt(cardIconSize)},
 		}
 	}
 	return core.View{
+		TestID: "card-icon-fallback-" + id,
 		Style: core.Style{
 			Width:          core.Pt(cardIconSize),
 			Height:         core.Pt(cardIconSize),

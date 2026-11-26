@@ -7,3 +7,4 @@
 - Draw the arena with a followed camera, a lantern-lit night and a native HUD, with prompts to take a card or start again after defeat (#3, #12 by @oneo-me).
 - Add all four weapons, eight passives with four-slot caps, weapon visuals and the three-card level-up modal with keyboard, gamepad and tap selection (#4, #17 by @oneo-me).
 - Complete the twelve-minute wave timeline with Thornling, Wisp, Shade, the Gloomwarden elite, the three-phase Hollow King boss, boss telegraphs and health bar, and the victory/defeat results screen (#5, #18 by @oneo-me).
+- Integrate animated stylized 2D sprite sheets with idle/walk transitions, facing flips, projectile rotation and embedded upgrade card icons, keeping procedural art as a clean fallback (#15, #21 by @oneo-me).

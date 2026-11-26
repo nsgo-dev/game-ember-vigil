@@ -3,6 +3,7 @@ package main
 import (
 	"image"
 	"math"
+	"time"
 
 	"github.com/nsgo-dev/game/packages/game/lights2d"
 	"github.com/nsgo-dev/game/packages/game/random"
@@ -101,11 +102,21 @@ func (c *camera) clamp(arena Vec2) {
 
 // actor is one drawn thing: what kind it is, where it is now and where it was on the step before, which the loop's alpha blends between.
 type actor struct {
-	id     uint64
-	kind   int
-	radius float64
-	pos    Vec2
-	was    Vec2
+	id          uint64
+	kind        int
+	radius      float64
+	pos         Vec2
+	was         Vec2
+	facingRight bool
+	angle       float32
+}
+
+// prevState remembers an actor's position, horizontal facing and travel angle from the previous step.
+type prevState struct {
+	pos         Vec2
+	facingRight bool
+	angle       float32
+	hasAngle    bool
 }
 
 // particle is one spark, puff or trail: where it drifts from, how, and how long it has left.
@@ -162,7 +173,14 @@ type arenaRenderer struct {
 	boss       BossView
 
 	// before holds where each id was last step so a frame between steps can blend; spare is the map the next step fills, swapped in when it is done.
-	before, spare map[uint64]Vec2
+	before, spare map[uint64]prevState
+
+	// Animation playback state driven by fixed steps and frozen while paused or not playing.
+	animTime          time.Duration
+	keeperAnim        sprite.Animation
+	keeperMoving      bool
+	keeperAnimMoving  bool
+	keeperFacingRight bool
 
 	fx        effects
 	cosmetics *random.Stream
@@ -171,26 +189,33 @@ type arenaRenderer struct {
 	fresh bool
 
 	// batch, pool, effects, lights and the lantern are reused every frame, so drawing a steady frame allocates nothing.
-	batch    sprite.Batch
-	pool     []*sprite.Sprite
-	used     int
-	flash    []sprite.Effect
-	flashing int
-	scene    lights2d.Scene
-	lights   []*lights2d.Light
-	glows    []*lights2d.Light
-	lantern  *lights2d.Light
+	batch        sprite.Batch
+	sheetBatch   sprite.Batch
+	sheetSprites []*sprite.Sprite
+	pixelSprites []*sprite.Sprite
+	pool         []*sprite.Sprite
+	used         int
+	flash        []sprite.Effect
+	flashing     int
+	scene        lights2d.Scene
+	lights       []*lights2d.Light
+	glows        []*lights2d.Light
+	lantern      *lights2d.Light
 }
 
 // newArenaRenderer prepares the arena's art, which every run of the app shares.
 func newArenaRenderer(a *art) *arenaRenderer {
 	r := &arenaRenderer{
-		art:       a,
-		before:    map[uint64]Vec2{},
-		spare:     map[uint64]Vec2{},
-		cosmetics: random.NewStreams(0).Stream("cosmetics"),
-		fx:        effects{flash: map[uint64]float64{}},
-		lantern:   lights2d.NewLight(0, 0, lanternRadius, core.RGB(0xffb347)),
+		art:               a,
+		before:            map[uint64]prevState{},
+		spare:             map[uint64]prevState{},
+		keeperFacingRight: true,
+		cosmetics:         random.NewStreams(0).Stream("cosmetics"),
+		fx:                effects{flash: map[uint64]float64{}},
+		lantern:           lights2d.NewLight(0, 0, lanternRadius, core.RGB(0xffb347)),
+	}
+	if a != nil && a.sheets.keeper.loaded {
+		r.keeperAnim = a.sheets.keeper.idle
 	}
 	r.lantern.Falloff = lanternFalloff
 	r.lantern.Intensity = 0.5
@@ -215,8 +240,20 @@ func (r *arenaRenderer) startRun(seed uint64) {
 	r.patches = r.patches[:0]
 	r.pulses = r.pulses[:0]
 	r.boss = BossView{}
+	r.sheetSprites = r.sheetSprites[:0]
+	r.pixelSprites = r.pixelSprites[:0]
 	clear(r.before)
 	clear(r.spare)
+	r.animTime = 0
+	r.keeperMoving = false
+	r.keeperAnimMoving = false
+	r.keeperFacingRight = true
+	if r.art != nil && r.art.sheets.keeper.loaded {
+		r.keeperAnim = r.art.sheets.keeper.idle
+		r.keeperAnim.Reset()
+	} else {
+		r.keeperAnim = sprite.Animation{}
+	}
 	r.fx = effects{flash: map[uint64]float64{}}
 	r.alpha = 0
 	r.fresh = false
@@ -258,25 +295,59 @@ func (r *arenaRenderer) sync(s Snapshot, events []Event, dt float64) {
 	r.patches = append(r.patches[:0], s.Patches...)
 	r.pulses = append(r.pulses[:0], s.Pulses...)
 	r.boss = s.Boss
+	if s.Phase == PhasePlaying && dt > 0 {
+		stepDur := time.Duration(math.Round(dt * float64(time.Second)))
+		r.animTime += stepDur
+		r.stepKeeperAnimation(stepDur)
+	}
 	r.stepEffects(events, dt)
 	r.emitTrails(dt)
 	r.fresh = true
 }
 
-// trackKeeper keeps the keeper's place this step and the step before.
+// stepKeeperAnimation switches between idle and walk clips and advances the keeper's animation by dt.
+func (r *arenaRenderer) stepKeeperAnimation(dt time.Duration) {
+	sa := r.art.sheets.keeper
+	if !sa.loaded {
+		return
+	}
+	if len(r.keeperAnim.Frames) == 0 || r.keeperMoving != r.keeperAnimMoving {
+		if r.keeperMoving {
+			r.keeperAnim = sa.move
+		} else {
+			r.keeperAnim = sa.idle
+		}
+		r.keeperAnim.Reset()
+		r.keeperAnimMoving = r.keeperMoving
+	}
+	r.keeperAnim.Update(dt)
+}
+
+// trackKeeper keeps the keeper's place this step and the step before, updating movement and horizontal facing.
 func (r *arenaRenderer) trackKeeper(s Snapshot) {
 	was := r.keeper.pos
 	if !r.seenKeeper {
 		was, r.seenKeeper = s.Keeper, true
 	}
-	r.keeper = actor{pos: s.Keeper, was: was, radius: s.KeeperRadius}
+	if s.Phase == PhasePlaying {
+		dx := s.Keeper.X - was.X
+		dy := s.Keeper.Y - was.Y
+		r.keeperMoving = dx*dx+dy*dy > 1e-4
+		if dx > 1e-3 {
+			r.keeperFacingRight = true
+		} else if dx < -1e-3 {
+			r.keeperFacingRight = false
+		}
+	}
+	r.keeper = actor{pos: s.Keeper, was: was, radius: s.KeeperRadius, facingRight: r.keeperFacingRight}
 }
 
 // trackEnemies copies the snapshot's enemies, reading where each was last step by its id.
 func (r *arenaRenderer) trackEnemies(s Snapshot) {
 	r.enemies = growActors(r.enemies, len(s.Enemies))
 	for i, e := range s.Enemies {
-		r.enemies[i] = r.tracked(r.enemies[i], e.ID, enemyKind(e.Kind), e.Radius, e.Pos)
+		defaultFacingRight := s.Keeper.X >= e.Pos.X
+		r.enemies[i] = r.tracked(r.enemies[i], e.ID, enemyKind(e.Kind), e.Radius, e.Pos, defaultFacingRight)
 	}
 }
 
@@ -284,7 +355,7 @@ func (r *arenaRenderer) trackEnemies(s Snapshot) {
 func (r *arenaRenderer) trackShots(s Snapshot) {
 	r.shots = growActors(r.shots, len(s.Shots))
 	for i, sh := range s.Shots {
-		r.shots[i] = r.tracked(r.shots[i], sh.ID, 0, sh.Radius, sh.Pos)
+		r.shots[i] = r.tracked(r.shots[i], sh.ID, 0, sh.Radius, sh.Pos, true)
 	}
 }
 
@@ -292,7 +363,7 @@ func (r *arenaRenderer) trackShots(s Snapshot) {
 func (r *arenaRenderer) trackEnemyShots(s Snapshot) {
 	r.enemyShots = growActors(r.enemyShots, len(s.EnemyShots))
 	for i, sh := range s.EnemyShots {
-		r.enemyShots[i] = r.tracked(r.enemyShots[i], sh.ID, int(sh.Kind), sh.Radius, sh.Pos)
+		r.enemyShots[i] = r.tracked(r.enemyShots[i], sh.ID, int(sh.Kind), sh.Radius, sh.Pos, true)
 	}
 }
 
@@ -300,7 +371,7 @@ func (r *arenaRenderer) trackEnemyShots(s Snapshot) {
 func (r *arenaRenderer) trackPickups(s Snapshot) {
 	r.pickups = growActors(r.pickups, len(s.Pickups))
 	for i, p := range s.Pickups {
-		r.pickups[i] = r.tracked(r.pickups[i], p.ID, 0, 6, p.Pos)
+		r.pickups[i] = r.tracked(r.pickups[i], p.ID, 0, 6, p.Pos, true)
 	}
 }
 
@@ -330,14 +401,32 @@ func (r *arenaRenderer) trackHalo(s Snapshot) {
 	}
 }
 
-// tracked places a into the actor list at id's position, remembering where it was last step for the frame's blend.
-func (r *arenaRenderer) tracked(a actor, id uint64, kind int, radius float64, pos Vec2) actor {
-	was, seen := r.before[id]
-	if !seen {
-		was = pos
+// tracked places a into the actor list at id's position, remembering where it was last step for blending, facing and travel angle.
+func (r *arenaRenderer) tracked(a actor, id uint64, kind int, radius float64, pos Vec2, defaultFacingRight bool) actor {
+	prev, seen := r.before[id]
+	was := pos
+	facingRight := defaultFacingRight
+	var angle float32
+	hasAngle := false
+	if seen {
+		was = prev.pos
+		facingRight = prev.facingRight
+		angle = prev.angle
+		hasAngle = prev.hasAngle
+		dx := pos.X - was.X
+		dy := pos.Y - was.Y
+		if dx > 0.05 {
+			facingRight = true
+		} else if dx < -0.05 {
+			facingRight = false
+		}
+		if dx*dx+dy*dy > 1e-6 {
+			angle = float32(math.Atan2(dy, dx))
+			hasAngle = true
+		}
 	}
-	r.spare[id] = pos
-	a.id, a.kind, a.radius, a.pos, a.was = id, kind, radius, pos, was
+	r.spare[id] = prevState{pos: pos, facingRight: facingRight, angle: angle, hasAngle: hasAngle}
+	a.id, a.kind, a.radius, a.pos, a.was, a.facingRight, a.angle = id, kind, radius, pos, was, facingRight, angle
 	return a
 }
 
@@ -461,6 +550,8 @@ func (r *arenaRenderer) draw(d *core.Drawing, alpha float64) {
 	r.drawBossTelegraph(d, ox, oy)
 
 	r.used, r.flashing = 0, 0
+	r.sheetSprites = r.sheetSprites[:0]
+	r.pixelSprites = r.pixelSprites[:0]
 	r.addEmbers(ox, oy)
 	r.addPickups(ox, oy)
 	r.addEnemies(ox, oy)
@@ -469,11 +560,50 @@ func (r *arenaRenderer) draw(d *core.Drawing, alpha float64) {
 	r.addHalo(ox, oy)
 	r.addKeeper(ox, oy)
 	r.addParticles(ox, oy)
-	r.batch = sprite.Batch{Atlas: r.art.atlas, Sprites: r.pool[:r.used]}
-	r.batch.Draw(d)
+	if r.art.sheetAtlas != nil && len(r.sheetSprites) > 0 {
+		d.SetImageSmoothing(true)
+		r.sheetBatch.Atlas = r.art.sheetAtlas
+		r.sheetBatch.Sprites = r.sheetSprites
+		r.sheetBatch.Draw(d)
+	}
+	if len(r.pixelSprites) > 0 {
+		d.SetImageSmoothing(false)
+		r.batch.Atlas = r.art.atlas
+		r.batch.Sprites = r.pixelSprites
+		r.batch.Draw(d)
+	}
+	d.SetImageSmoothing(false)
 	r.drawPulses(d, ox, oy)
 
 	r.drawLight(d, w, h)
+}
+
+// spriteFlipX reports whether a sprite facing right (facingRight=true) or left (facingRight=false)
+// needs horizontal mirroring given whether its source sheet defaults to facing left.
+func spriteFlipX(facingRight, defaultFacesLeft bool) bool {
+	if defaultFacesLeft {
+		return facingRight
+	}
+	return !facingRight
+}
+
+// phaseOffset derives a deterministic animation start offset from an actor id so crowds do not animate in lockstep.
+func phaseOffset(id uint64, round time.Duration) time.Duration {
+	if round <= 0 {
+		return 0
+	}
+	h := id * 0x9e3779b97f4a7c15
+	h ^= h >> 30
+	return time.Duration(h % uint64(round))
+}
+
+// sampleAnimation returns sa's frame at animTime plus a deterministic per-id phase offset, using a stack value for zero allocations.
+func sampleAnimation(sa sheetActor, id uint64, animTime time.Duration) sprite.Frame {
+	anim := sa.move
+	if t := animTime + phaseOffset(id, sa.round); t > 0 {
+		anim.Update(t)
+	}
+	return anim.Frame()
 }
 
 // origin returns the whole virtual pixels the frame's world is drawn from, with the camera's shake added and kept inside the arena.
@@ -495,44 +625,75 @@ func inView(x, y float32) bool {
 
 // addEmbers adds the embers waiting on the ground.
 func (r *arenaRenderer) addEmbers(ox, oy float32) {
+	sa := r.art.sheets.ember
 	for i := range r.embers {
-		r.add(r.art.frames.ember, r.embers[i], ox, oy, 1, 1)
+		if sa.loaded {
+			frame := sampleAnimation(sa, uint64(i+1), r.animTime)
+			r.addSheet(frame, sa.scale, r.embers[i], ox, oy, 1, 1)
+		} else {
+			r.add(r.art.frames.ember, r.embers[i], ox, oy, 1, 1)
+		}
 	}
 }
 
 // addPickups adds elite healing caches waiting on the ground.
 func (r *arenaRenderer) addPickups(ox, oy float32) {
+	sa := r.art.sheets.cache
 	for i := range r.pickups {
-		s := r.add(r.art.frames.cache, r.pickups[i], ox, oy, 1, 1)
+		var s *sprite.Sprite
+		if sa.loaded {
+			frame := sampleAnimation(sa, r.pickups[i].id, r.animTime)
+			s = r.addSheet(frame, sa.scale, r.pickups[i], ox, oy, 1, 1)
+		} else {
+			s = r.add(r.art.frames.cache, r.pickups[i], ox, oy, 1, 1)
+		}
 		if s != nil {
 			s.Y += float32(math.Round(math.Sin(r.fx.time*5 + float64(r.pickups[i].id))))
 		}
 	}
 }
 
-// addEnemies adds the living enemies, with a struck one flashing toward hitColor, and flying foes bobbing.
+// enemySheet returns the stylized sheetActor and procedural fallback frame for an enemy kind.
+func (r *arenaRenderer) enemyVisual(kind int) (sheetActor, sprite.Frame) {
+	s, f := &r.art.sheets, &r.art.frames
+	switch kind {
+	case kindMoth:
+		return s.moth, f.moth
+	case kindHusk:
+		return s.husk, f.husk
+	case kindThornling:
+		return s.thornling, f.thornling
+	case kindWisp:
+		return s.wisp, f.wisp
+	case kindShade:
+		return s.shade, f.shade
+	case kindGloomwarden:
+		return s.gloomwarden, f.gloomwarden
+	case kindHollowKing:
+		return s.hollowking, f.hollowking
+	default:
+		return s.mite, f.mite
+	}
+}
+
+// addEnemies adds the living enemies, with a struck one flashing toward hitColor, horizontal facing flips, and flying foes bobbing.
 func (r *arenaRenderer) addEnemies(ox, oy float32) {
-	f := r.art.frames
 	for i := range r.enemies {
 		e := &r.enemies[i]
-		frame := f.mite
-		switch e.kind {
-		case kindMoth:
-			frame = f.moth
-		case kindHusk:
-			frame = f.husk
-		case kindThornling:
-			frame = f.thornling
-		case kindWisp:
-			frame = f.wisp
-		case kindShade:
-			frame = f.shade
-		case kindGloomwarden:
-			frame = f.gloomwarden
-		case kindHollowKing:
-			frame = f.hollowking
+		sa, fallback := r.enemyVisual(e.kind)
+		var s *sprite.Sprite
+		if sa.loaded {
+			frame := sampleAnimation(sa, e.id, r.animTime)
+			s = r.addSheet(frame, sa.scale, *e, ox, oy, 1, 2)
+			if s != nil {
+				s.FlipX = spriteFlipX(e.facingRight, sa.defaultFacesLeft)
+			}
+		} else {
+			s = r.add(fallback, *e, ox, oy, 1, 2)
+			if s != nil {
+				s.FlipX = !e.facingRight
+			}
 		}
-		s := r.add(frame, *e, ox, oy, 1, 2)
 		if s == nil {
 			continue
 		}
@@ -545,10 +706,20 @@ func (r *arenaRenderer) addEnemies(ox, oy float32) {
 	}
 }
 
-// addShots adds the Ember Bolts in flight above the enemies they are about to hit.
+// addShots adds the Ember Bolts in flight above the enemies they are about to hit, rotated along their travel direction.
 func (r *arenaRenderer) addShots(ox, oy float32) {
+	sa := r.art.sheets.bolt
 	for i := range r.shots {
-		r.add(r.art.frames.bolt, r.shots[i], ox, oy, 1, 3)
+		var s *sprite.Sprite
+		if sa.loaded {
+			frame := sampleAnimation(sa, r.shots[i].id, r.animTime)
+			s = r.addSheet(frame, sa.scale, r.shots[i], ox, oy, 1, 3)
+		} else {
+			s = r.add(r.art.frames.bolt, r.shots[i], ox, oy, 1, 3)
+		}
+		if s != nil {
+			s.Rotation = r.shots[i].angle
+		}
 	}
 }
 
@@ -556,11 +727,19 @@ func (r *arenaRenderer) addShots(ox, oy float32) {
 func (r *arenaRenderer) addEnemyShots(ox, oy float32) {
 	f := r.art.frames
 	for i := range r.enemyShots {
-		frame := f.thorn
+		sa, frame := r.art.sheets.thorn, f.thorn
 		if r.enemyShots[i].kind == int(enemyShotBone) {
-			frame = f.bone
+			sa, frame = r.art.sheets.bone, f.bone
 		}
-		r.add(frame, r.enemyShots[i], ox, oy, 1, 3)
+		var s *sprite.Sprite
+		if sa.loaded {
+			s = r.addSheet(sampleAnimation(sa, r.enemyShots[i].id, r.animTime), sa.scale, r.enemyShots[i], ox, oy, 1, 3)
+		} else {
+			s = r.add(frame, r.enemyShots[i], ox, oy, 1, 3)
+		}
+		if s != nil {
+			s.Rotation = r.enemyShots[i].angle
+		}
 	}
 }
 
@@ -602,8 +781,14 @@ func (r *arenaRenderer) drawBossTelegraph(d *core.Drawing, ox, oy float32) {
 
 // addHalo adds Lantern Halo's orbiting embers around the keeper.
 func (r *arenaRenderer) addHalo(ox, oy float32) {
+	sa := r.art.sheets.halo
 	for i := range r.halo {
-		r.add(r.art.frames.halo, r.halo[i], ox, oy, 1, 3)
+		if sa.loaded {
+			frame := sampleAnimation(sa, uint64(i+1), r.animTime)
+			r.addSheet(frame, sa.scale, r.halo[i], ox, oy, 1, 3)
+		} else {
+			r.add(r.art.frames.halo, r.halo[i], ox, oy, 1, 3)
+		}
 	}
 }
 
@@ -646,7 +831,22 @@ func (r *arenaRenderer) drawPulses(d *core.Drawing, ox, oy float32) {
 
 // addKeeper adds the keeper above its enemies, blinking off while contact leaves it invulnerable.
 func (r *arenaRenderer) addKeeper(ox, oy float32) {
-	s := r.add(r.art.frames.keeper, r.keeper, ox, oy, 1, 4)
+	var s *sprite.Sprite
+	if sa := r.art.sheets.keeper; sa.loaded {
+		frame := r.keeperAnim.Frame()
+		if frame.W == 0 {
+			frame = sa.idle.Frame()
+		}
+		s = r.addSheet(frame, sa.scale, r.keeper, ox, oy, 1, 4)
+		if s != nil {
+			s.FlipX = spriteFlipX(r.keeperFacingRight, sa.defaultFacesLeft)
+		}
+	} else {
+		s = r.add(r.art.frames.keeper, r.keeper, ox, oy, 1, 4)
+		if s != nil {
+			s.FlipX = !r.keeperFacingRight
+		}
+	}
 	if s != nil && r.invuln > 0 && math.Mod(r.fx.time*16, 1) < 0.4 {
 		s.Alpha = 0.5
 	}
@@ -671,10 +871,11 @@ func (r *arenaRenderer) addParticles(ox, oy float32) {
 		}
 		s := r.next(frame)
 		s.X, s.Y, s.Alpha, s.Z = x, y, left, 5
+		r.pixelSprites = append(r.pixelSprites, s)
 	}
 }
 
-// add adds one sprite of frame at a's blended position with the given alpha and depth, and returns it, or nil when it is off the canvas.
+// add adds one procedural-atlas sprite of frame at a's blended position with the given alpha and depth, and returns it, or nil when it is off the canvas.
 func (r *arenaRenderer) add(frame sprite.Frame, a actor, ox, oy float32, alpha float32, z int) *sprite.Sprite {
 	p := Vec2{a.was.X + (a.pos.X-a.was.X)*r.alpha, a.was.Y + (a.pos.Y-a.was.Y)*r.alpha}
 	x, y := toScreen(p, ox, oy)
@@ -683,6 +884,20 @@ func (r *arenaRenderer) add(frame sprite.Frame, a actor, ox, oy float32, alpha f
 	}
 	s := r.next(frame)
 	s.X, s.Y, s.Alpha, s.Z = x, y, alpha, z
+	r.pixelSprites = append(r.pixelSprites, s)
+	return s
+}
+
+// addSheet adds one stylized sprite-sheet frame scaled to its logical world footprint into the smooth sheet batch.
+func (r *arenaRenderer) addSheet(frame sprite.Frame, scale float32, a actor, ox, oy float32, alpha float32, z int) *sprite.Sprite {
+	p := Vec2{a.was.X + (a.pos.X-a.was.X)*r.alpha, a.was.Y + (a.pos.Y-a.was.Y)*r.alpha}
+	x, y := float32(p.X)-ox, float32(p.Y)-oy
+	if !inView(x, y) {
+		return nil
+	}
+	s := r.next(frame)
+	s.X, s.Y, s.ScaleX, s.ScaleY, s.Alpha, s.Z = x, y, scale, scale, alpha, z
+	r.sheetSprites = append(r.sheetSprites, s)
 	return s
 }
 
