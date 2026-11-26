@@ -286,7 +286,8 @@ func TestEffectsStayWithinTheirCaps(t *testing.T) {
 	}
 }
 
-// TestFrameDrawsNewWeapons checks that Lantern Halo orbs, Cinder Trail patches and Bell Toll pulses render onto the canvas without mutating the run.
+// TestFrameDrawsNewWeapons checks that Lantern Halo orbs, Cinder Trail patches and Bell Toll pulses
+// render via their stylized sprite sheets when embedded and fall back cleanly to procedural shapes when absent.
 func TestFrameDrawsNewWeapons(t *testing.T) {
 	r := quietRun(t)
 	for i := range r.weaponLevels {
@@ -299,10 +300,23 @@ func TestFrameDrawsNewWeapons(t *testing.T) {
 	d := &core.Drawing{}
 	a.draw(d, 0.5)
 
-	// Keeper + 3 halo orbs = at least 4 sprites.
-	if got := countSprites(d.Ops); got < 4 {
-		t.Fatalf("frame drew %d sprites, want keeper plus Lantern Halo orbs", got)
+	// Keeper + 3 halo orbs + Cinder Trail patch + Bell Toll pulse sprites.
+	if got := countSprites(d.Ops); got < 6 {
+		t.Fatalf("frame drew %d sprites, want keeper, Lantern Halo orbs, Cinder Trail patch and Bell Toll pulse", got)
 	}
+	if len(a.patchSprites) == 0 {
+		t.Fatal("Cinder Trail patch did not render via cinder_trail sprite sheet")
+	}
+	if len(a.pulseSprites) == 0 {
+		t.Fatal("Bell Toll pulse did not render via bell_toll sprite sheet")
+	}
+
+	// Verify procedural fallback draws arcs and stroke rings when sprite sheets are absent.
+	fb := newArenaRenderer(newArtFromFS(fstest.MapFS{}, fstest.MapFS{}))
+	fb.startRun(9)
+	fb.sync(r.Snapshot(), r.Events(), stepSeconds)
+	d.Ops = d.Ops[:0]
+	fb.draw(d, 0.5)
 	hasStroke := false
 	hasArc := false
 	for _, op := range d.Ops {
@@ -314,10 +328,10 @@ func TestFrameDrawsNewWeapons(t *testing.T) {
 		}
 	}
 	if !hasArc {
-		t.Fatal("frame drew no arcs for Cinder Trail patches or Bell Toll pulses")
+		t.Fatal("fallback frame drew no arcs for Cinder Trail patches or Bell Toll pulses")
 	}
 	if !hasStroke {
-		t.Fatal("frame drew no stroke ring for Bell Toll pulse")
+		t.Fatal("fallback frame drew no stroke ring for Bell Toll pulse")
 	}
 }
 
@@ -362,7 +376,7 @@ func TestFrameDrawsNewEnemiesPickupsAndBossTelegraph(t *testing.T) {
 	}
 }
 
-// TestEmbeddedSpriteSheetsSliceCleanly checks that the embedded #13 sprite sheets decode, slice into the expected frame counts and cell sizes, pack without overlap, and preserve facing metadata.
+// TestEmbeddedSpriteSheetsSliceCleanly checks that all 14 embedded sprite sheets decode, slice into the expected frame counts and cell sizes, pack without overlap, and preserve facing and action-row metadata.
 func TestEmbeddedSpriteSheetsSliceCleanly(t *testing.T) {
 	a := newArt()
 	if a.sheetAtlas == nil || a.sheetAtlas.Image.Pixels == nil {
@@ -371,20 +385,29 @@ func TestEmbeddedSpriteSheetsSliceCleanly(t *testing.T) {
 	b := a.sheetAtlas.Image.Pixels.Bounds()
 
 	checks := []struct {
-		name           string
-		actor          sheetActor
-		wantIdleFrames int
-		wantMoveFrames int
-		wantCellW      float32
-		wantCellH      float32
-		wantFacesLeft  bool
+		name             string
+		actor            sheetActor
+		wantIdleFrames   int
+		wantMoveFrames   int
+		wantActionFrames int
+		wantCellW        float32
+		wantCellH        float32
+		wantFacesLeft    bool
 	}{
-		{"keeper", a.sheets.keeper, 4, 4, 64, 64, true},
-		{"mite", a.sheets.mite, 4, 4, 64, 64, false},
-		{"moth", a.sheets.moth, 4, 4, 64, 64, false},
-		{"husk", a.sheets.husk, 4, 4, 64, 64, false},
-		{"ember", a.sheets.ember, 4, 4, 32, 32, false},
-		{"bolt", a.sheets.bolt, 4, 4, 32, 32, false},
+		{"keeper", a.sheets.keeper, 4, 4, 0, 64, 64, true},
+		{"mite", a.sheets.mite, 4, 4, 0, 64, 64, false},
+		{"moth", a.sheets.moth, 4, 4, 0, 64, 64, false},
+		{"husk", a.sheets.husk, 4, 4, 0, 64, 64, false},
+		{"thornling", a.sheets.thornling, 4, 4, 0, 64, 64, false},
+		{"wisp", a.sheets.wisp, 4, 4, 0, 64, 64, false},
+		{"shade", a.sheets.shade, 4, 4, 0, 64, 64, false},
+		{"gloomwarden", a.sheets.gloomwarden, 4, 4, 4, 96, 96, false},
+		{"hollow_king", a.sheets.hollowking, 4, 4, 4, 128, 128, false},
+		{"ember", a.sheets.ember, 4, 4, 0, 32, 32, false},
+		{"bolt", a.sheets.bolt, 4, 4, 0, 32, 32, false},
+		{"lantern_halo", a.sheets.halo, 4, 4, 0, 64, 64, false},
+		{"cinder_trail", a.sheets.cinderTrail, 4, 4, 0, 64, 64, false},
+		{"bell_toll", a.sheets.bellToll, 4, 4, 0, 64, 64, false},
 	}
 	for _, tc := range checks {
 		if !tc.actor.loaded {
@@ -395,6 +418,9 @@ func TestEmbeddedSpriteSheetsSliceCleanly(t *testing.T) {
 		}
 		if len(tc.actor.move.Frames) != tc.wantMoveFrames {
 			t.Fatalf("sheet %q move has %d frames, want %d", tc.name, len(tc.actor.move.Frames), tc.wantMoveFrames)
+		}
+		if len(tc.actor.action.Frames) != tc.wantActionFrames {
+			t.Fatalf("sheet %q action has %d frames, want %d", tc.name, len(tc.actor.action.Frames), tc.wantActionFrames)
 		}
 		if tc.actor.defaultFacesLeft != tc.wantFacesLeft {
 			t.Fatalf("sheet %q defaultFacesLeft = %v, want %v", tc.name, tc.actor.defaultFacesLeft, tc.wantFacesLeft)
@@ -411,11 +437,23 @@ func TestEmbeddedSpriteSheetsSliceCleanly(t *testing.T) {
 				t.Fatalf("sheet %q frame %q pivot = (%v,%v), want center", tc.name, f.Name, f.PivotX, f.PivotY)
 			}
 		}
+		for _, af := range tc.actor.action.Frames {
+			f := af.Frame
+			if f.W != tc.wantCellW || f.H != tc.wantCellH {
+				t.Fatalf("sheet %q action frame %q size = %vx%v, want %vx%v", tc.name, f.Name, f.W, f.H, tc.wantCellW, tc.wantCellH)
+			}
+		}
 	}
 
-	// Verify keeper idle and walk clips use distinct rows/frames.
+	// Verify two-row sheets use distinct rows for idle/walk and move/action clips.
 	if a.sheets.keeper.idle.Frames[0].Frame.Name == a.sheets.keeper.move.Frames[0].Frame.Name {
 		t.Fatal("keeper idle and walk clips share the same first frame")
+	}
+	if a.sheets.gloomwarden.move.Frames[0].Frame.Name == a.sheets.gloomwarden.action.Frames[0].Frame.Name {
+		t.Fatal("gloomwarden move and action clips share the same first frame")
+	}
+	if a.sheets.hollowking.move.Frames[0].Frame.Name == a.sheets.hollowking.action.Frames[0].Frame.Name {
+		t.Fatal("hollow_king move and action clips share the same first frame")
 	}
 
 	// Verify no two packed frames in sheetAtlas overlap and all fit inside the atlas bounds.
@@ -434,6 +472,171 @@ func TestEmbeddedSpriteSheetsSliceCleanly(t *testing.T) {
 				t.Fatalf("sheet frames %q and %q overlap", all[i], all[j])
 			}
 		}
+	}
+}
+
+// TestEmbeddedEnvironmentArtAndFallback verifies all 9 embedded environment assets decode with expected
+// dimensions, seeded painted ground rendering stays deterministic and draws smoothly, and missing/corrupt
+// environment assets fall back cleanly to procedural ground.
+func TestEmbeddedEnvironmentArtAndFallback(t *testing.T) {
+	a := newArt()
+	if !a.hasPaintedGround() {
+		t.Fatal("embedded environment assets did not enable painted ground")
+	}
+	envChecks := []struct {
+		name string
+		img  *image.RGBA
+		w, h int
+	}{
+		{"ground_soil.png", a.env.soil, 256, 256},
+		{"ground_moss.png", a.env.moss, 256, 256},
+		{"grass_tuft.png", a.env.grassTuft, 64, 64},
+		{"fern.png", a.env.fern, 64, 64},
+		{"moss_stone.png", a.env.mossStone, 64, 64},
+		{"mushrooms.png", a.env.mushrooms, 64, 64},
+		{"stump.png", a.env.stump, 96, 96},
+		{"fallen_branch.png", a.env.fallenBranch, 96, 64},
+		{"tree_canopy.png", a.env.treeCanopy, 128, 128},
+	}
+	for _, tc := range envChecks {
+		if tc.img == nil {
+			t.Fatalf("environment asset %q was not loaded", tc.name)
+		}
+		b := tc.img.Bounds()
+		if b.Dx() != tc.w || b.Dy() != tc.h {
+			t.Fatalf("environment asset %q = %dx%d, want %dx%d", tc.name, b.Dx(), b.Dy(), tc.w, tc.h)
+		}
+	}
+
+	// Painted ground must be deterministic per seed and distinct across seeds.
+	paintedA := a.newGround(77, 640, 400)
+	paintedB := a.newGround(77, 640, 400)
+	paintedOther := a.newGround(78, 640, 400)
+	if !bytes.Equal(paintedA.Pix, paintedB.Pix) {
+		t.Fatal("painted ground differed for identical seed")
+	}
+	if bytes.Equal(paintedA.Pix, paintedOther.Pix) {
+		t.Fatal("painted ground matched across different seeds")
+	}
+
+	// Missing environment FS falls back cleanly to procedural ground and stays deterministic.
+	fallback := newArtFromAllFS(fstest.MapFS{}, fstest.MapFS{}, fstest.MapFS{})
+	if fallback.hasPaintedGround() {
+		t.Fatal("empty environment FS reported painted ground as loaded")
+	}
+	procA := fallback.newGround(77, 640, 400)
+	procB := fallback.newGround(77, 640, 400)
+	if !bytes.Equal(procA.Pix, procB.Pix) {
+		t.Fatal("procedural fallback ground differed for identical seed")
+	}
+	if bytes.Equal(paintedA.Pix, procA.Pix) {
+		t.Fatal("painted ground was identical to procedural fallback")
+	}
+
+	// Corrupt soil tile falls back cleanly without panicking.
+	corrupt := newArtFromAllFS(fstest.MapFS{}, fstest.MapFS{}, fstest.MapFS{
+		"assets/environment/ground_soil.png": &fstest.MapFile{Data: []byte("bad png")},
+	})
+	if corrupt.hasPaintedGround() {
+		t.Fatal("corrupt ground_soil.png reported painted ground as loaded")
+	}
+	if g := corrupt.newGround(5, 320, 200); g.Bounds() != image.Rect(0, 0, 320, 200) {
+		t.Fatalf("corrupt fallback ground bounds = %v, want 320x200", g.Bounds())
+	}
+
+	// Painted ground crop draws with smooth image sampling.
+	r := quietRun(t)
+	ar := newTestArena(t, r, 7)
+	d := &core.Drawing{}
+	ar.draw(d, 1)
+	groundSmooth := false
+	for _, op := range d.Ops {
+		if op.Kind == core.DrawImage && op.Image != nil && isGround(op.Image) && op.Sampling == core.ImageSamplingSmooth {
+			groundSmooth = true
+			break
+		}
+	}
+	if !groundSmooth {
+		t.Fatal("painted ground crop did not draw with smooth image sampling")
+	}
+}
+
+// TestBossTelegraphAndGloomwardenActionRows verifies Hollow King switches to row 1 while telegraphing
+// and Gloomwarden switches to row 1 at close melee range.
+func TestBossTelegraphAndGloomwardenActionRows(t *testing.T) {
+	a := newArenaRenderer(newArt())
+	a.startRun(31)
+	arena := Vec2{X: 1920, Y: 1280}
+	keeper := Vec2{X: 960, Y: 640}
+
+	// Hollow King hovering without telegraph -> row 0; Gloomwarden far away -> row 0.
+	a.sync(Snapshot{
+		Phase:        PhasePlaying,
+		Arena:        arena,
+		Keeper:       keeper,
+		KeeperRadius: 8,
+		Enemies: []EnemyView{
+			{ID: 1, Kind: "Hollow King", Boss: true, Pos: keeper.Add(Vec2{X: 80}), Radius: 22},
+			{ID: 2, Kind: "Gloomwarden", Elite: true, Pos: keeper.Add(Vec2{X: -120}), Radius: 15},
+		},
+		Boss: BossView{Active: true, ID: 1, Name: "Hollow King", Pos: keeper.Add(Vec2{X: 80}), Radius: 22},
+	}, nil, stepSeconds)
+
+	d := &core.Drawing{}
+	a.draw(d, 1)
+	bossFrame, wardenFrame := "", ""
+	for _, s := range a.sheetSprites {
+		if s.Z != 2 {
+			continue
+		}
+		if len(s.Frame.Name) >= len("hollow_king/") && s.Frame.Name[:len("hollow_king/")] == "hollow_king/" {
+			bossFrame = s.Frame.Name
+		}
+		if len(s.Frame.Name) >= len("gloomwarden/") && s.Frame.Name[:len("gloomwarden/")] == "gloomwarden/" {
+			wardenFrame = s.Frame.Name
+		}
+	}
+	if bossFrame == "" || bossFrame[:len("hollow_king/0/")] != "hollow_king/0/" {
+		t.Fatalf("Hollow King without telegraph used frame %q, want row 0", bossFrame)
+	}
+	if wardenFrame == "" || wardenFrame[:len("gloomwarden/0/")] != "gloomwarden/0/" {
+		t.Fatalf("distant Gloomwarden used frame %q, want row 0", wardenFrame)
+	}
+
+	// Hollow King telegraphing -> row 1; Gloomwarden in close melee range -> row 1.
+	a.sync(Snapshot{
+		Phase:        PhasePlaying,
+		Arena:        arena,
+		Keeper:       keeper,
+		KeeperRadius: 8,
+		Enemies: []EnemyView{
+			{ID: 1, Kind: "Hollow King", Boss: true, Pos: keeper.Add(Vec2{X: 80}), Radius: 22},
+			{ID: 2, Kind: "Gloomwarden", Elite: true, Pos: keeper.Add(Vec2{X: -30}), Radius: 15},
+		},
+		Boss: BossView{
+			Active: true, ID: 1, Name: "Hollow King", Pos: keeper.Add(Vec2{X: 80}), Radius: 22,
+			Telegraph: "ring", TelegraphProgress: 0.5, TelegraphLength: 68,
+		},
+	}, nil, stepSeconds)
+	d.Ops = d.Ops[:0]
+	a.draw(d, 1)
+	bossFrame, wardenFrame = "", ""
+	for _, s := range a.sheetSprites {
+		if s.Z != 2 {
+			continue
+		}
+		if len(s.Frame.Name) >= len("hollow_king/") && s.Frame.Name[:len("hollow_king/")] == "hollow_king/" {
+			bossFrame = s.Frame.Name
+		}
+		if len(s.Frame.Name) >= len("gloomwarden/") && s.Frame.Name[:len("gloomwarden/")] == "gloomwarden/" {
+			wardenFrame = s.Frame.Name
+		}
+	}
+	if bossFrame == "" || bossFrame[:len("hollow_king/1/")] != "hollow_king/1/" {
+		t.Fatalf("Hollow King with telegraph used frame %q, want row 1", bossFrame)
+	}
+	if wardenFrame == "" || wardenFrame[:len("gloomwarden/1/")] != "gloomwarden/1/" {
+		t.Fatalf("close-range Gloomwarden used frame %q, want row 1", wardenFrame)
 	}
 }
 

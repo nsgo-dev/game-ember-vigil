@@ -207,7 +207,11 @@ type arenaRenderer struct {
 	// batch, pool, effects, lights and the lantern are reused every frame, so drawing a steady frame allocates nothing.
 	batch        sprite.Batch
 	sheetBatch   sprite.Batch
+	patchBatch   sprite.Batch
+	pulseBatch   sprite.Batch
 	sheetSprites []*sprite.Sprite
+	patchSprites []*sprite.Sprite
+	pulseSprites []*sprite.Sprite
 	pixelSprites []*sprite.Sprite
 	pool         []*sprite.Sprite
 	used         int
@@ -259,6 +263,8 @@ func (r *arenaRenderer) startRun(seed uint64) {
 	r.pulses = r.pulses[:0]
 	r.boss = BossView{}
 	r.sheetSprites = r.sheetSprites[:0]
+	r.patchSprites = r.patchSprites[:0]
+	r.pulseSprites = r.pulseSprites[:0]
 	r.pixelSprites = r.pixelSprites[:0]
 	clear(r.before)
 	clear(r.spare)
@@ -635,11 +641,15 @@ func (r *arenaRenderer) draw(d *core.Drawing, alpha float64) {
 		return
 	}
 	ox, oy := r.origin()
+	d.SetImageSmoothing(r.art.hasPaintedGround())
 	d.DrawImageFrom(r.groundSource, ox, oy, w, h, 0, 0, w, h)
+	r.used, r.flashing = 0, 0
+	r.patchSprites = r.patchSprites[:0]
+	r.pulseSprites = r.pulseSprites[:0]
 	r.drawPatches(d, ox, oy)
+	d.SetImageSmoothing(false)
 	r.drawBossTelegraph(d, ox, oy)
 
-	r.used, r.flashing = 0, 0
 	r.sheetSprites = r.sheetSprites[:0]
 	r.pixelSprites = r.pixelSprites[:0]
 	r.addEmbers(ox, oy)
@@ -662,8 +672,8 @@ func (r *arenaRenderer) draw(d *core.Drawing, alpha float64) {
 		r.batch.Sprites = r.pixelSprites
 		r.batch.Draw(d)
 	}
-	d.SetImageSmoothing(false)
 	r.drawPulses(d, ox, oy)
+	d.SetImageSmoothing(false)
 	r.drawLevelFlourish(d, ox, oy)
 
 	r.drawLight(d, w, h)
@@ -689,13 +699,17 @@ func phaseOffset(id uint64, round time.Duration) time.Duration {
 	return time.Duration(h % uint64(round))
 }
 
-// sampleAnimation returns sa's frame at animTime plus a deterministic per-id phase offset, using a stack value for zero allocations.
-func sampleAnimation(sa sheetActor, id uint64, animTime time.Duration) sprite.Frame {
-	anim := sa.move
-	if t := animTime + phaseOffset(id, sa.round); t > 0 {
+// sampleClip returns anim's frame at animTime plus a deterministic per-id phase offset, using a stack value for zero allocations.
+func sampleClip(anim sprite.Animation, round time.Duration, id uint64, animTime time.Duration) sprite.Frame {
+	if t := animTime + phaseOffset(id, round); t > 0 {
 		anim.Update(t)
 	}
 	return anim.Frame()
+}
+
+// sampleAnimation returns sa's normal movement frame at animTime plus a deterministic per-id phase offset, using a stack value for zero allocations.
+func sampleAnimation(sa sheetActor, id uint64, animTime time.Duration) sprite.Frame {
+	return sampleClip(sa.move, sa.round, id, animTime)
 }
 
 // origin returns the whole virtual pixels the frame's world is drawn from, with the camera's shake added and kept inside the arena.
@@ -768,14 +782,15 @@ func (r *arenaRenderer) enemyVisual(kind int) (sheetActor, sprite.Frame) {
 	}
 }
 
-// addEnemies adds the living enemies, with a struck one flashing toward hitColor, horizontal facing flips, and flying foes bobbing.
+// addEnemies adds the living enemies, with a struck one flashing toward hitColor, horizontal facing flips,
+// action/telegraph clip selection on 2-row bosses/elites, and flying foes bobbing.
 func (r *arenaRenderer) addEnemies(ox, oy float32) {
 	for i := range r.enemies {
 		e := &r.enemies[i]
 		sa, fallback := r.enemyVisual(e.kind)
 		var s *sprite.Sprite
 		if sa.loaded {
-			frame := sampleAnimation(sa, e.id, r.animTime)
+			frame := r.enemyFrame(sa, e)
 			s = r.addSheet(frame, sa.scale, *e, ox, oy, 1, 2)
 			if s != nil {
 				s.FlipX = spriteFlipX(e.facingRight, sa.defaultFacesLeft)
@@ -796,6 +811,25 @@ func (r *arenaRenderer) addEnemies(ox, oy float32) {
 			s.Effect = r.flasher(left)
 		}
 	}
+}
+
+// enemyFrame picks the animation frame for e, switching 2-row bosses and elites to their row-1 action clip
+// while telegraphing (Hollow King) or winding up a close-range strike (Gloomwarden).
+func (r *arenaRenderer) enemyFrame(sa sheetActor, e *actor) sprite.Frame {
+	if len(sa.action.Frames) > 0 {
+		switch e.kind {
+		case kindHollowKing:
+			if r.boss.Active && r.boss.Telegraph != "" {
+				return sampleClip(sa.action, sa.actionRound, e.id, r.animTime)
+			}
+		case kindGloomwarden:
+			reach := e.radius + r.keeper.radius + 26
+			if e.pos.Sub(r.keeper.pos).LenSq() <= reach*reach {
+				return sampleClip(sa.action, sa.actionRound, e.id, r.animTime)
+			}
+		}
+	}
+	return sampleAnimation(sa, e.id, r.animTime)
 }
 
 // addShots adds the Ember Bolts in flight above the enemies they are about to hit, rotated along their travel direction.
@@ -895,8 +929,40 @@ func (r *arenaRenderer) addHalo(ox, oy float32) {
 	}
 }
 
-// drawPatches paints Cinder Trail's burning ground patches over the forest floor before sprites draw.
+// drawPatches paints Cinder Trail's burning ground patches over the forest floor before sprites draw,
+// using the animated cinder_trail sprite sheet when loaded and falling back to procedural arcs otherwise.
 func (r *arenaRenderer) drawPatches(d *core.Drawing, ox, oy float32) {
+	if len(r.patches) == 0 {
+		return
+	}
+	sa := r.art.sheets.cinderTrail
+	if sa.loaded && r.art.sheetAtlas != nil {
+		r.patchSprites = r.patchSprites[:0]
+		for i := range r.patches {
+			p := &r.patches[i]
+			x, y := float32(p.Pos.X)-ox, float32(p.Pos.Y)-oy
+			rad := float32(p.Radius)
+			if x+rad < 0 || x-rad > viewWidth || y+rad < 0 || y-rad > viewHeight {
+				continue
+			}
+			frame := sampleAnimation(sa, p.ID, r.animTime)
+			fade := float32(math.Min(1, p.Life/0.5))
+			flicker := float32(1 + 0.05*math.Sin(r.fx.time*14+float64(p.ID)))
+			scale := (rad * 2.15 * flicker) / max(frame.W, 1)
+			s := r.next(frame)
+			s.X, s.Y, s.ScaleX, s.ScaleY, s.Alpha, s.Z = x, y, scale, scale, fade, 0
+			r.patchSprites = append(r.patchSprites, s)
+		}
+		if len(r.patchSprites) > 0 {
+			d.SetImageSmoothing(true)
+			r.patchBatch.Atlas = r.art.sheetAtlas
+			r.patchBatch.Sprites = r.patchSprites
+			r.patchBatch.Draw(d)
+		}
+		return
+	}
+
+	d.SetImageSmoothing(false)
 	for i := range r.patches {
 		p := &r.patches[i]
 		x, y := toScreen(p.Pos, ox, oy)
@@ -913,8 +979,42 @@ func (r *arenaRenderer) drawPatches(d *core.Drawing, ox, oy float32) {
 	}
 }
 
-// drawPulses paints Bell Toll's expanding shockwave rings over the sprites.
+// drawPulses paints Bell Toll's expanding shockwave rings over the sprites,
+// mapping pulse progress across bell_toll's 4 frames when loaded and falling back to procedural rings otherwise.
 func (r *arenaRenderer) drawPulses(d *core.Drawing, ox, oy float32) {
+	if len(r.pulses) == 0 {
+		return
+	}
+	sa := r.art.sheets.bellToll
+	if sa.loaded && r.art.sheetAtlas != nil && len(sa.move.Frames) > 0 {
+		r.pulseSprites = r.pulseSprites[:0]
+		frames := sa.move.Frames
+		for i := range r.pulses {
+			p := &r.pulses[i]
+			x, y := float32(p.Pos.X)-ox, float32(p.Pos.Y)-oy
+			t := float32(min(max(1-p.Life/max(p.Max, 0.001), 0), 1))
+			rad := float32(p.Radius) * (0.45 + 0.65*t)
+			if x+rad < 0 || x-rad > viewWidth || y+rad < 0 || y-rad > viewHeight {
+				continue
+			}
+			idx := min(int(t*float32(len(frames))), len(frames)-1)
+			frame := frames[idx].Frame
+			alpha := float32(math.Max(0, 1-float64(t)*0.85))
+			scale := (rad * 2) / max(frame.W, 1)
+			s := r.next(frame)
+			s.X, s.Y, s.ScaleX, s.ScaleY, s.Alpha, s.Z = x, y, scale, scale, alpha, 6
+			r.pulseSprites = append(r.pulseSprites, s)
+		}
+		if len(r.pulseSprites) > 0 {
+			d.SetImageSmoothing(true)
+			r.pulseBatch.Atlas = r.art.sheetAtlas
+			r.pulseBatch.Sprites = r.pulseSprites
+			r.pulseBatch.Draw(d)
+		}
+		return
+	}
+
+	d.SetImageSmoothing(false)
 	for i := range r.pulses {
 		p := &r.pulses[i]
 		x, y := toScreen(p.Pos, ox, oy)

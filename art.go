@@ -23,6 +23,9 @@ var embeddedSprites embed.FS
 //go:embed assets/icons/*.png
 var embeddedIcons embed.FS
 
+//go:embed assets/environment/*.png
+var embeddedEnvironment embed.FS
+
 //go:embed assets/Title.png
 var embeddedTitleArt embed.FS
 
@@ -385,7 +388,9 @@ type sheetActor struct {
 	defaultFacesLeft bool
 	idle             sprite.Animation
 	move             sprite.Animation
+	action           sprite.Animation
 	round            time.Duration
+	actionRound      time.Duration
 }
 
 // sheetFrames holds every actor's loaded sprite-sheet animations by field so drawing never allocates or hashes strings.
@@ -402,12 +407,16 @@ type sheetFrames struct {
 	ember       sheetActor
 	bolt        sheetActor
 	halo        sheetActor
+	cinderTrail sheetActor
+	bellToll    sheetActor
 	thorn       sheetActor
 	bone        sheetActor
 	cache       sheetActor
 }
 
 // sheetSpec describes one uniform-grid PNG sprite sheet under assets/sprites/.
+// When actionFrameTime > 0 on a 2-row sheet, row 0 is the normal movement clip and row 1 is the attack/telegraph clip;
+// otherwise row 0 is idle and row 1 is walk (as on keeper.png).
 type sheetSpec struct {
 	name             string
 	file             string
@@ -415,12 +424,13 @@ type sheetSpec struct {
 	cols             int
 	idleFrameTime    time.Duration
 	moveFrameTime    time.Duration
+	actionFrameTime  time.Duration
 	worldHeight      float32
 	defaultFacesLeft bool
 	target           func(*sheetFrames) *sheetActor
 }
 
-// sheetSpecs lists every stylized 2D sprite sheet the loader recognizes, including #14 sheets that fall back cleanly until added.
+// sheetSpecs lists every stylized 2D sprite sheet the loader recognizes, falling back cleanly when a sheet is absent.
 var sheetSpecs = []sheetSpec{
 	{
 		name: "keeper", file: "assets/sprites/keeper.png",
@@ -466,13 +476,13 @@ var sheetSpecs = []sheetSpec{
 	},
 	{
 		name: "gloomwarden", file: "assets/sprites/gloomwarden.png",
-		rows: 1, cols: 4, moveFrameTime: 140 * time.Millisecond,
+		rows: 2, cols: 4, moveFrameTime: 140 * time.Millisecond, actionFrameTime: 115 * time.Millisecond,
 		worldHeight: 38,
 		target:      func(s *sheetFrames) *sheetActor { return &s.gloomwarden },
 	},
 	{
-		name: "hollowking", file: "assets/sprites/hollowking.png",
-		rows: 1, cols: 4, moveFrameTime: 150 * time.Millisecond,
+		name: "hollow_king", file: "assets/sprites/hollow_king.png",
+		rows: 2, cols: 4, moveFrameTime: 150 * time.Millisecond, actionFrameTime: 120 * time.Millisecond,
 		worldHeight: 52,
 		target:      func(s *sheetFrames) *sheetActor { return &s.hollowking },
 	},
@@ -489,10 +499,22 @@ var sheetSpecs = []sheetSpec{
 		target:      func(s *sheetFrames) *sheetActor { return &s.bolt },
 	},
 	{
-		name: "halo", file: "assets/sprites/halo.png",
+		name: "lantern_halo", file: "assets/sprites/lantern_halo.png",
 		rows: 1, cols: 4, moveFrameTime: 100 * time.Millisecond,
-		worldHeight: 14,
+		worldHeight: 16,
 		target:      func(s *sheetFrames) *sheetActor { return &s.halo },
+	},
+	{
+		name: "cinder_trail", file: "assets/sprites/cinder_trail.png",
+		rows: 1, cols: 4, moveFrameTime: 110 * time.Millisecond,
+		worldHeight: 32,
+		target:      func(s *sheetFrames) *sheetActor { return &s.cinderTrail },
+	},
+	{
+		name: "bell_toll", file: "assets/sprites/bell_toll.png",
+		rows: 1, cols: 4, moveFrameTime: 90 * time.Millisecond,
+		worldHeight: 64,
+		target:      func(s *sheetFrames) *sheetActor { return &s.bellToll },
 	},
 	{
 		name: "thorn", file: "assets/sprites/thorn.png",
@@ -514,28 +536,53 @@ var sheetSpecs = []sheetSpec{
 	},
 }
 
-// art holds the procedural fallback atlas, the packed stylized sprite-sheet atlas, embedded upgrade card icons and title key art.
+// envArt holds the decoded hand-painted arena tiles, forest props and border canopy from assets/environment/.
+type envArt struct {
+	soil         *image.RGBA
+	moss         *image.RGBA
+	grassTuft    *image.RGBA
+	fern         *image.RGBA
+	mossStone    *image.RGBA
+	mushrooms    *image.RGBA
+	stump        *image.RGBA
+	fallenBranch *image.RGBA
+	treeCanopy   *image.RGBA
+}
+
+// loaded reports whether the required seamless ground tiles decoded cleanly.
+func (e envArt) loaded() bool {
+	return e.soil != nil && e.moss != nil
+}
+
+// art holds the procedural fallback atlas, the packed stylized sprite-sheet atlas, embedded environment tiles/props, upgrade card icons and title key art.
 type art struct {
 	atlas       *sprite.Atlas
 	frames      frames
 	pixels      map[string]*pixels
 	sheetAtlas  *sprite.Atlas
 	sheets      sheetFrames
+	env         envArt
 	icons       map[string]core.ImageSource
 	titleArt    core.ImageSource
 	hasTitleArt bool
 }
 
-// newArt builds the procedural fallback atlas and loads all embedded sprite sheets, upgrade card icons and title key art.
+// newArt builds the procedural fallback atlas and loads all embedded sprite sheets, environment art, upgrade card icons and title key art.
 func newArt() *art {
-	a := newArtFromFS(embeddedSprites, embeddedIcons)
+	a := newArtFromAllFS(embeddedSprites, embeddedIcons, embeddedEnvironment)
 	a.loadTitleArt(embeddedTitleArt)
 	return a
 }
 
-// newArtFromFS builds the procedural fallback atlas and loads any available sprite sheets and icons from spriteFS and iconFS.
-// Missing or unreadable files are skipped so callers always get a valid fallback.
+// newArtFromFS builds the procedural fallback atlas and loads any available sprite sheets and icons from spriteFS and iconFS,
+// using procedural ground fallback.
 func newArtFromFS(spriteFS, iconFS fs.FS) *art {
+	return newArtFromAllFS(spriteFS, iconFS, nil)
+}
+
+// newArtFromAllFS builds the procedural fallback atlas and loads any available sprite sheets, icons and environment assets.
+// Missing or unreadable files are skipped so callers always get a valid fallback.
+func newArtFromAllFS(spriteFS, iconFS, envFS fs.FS) *art {
 	ras := make([]*pixels, len(pictures))
 	for i, p := range pictures {
 		ras[i] = rasterize(p)
@@ -558,7 +605,13 @@ func newArtFromFS(spriteFS, iconFS fs.FS) *art {
 	a.frames = framesOf(a.atlas.Frames)
 	a.loadSheets(spriteFS)
 	a.loadIcons(iconFS)
+	a.loadEnvironment(envFS)
 	return a
+}
+
+// hasPaintedGround reports whether the hand-painted forest floor tiles are loaded.
+func (a *art) hasPaintedGround() bool {
+	return a != nil && a.env.loaded()
 }
 
 // cardIcon returns the embedded PNG icon for an upgrade card id (converting hyphens to underscores), or false when absent.
@@ -637,7 +690,7 @@ func (a *art) loadSheets(fsys fs.FS) {
 	}
 
 	const (
-		sheetAtlasWidth = 512
+		sheetAtlasWidth = 768
 		sheetGap        = 2
 	)
 	type placement struct {
@@ -708,7 +761,15 @@ func (a *art) loadSheets(fsys fs.FS) {
 			scale:            spec.worldHeight / float32(ds.cellH),
 			defaultFacesLeft: spec.defaultFacesLeft,
 		}
-		if spec.rows >= 2 {
+		if spec.rows >= 2 && spec.actionFrameTime > 0 {
+			actor.move = buildClip(gridFrames[si][0], spec.moveFrameTime)
+			actor.idle = actor.move
+			actor.action = buildClip(gridFrames[si][1], spec.actionFrameTime)
+			actor.round = spec.moveFrameTime * time.Duration(spec.cols)
+			actor.actionRound = spec.actionFrameTime * time.Duration(spec.cols)
+			atlas.Animations[spec.name+":move"] = actor.move
+			atlas.Animations[spec.name+":action"] = actor.action
+		} else if spec.rows >= 2 {
 			idleDur := spec.idleFrameTime
 			if idleDur <= 0 {
 				idleDur = spec.moveFrameTime
@@ -767,6 +828,40 @@ func (a *art) loadIcons(fsys fs.FS) {
 			Version: 1,
 			Size:    core.Size{Width: core.Points(b.Dx()), Height: core.Points(b.Dy())},
 		}
+	}
+}
+
+// loadEnvironment decodes the hand-painted forest floor tiles, props and border canopy from assets/environment/.
+// Missing or corrupt files are skipped cleanly so newGround falls back to procedural rendering whenever needed.
+func (a *art) loadEnvironment(fsys fs.FS) {
+	if fsys == nil {
+		return
+	}
+	load := func(name string) *image.RGBA {
+		raw, err := fs.ReadFile(fsys, "assets/environment/"+name)
+		if err != nil {
+			return nil
+		}
+		rgba, err := decodePNGToRGBA(raw)
+		if err != nil {
+			return nil
+		}
+		b := rgba.Bounds()
+		if b.Dx() <= 0 || b.Dy() <= 0 {
+			return nil
+		}
+		return rgba
+	}
+	a.env = envArt{
+		soil:         load("ground_soil.png"),
+		moss:         load("ground_moss.png"),
+		grassTuft:    load("grass_tuft.png"),
+		fern:         load("fern.png"),
+		mossStone:    load("moss_stone.png"),
+		mushrooms:    load("mushrooms.png"),
+		stump:        load("stump.png"),
+		fallenBranch: load("fallen_branch.png"),
+		treeCanopy:   load("tree_canopy.png"),
 	}
 }
 
@@ -930,8 +1025,18 @@ var (
 	groundSoilHighlight = core.RGB(0x344159)
 )
 
-// newGround paints the arena's ground once per run: mottled moonlit soil, and the decor the run's cosmetic stream scatters over it. Two runs with one seed paint the same ground.
+// newGround paints the arena's ground once per run from the run's seed. When the hand-painted environment tiles
+// are embedded, it blends ground_soil and ground_moss seamlessly, scatters proportionally scaled forest props,
+// and frames the four arena edges with overlapping tree_canopy. Otherwise it falls back to procedural moonlit soil.
 func (a *art) newGround(seed uint64, width, height int) *image.RGBA {
+	if a.hasPaintedGround() {
+		return a.newPaintedGround(seed, width, height)
+	}
+	return a.newProceduralGround(seed, width, height)
+}
+
+// newProceduralGround paints mottled moonlit soil and procedural pixel decor when hand-painted tiles are absent.
+func (a *art) newProceduralGround(seed uint64, width, height int) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	for y := 0; y < height; y += soilBlock {
 		for x := 0; x < width; x += soilBlock {
@@ -956,6 +1061,269 @@ func (a *art) newGround(seed uint64, width, height int) *image.RGBA {
 		p.drawInto(img, x, y)
 	}
 	return img
+}
+
+// newPaintedGround tiles and smoothly blends ground_soil.png and ground_moss.png, scatters proportionally
+// scaled transparent forest props, and rings the outer arena perimeter with tree_canopy.png.
+func (a *art) newPaintedGround(seed uint64, width, height int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	if width <= 0 || height <= 0 {
+		return img
+	}
+
+	soil, moss := a.env.soil, a.env.moss
+	soilW, soilH := soil.Bounds().Dx(), soil.Bounds().Dy()
+	mossW, mossH := moss.Bounds().Dx(), moss.Bounds().Dy()
+
+	s := random.NewStreams(seed).Stream("ground")
+	soilOffX, soilOffY := s.Intn(soilW), s.Intn(soilH)
+	mossOffX, mossOffY := s.Intn(mossW), s.Intn(mossH)
+
+	// Precompute two coarse value-noise grids for organic, seam-free moss glades.
+	const (
+		coarseCell = 160
+		detailCell = 64
+	)
+	coarse := newNoiseGrid(seed^0x51a7c3d1, width, height, coarseCell)
+	detail := newNoiseGrid(seed^0x9e3779b9, width, height, detailCell)
+
+	for y := 0; y < height; y++ {
+		sy := (y + soilOffY) % soilH
+		my := (y + mossOffY) % mossH
+		soilRow := sy * soil.Stride
+		mossRow := my * moss.Stride
+		dstRow := y * img.Stride
+		for x := 0; x < width; x++ {
+			n := 0.72*coarse.sample(x, y) + 0.28*detail.sample(x, y)
+			w := smoothstep(0.36, 0.66, n)
+			mw := uint32(w*256 + 0.5)
+			sw := 256 - mw
+
+			sx := (x + soilOffX) % soilW
+			mx := (x + mossOffX) % mossW
+			si := soilRow + sx*4
+			mi := mossRow + mx*4
+			di := dstRow + x*4
+
+			img.Pix[di+0] = uint8((uint32(soil.Pix[si+0])*sw + uint32(moss.Pix[mi+0])*mw) >> 8)
+			img.Pix[di+1] = uint8((uint32(soil.Pix[si+1])*sw + uint32(moss.Pix[mi+1])*mw) >> 8)
+			img.Pix[di+2] = uint8((uint32(soil.Pix[si+2])*sw + uint32(moss.Pix[mi+2])*mw) >> 8)
+			img.Pix[di+3] = 255
+		}
+	}
+
+	// Scatter proportionally scaled forest props (keeper is ~28 logical units tall).
+	type envProp struct {
+		img         *image.RGBA
+		minH, maxH  float64
+		weight      float64
+		sizeByWidth bool
+	}
+	candidates := []envProp{
+		{img: a.env.grassTuft, minH: 16, maxH: 22, weight: 5.5},
+		{img: a.env.fern, minH: 18, maxH: 24, weight: 4.0},
+		{img: a.env.mossStone, minH: 16, maxH: 22, weight: 2.0},
+		{img: a.env.mushrooms, minH: 16, maxH: 20, weight: 1.4},
+		{img: a.env.fallenBranch, minH: 28, maxH: 38, weight: 1.2, sizeByWidth: true},
+		{img: a.env.stump, minH: 28, maxH: 36, weight: 0.9},
+	}
+	props := candidates[:0]
+	weights := make([]float64, 0, len(candidates))
+	for _, p := range candidates {
+		if p.img != nil {
+			props = append(props, p)
+			weights = append(weights, p.weight)
+		}
+	}
+	if len(props) > 0 {
+		count := max(24, (width*height)/8000)
+		margin := min(24, min(width, height)/8)
+		spanX := max(1, width-2*margin)
+		spanY := max(1, height-2*margin)
+		for range count {
+			p := props[s.WeightedIndex(weights)]
+			sb := p.img.Bounds()
+			target := s.Range(p.minH, p.maxH)
+			var dw, dh int
+			if p.sizeByWidth {
+				dw = max(1, int(math.Round(target)))
+				dh = max(1, int(math.Round(target*float64(sb.Dy())/float64(sb.Dx()))))
+			} else {
+				dh = max(1, int(math.Round(target)))
+				dw = max(1, int(math.Round(target*float64(sb.Dx())/float64(sb.Dy()))))
+			}
+			cx := margin + s.Intn(spanX)
+			cy := margin + s.Intn(spanY)
+			blitScaledOver(img, p.img, cx, cy, dw, dh, s.Intn(2) == 1)
+		}
+	}
+
+	// Frame all four outer arena edges with slightly overlapping tree canopies (purely decorative).
+	if canopy := a.env.treeCanopy; canopy != nil {
+		const (
+			canopyStep   = 38
+			canopyMin    = 56.0
+			canopyMax    = 72.0
+			edgeInsetMax = 16.0
+		)
+		placeCanopy := func(cx, cy float64) {
+			size := max(1, int(math.Round(s.Range(canopyMin, canopyMax))))
+			blitScaledOver(img, canopy, int(math.Round(cx)), int(math.Round(cy)), size, size, s.Intn(2) == 1)
+		}
+		for x := 0; x <= width; x += canopyStep {
+			placeCanopy(float64(x)+s.Range(-10, 10), s.Range(-8, edgeInsetMax))
+			placeCanopy(float64(x)+s.Range(-10, 10), float64(height)-s.Range(-8, edgeInsetMax))
+		}
+		for y := canopyStep; y < height; y += canopyStep {
+			placeCanopy(s.Range(-8, edgeInsetMax), float64(y)+s.Range(-10, 10))
+			placeCanopy(float64(width)-s.Range(-8, edgeInsetMax), float64(y)+s.Range(-10, 10))
+		}
+	}
+
+	return img
+}
+
+// noiseGrid is a coarse 2D deterministic value-noise table sampled with smoothstep bilinear interpolation.
+type noiseGrid struct {
+	cols int
+	cell int
+	vals []float64
+}
+
+func newNoiseGrid(seed uint64, width, height, cell int) noiseGrid {
+	cols := width/cell + 2
+	rows := height/cell + 2
+	vals := make([]float64, cols*rows)
+	for gy := 0; gy < rows; gy++ {
+		for gx := 0; gx < cols; gx++ {
+			vals[gy*cols+gx] = float64(mottle(seed, gx, gy)&0xffff) / 65535.0
+		}
+	}
+	return noiseGrid{cols: cols, cell: cell, vals: vals}
+}
+
+func (g noiseGrid) sample(x, y int) float64 {
+	gx, gy := x/g.cell, y/g.cell
+	tx := float64(x-gx*g.cell) / float64(g.cell)
+	ty := float64(y-gy*g.cell) / float64(g.cell)
+	tx = tx * tx * (3 - 2*tx)
+	ty = ty * ty * (3 - 2*ty)
+
+	i00 := gy*g.cols + gx
+	v00 := g.vals[i00]
+	v10 := g.vals[i00+1]
+	v01 := g.vals[i00+g.cols]
+	v11 := g.vals[i00+g.cols+1]
+	top := v00 + (v10-v00)*tx
+	bot := v01 + (v11-v01)*tx
+	return top + (bot-top)*ty
+}
+
+// smoothstep maps v smoothly from 0 at edge0 to 1 at edge1.
+func smoothstep(edge0, edge1, v float64) float64 {
+	t := (v - edge0) / (edge1 - edge0)
+	if t <= 0 {
+		return 0
+	}
+	if t >= 1 {
+		return 1
+	}
+	return t * t * (3 - 2*t)
+}
+
+// blitScaledOver draws premultiplied RGBA src scaled to dstW×dstH centered at (cx, cy) onto dst with
+// bilinear filtering and Porter-Duff Over alpha compositing.
+func blitScaledOver(dst, src *image.RGBA, cx, cy, dstW, dstH int, flipX bool) {
+	if dstW <= 0 || dstH <= 0 {
+		return
+	}
+	sb := src.Bounds()
+	srcW, srcH := sb.Dx(), sb.Dy()
+	if srcW <= 0 || srcH <= 0 {
+		return
+	}
+	db := dst.Bounds()
+	x0 := cx - dstW/2
+	y0 := cy - dstH/2
+	startX := max(x0, db.Min.X)
+	endX := min(x0+dstW, db.Max.X)
+	startY := max(y0, db.Min.Y)
+	endY := min(y0+dstH, db.Max.Y)
+	if startX >= endX || startY >= endY {
+		return
+	}
+
+	scaleX := float64(srcW) / float64(dstW)
+	scaleY := float64(srcH) / float64(dstH)
+	maxSX := srcW - 1
+	maxSY := srcH - 1
+
+	for dy := startY; dy < endY; dy++ {
+		syF := (float64(dy-y0)+0.5)*scaleY - 0.5
+		if syF < 0 {
+			syF = 0
+		} else if syF > float64(maxSY) {
+			syF = float64(maxSY)
+		}
+		sy0 := int(syF)
+		sy1 := min(sy0+1, maxSY)
+		fy := syF - float64(sy0)
+		wy0 := uint32((1-fy)*256 + 0.5)
+		wy1 := 256 - wy0
+		row0 := sy0 * src.Stride
+		row1 := sy1 * src.Stride
+		dstRow := dy * dst.Stride
+
+		for dx := startX; dx < endX; dx++ {
+			relX := float64(dx-x0) + 0.5
+			if flipX {
+				relX = float64(dstW) - relX
+			}
+			sxF := relX*scaleX - 0.5
+			if sxF < 0 {
+				sxF = 0
+			} else if sxF > float64(maxSX) {
+				sxF = float64(maxSX)
+			}
+			sx0 := int(sxF)
+			sx1 := min(sx0+1, maxSX)
+			fx := sxF - float64(sx0)
+			wx0 := uint32((1-fx)*256 + 0.5)
+			wx1 := 256 - wx0
+
+			w00 := wx0 * wy0
+			w10 := wx1 * wy0
+			w01 := wx0 * wy1
+			w11 := wx1 * wy1
+
+			p00 := row0 + sx0*4
+			p10 := row0 + sx1*4
+			p01 := row1 + sx0*4
+			p11 := row1 + sx1*4
+
+			sa := (uint32(src.Pix[p00+3])*w00 + uint32(src.Pix[p10+3])*w10 + uint32(src.Pix[p01+3])*w01 + uint32(src.Pix[p11+3])*w11) >> 16
+			if sa == 0 {
+				continue
+			}
+			sr := (uint32(src.Pix[p00+0])*w00 + uint32(src.Pix[p10+0])*w10 + uint32(src.Pix[p01+0])*w01 + uint32(src.Pix[p11+0])*w11) >> 16
+			sg := (uint32(src.Pix[p00+1])*w00 + uint32(src.Pix[p10+1])*w10 + uint32(src.Pix[p01+1])*w01 + uint32(src.Pix[p11+1])*w11) >> 16
+			sbC := (uint32(src.Pix[p00+2])*w00 + uint32(src.Pix[p10+2])*w10 + uint32(src.Pix[p01+2])*w01 + uint32(src.Pix[p11+2])*w11) >> 16
+
+			di := dstRow + dx*4
+			if sa >= 255 {
+				dst.Pix[di+0] = uint8(sr)
+				dst.Pix[di+1] = uint8(sg)
+				dst.Pix[di+2] = uint8(sbC)
+				dst.Pix[di+3] = 255
+				continue
+			}
+			invA := 255 - sa
+			dst.Pix[di+0] = uint8(min(255, sr+(uint32(dst.Pix[di+0])*invA+127)/255))
+			dst.Pix[di+1] = uint8(min(255, sg+(uint32(dst.Pix[di+1])*invA+127)/255))
+			dst.Pix[di+2] = uint8(min(255, sbC+(uint32(dst.Pix[di+2])*invA+127)/255))
+			dst.Pix[di+3] = uint8(min(255, sa+(uint32(dst.Pix[di+3])*invA+127)/255))
+		}
+	}
 }
 
 // decorChoice picks a decor picture from the ground stream, weighted so grass and ferns cover more of the forest floor than its stones.
