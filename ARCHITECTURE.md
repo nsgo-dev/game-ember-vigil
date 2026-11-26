@@ -13,7 +13,7 @@ Ember Vigil is an NSGo app with one fixed-step game loop. A run is simulated hea
 | `waves.go` | The wave director: timeline, spawn ring, caps and the view it stays outside |
 | `data.go`, `data/` | Tuning YAML and its loaders: version checked, unknown fields refused, canonical round trip |
 | `art.go`, `draw.go` | Palette and procedural pixel atlas; world, lighting and effects |
-| `screens.go` | Native HUD, title, pause, level-up, results and settings views |
+| `screens.go` | Native HUD, title, pause, level-up, defeat and settings views |
 | `audio.go`, `save.go`, `strings/` | Mixer and cues; records and settings; English and Chinese strings |
 | `*_test.go` | Headless shell, run and project tests |
 
@@ -22,14 +22,14 @@ Ember Vigil is an NSGo app with one fixed-step game loop. A run is simulated hea
 - `run.go` knows nothing about NSGo views, devices, sound, storage or wall-clock time. It takes one step of controls and a fixed `dt`, and returns a snapshot and the step's events.
 - The shell turns input into controls and events into sounds, screen changes and saves. A rule never lives in a view, and a view never mutates a run.
 - Tuning lives in `data/*.yaml`, versioned and canonical, with unknown fields refused. Constants in code only name things no designer would tune.
-- `art.go` builds one atlas from the palette at startup, so the repository carries no sprite sheets.
+- `art.go` builds one atlas from the palette at startup, and the ground is painted once per run from its seed. The repository carries no sprite sheets.
 - One canvas draws the world. The HUD and menus are native views above it and read run snapshots through signals instead of polling the simulation.
 - A seed plus a list of controls replays a run. The map, spawns, offers and drops all derive from the run's streams.
 - Pin `nsgo-dev/game` and `nsgo-dev/nsgo`; upgrade both in a change of its own after the tests pass. No cgo and no hand-written C.
 
 ## Core flows
 
-**Frame.** A display frame runs zero or more fixed updates, then one `Draw` with the interpolation alpha. Each update steps the run unless a screen pauses it. HUD signals update at a lower rate so the view tree does not re-commit every frame.
+**Frame.** A display frame runs zero or more fixed updates, then one `Draw` with the interpolation alpha. Each update steps the run unless a screen pauses it. The arena canvas draws the ground, one sprite batch and the keeper's light; [the arena](docs/architecture/arena.md) owns that order. HUD signals update at a lower rate so the view tree does not re-commit every frame.
 
 **Run.** Move the keeper, spawn off-screen, chase, fire automatically, kill, drop embers, pull them in, fill the XP bar, pause on three cards, apply one, resume. At 12:00 the Hollow King arrives; defeat or death ends the run and opens the results.
 
@@ -41,10 +41,11 @@ Ember Vigil is an NSGo app with one fixed-step game loop. A run is simulated hea
 
 ## Verification
 
-Headless tests play a run from its own API: replays, movement, contact, kills, embers, level cards, defeat and three minutes of waves. `nsgotest` tests play the shell from the title into the arena, through a pause and back. `go tool nsgo check -target macos,windows,linux,web` covers builds. Frame pacing, gamepad feel, sound and the read of darkness need a manual run.
+Headless tests play a run from its own API: replays, movement, contact, kills, embers, level cards, defeat and three minutes of waves. `nsgotest` tests play the shell from the title into the arena, through a pause and back, take a level-up card and read the HUD and the defeat overlay. Canvas tests check a frame's ground and sprites, the camera's clamp and a seed's ground, and a benchmark keeps two hundred enemies inside the frame budget. `go tool nsgo check -target macos,windows,linux,web` covers builds. Frame pacing, gamepad feel, sound and the read of darkness need a manual run.
 
 ## Subjects
 
 | Document | When to read |
 | --- | --- |
 | [The run model](docs/architecture/run.md) | Changing simulation, spawning, collision or upgrades |
+| [The arena](docs/architecture/arena.md) | Changing the canvas, the camera, the light, the effects or the HUD |

@@ -12,7 +12,7 @@ Today the model runs the keeper, the starter Ember Bolt, three enemies, embers, 
 
 ## Determinism
 
-- `NewRun(seed)` derives separate streams for spawns, offers, drops, decoration and cosmetic particles.
+- `NewRun(seed)` derives separate streams for spawns, offers and drops. The shell draws the ground's decor and its particles from its own streams on the same seed, so drawing never changes a run.
 - Every iteration is over a slice, never a map. Ties break by index.
 - The run never reads the system random source, `time.Now` or map order. Cosmetic randomness uses its own stream and never changes gameplay.
 - A seed and a control list produce the same events on every platform; tests compare two runs step by step.

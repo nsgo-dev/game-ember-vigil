@@ -248,3 +248,139 @@ func TestButtonsAreTouchFriendly(t *testing.T) {
 	press(t, app, "role:button Start")
 	check("arena")
 }
+
+// TestTheHUDFollowsTheRun checks that the native HUD shows the run's clock, level, kills and starter weapon, and keeps up with them.
+func TestTheHUDFollowsTheRun(t *testing.T) {
+	app, g := startEmberVigil(t)
+	press(t, app, "role:button Start")
+
+	if got := app.Find("id:hud-timer").Text; got != "00:00" {
+		t.Fatalf("the HUD's clock reads %q at the start, want 00:00", got)
+	}
+	if got := app.Find("id:hud-level").Text; got != "Level 1" {
+		t.Fatalf("the HUD's level reads %q, want Level 1", got)
+	}
+	if got := app.Find("id:hud-kills").Text; got != "Kills 0" {
+		t.Fatalf("the HUD's kills read %q, want Kills 0", got)
+	}
+	if got := app.Find("id:hud-weapon-name").Text; got != "Ember Bolt" {
+		t.Fatalf("the HUD's weapon slot reads %q, want Ember Bolt", got)
+	}
+	app.Find("id:hud-health")
+	app.Find("id:hud-xp")
+
+	app.Advance(70 * frame)
+	want := clockText(g.run.Snapshot().Time)
+	if got := app.Find("id:hud-timer").Text; got != want || got == "00:00" {
+		t.Fatalf("the HUD's clock reads %q after a second, want %q", got, want)
+	}
+}
+
+// TestALevelUpCardIsChosenFromThePrompt checks that a level-up offers its cards as buttons, that a press takes one and that the run carries on.
+func TestALevelUpCardIsChosenFromThePrompt(t *testing.T) {
+	app, g := startEmberVigil(t)
+	press(t, app, "role:button Start")
+
+	// Exactly the XP for the next level, which the run spends on three cards on its next step.
+	g.run.xp = g.run.xpNeeded()
+	app.Advance(8 * frame)
+	if p := g.run.Snapshot().Phase; p != PhaseLevelUp {
+		t.Fatalf("the run's phase with a level's XP is %v, want PhaseLevelUp", p)
+	}
+	app.Find("id:level-up")
+	offers := g.run.Snapshot().Offers
+	if len(offers) != offerCount {
+		t.Fatalf("the level-up offered %d cards, want %d", len(offers), offerCount)
+	}
+	for _, o := range offers {
+		app.Find("role:button " + o.Name)
+	}
+
+	press(t, app, "role:button "+offers[0].Name)
+	if p := g.run.Snapshot().Phase; p != PhasePlaying {
+		t.Fatalf("the run's phase after choosing a card is %v, want PhasePlaying", p)
+	}
+	if lvl := g.run.Snapshot().Level; lvl != 2 {
+		t.Fatalf("the run's level after its first card is %d, want 2", lvl)
+	}
+	if app.Exists("id:level-up") {
+		t.Fatal("the level-up prompt stayed after a card was chosen")
+	}
+	before := g.run.Snapshot().Time
+	app.Advance(10 * frame)
+	if g.run.Snapshot().Time <= before {
+		t.Fatalf("the run lasted %v seconds after the card, want more than %v", g.run.Snapshot().Time, before)
+	}
+}
+
+// TestDefeatShowsTheOverlay checks that a dead keeper shows the minimal defeat overlay, whose Retry starts a fresh run and whose Title returns to the title screen.
+func TestDefeatShowsTheOverlay(t *testing.T) {
+	app, g := startEmberVigil(t)
+	press(t, app, "role:button Start")
+
+	first := g.run
+	g.run.keeper.health = 0
+	app.Advance(8 * frame)
+	if p := g.run.Snapshot().Phase; p != PhaseDefeat {
+		t.Fatalf("the run's phase with no health is %v, want PhaseDefeat", p)
+	}
+	app.Find("id:defeat")
+	var texts []string
+	texts = app.Texts()
+	for _, want := range []string{"Time ", "Kills ", "Level "} {
+		found := false
+		for _, got := range texts {
+			if len(got) >= len(want) && got[:len(want)] == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("the defeat overlay shows no %q line: %v", want, texts)
+		}
+	}
+
+	press(t, app, "role:button Retry")
+	if g.run == first {
+		t.Fatal("Retry kept the defeated run")
+	}
+	if p := g.run.Snapshot().Phase; p != PhasePlaying {
+		t.Fatalf("the retried run's phase is %v, want PhasePlaying", p)
+	}
+	if app.Exists("id:defeat") {
+		t.Fatal("the defeat overlay stayed after a retry")
+	}
+	app.Find("id:hud-timer")
+
+	g.run.keeper.health = 0
+	app.Advance(8 * frame)
+	press(t, app, "role:button Title")
+	if g.phase.Get() != phaseTitle {
+		t.Fatalf("the phase after Title is %v, want phaseTitle", g.phase.Get())
+	}
+	if g.run != nil {
+		t.Fatal("the run survived Title")
+	}
+	app.Find("id:title")
+}
+
+// TestTheArenaCanvasDrawsTheWorld checks that the shell's canvas draws the run's ground and its sprites.
+func TestTheArenaCanvasDrawsTheWorld(t *testing.T) {
+	app, g := startEmberVigil(t)
+	press(t, app, "role:button Start")
+
+	g.run.addEnemy(0, g.run.keeper.pos.Add(Vec2{X: 40}), 1, 1)
+	app.Advance(2 * frame)
+	ops := app.Find("id:arena").Ops
+	if sprites := countSprites(ops); sprites < 2 {
+		t.Fatalf("the canvas drew %d sprites, want at least the keeper and its enemy", sprites)
+	}
+	ground := false
+	for _, op := range ops {
+		if op.Kind == core.DrawImage && op.Image != nil && isGround(op.Image) {
+			ground = true
+		}
+	}
+	if !ground {
+		t.Fatal("the canvas drew no ground")
+	}
+}
