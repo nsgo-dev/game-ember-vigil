@@ -139,6 +139,9 @@ type arenaRenderer struct {
 	enemies []actor
 	shots   []actor
 	embers  []actor
+	halo    []actor
+	patches []PatchView
+	pulses  []PulseView
 
 	// before holds where each id was last step so a frame between steps can blend; spare is the map the next step fills, swapped in when it is done.
 	before, spare map[uint64]Vec2
@@ -188,6 +191,9 @@ func (r *arenaRenderer) startRun(seed uint64) {
 	r.enemies = r.enemies[:0]
 	r.shots = r.shots[:0]
 	r.embers = r.embers[:0]
+	r.halo = r.halo[:0]
+	r.patches = r.patches[:0]
+	r.pulses = r.pulses[:0]
 	clear(r.before)
 	clear(r.spare)
 	r.fx = effects{flash: map[uint64]float64{}}
@@ -225,6 +231,9 @@ func (r *arenaRenderer) sync(s Snapshot, events []Event, dt float64) {
 	r.trackShots(s)
 	r.before, r.spare = r.spare, r.before
 	r.trackEmbers(s)
+	r.trackHalo(s)
+	r.patches = append(r.patches[:0], s.Patches...)
+	r.pulses = append(r.pulses[:0], s.Pulses...)
 	r.stepEffects(events, dt)
 	r.emitTrails(dt)
 	r.fresh = true
@@ -265,6 +274,19 @@ func (r *arenaRenderer) trackEmbers(s Snapshot) {
 			was = r.embers[i].pos
 		}
 		r.embers[i] = actor{pos: e.Pos, was: was}
+	}
+}
+
+// trackHalo copies Lantern Halo's orbiting embers, blending between steps while the orb count stays the same.
+func (r *arenaRenderer) trackHalo(s Snapshot) {
+	same := len(r.halo) == len(s.Halo)
+	r.halo = growActors(r.halo, len(s.Halo))
+	for i, orb := range s.Halo {
+		was := orb.Pos
+		if same {
+			was = r.halo[i].pos
+		}
+		r.halo[i] = actor{pos: orb.Pos, was: was, radius: orb.Radius}
 	}
 }
 
@@ -385,15 +407,18 @@ func (r *arenaRenderer) draw(d *core.Drawing, alpha float64) {
 	}
 	ox, oy := r.origin()
 	d.DrawImageFrom(r.groundSource, ox, oy, w, h, 0, 0, w, h)
+	r.drawPatches(d, ox, oy)
 
 	r.used, r.flashing = 0, 0
 	r.addEmbers(ox, oy)
 	r.addEnemies(ox, oy)
 	r.addShots(ox, oy)
+	r.addHalo(ox, oy)
 	r.addKeeper(ox, oy)
 	r.addParticles(ox, oy)
 	r.batch = sprite.Batch{Atlas: r.art.atlas, Sprites: r.pool[:r.used]}
 	r.batch.Draw(d)
+	r.drawPulses(d, ox, oy)
 
 	r.drawLight(d, w, h)
 }
@@ -451,6 +476,50 @@ func (r *arenaRenderer) addEnemies(ox, oy float32) {
 func (r *arenaRenderer) addShots(ox, oy float32) {
 	for i := range r.shots {
 		r.add(r.art.frames.bolt, r.shots[i], ox, oy, 1, 3)
+	}
+}
+
+// addHalo adds Lantern Halo's orbiting embers around the keeper.
+func (r *arenaRenderer) addHalo(ox, oy float32) {
+	for i := range r.halo {
+		r.add(r.art.frames.halo, r.halo[i], ox, oy, 1, 3)
+	}
+}
+
+// drawPatches paints Cinder Trail's burning ground patches over the forest floor before sprites draw.
+func (r *arenaRenderer) drawPatches(d *core.Drawing, ox, oy float32) {
+	for i := range r.patches {
+		p := &r.patches[i]
+		x, y := toScreen(p.Pos, ox, oy)
+		rad := float32(p.Radius)
+		if x+rad < 0 || x-rad > viewWidth || y+rad < 0 || y-rad > viewHeight {
+			continue
+		}
+		fade := float32(math.Min(1, p.Life/0.5))
+		flicker := float32(1 + 0.06*math.Sin(r.fx.time*14+float64(p.ID)))
+		d.SetFillColor(core.RGBA(0xa3341a, 0.42*fade)).
+			BeginPath().Arc(x, y, rad*flicker, 0, 2*math.Pi, false).Fill()
+		d.SetFillColor(core.RGBA(0xff7a1a, 0.55*fade)).
+			BeginPath().Arc(x, y, rad*0.58*flicker, 0, 2*math.Pi, false).Fill()
+	}
+}
+
+// drawPulses paints Bell Toll's expanding shockwave rings over the sprites.
+func (r *arenaRenderer) drawPulses(d *core.Drawing, ox, oy float32) {
+	for i := range r.pulses {
+		p := &r.pulses[i]
+		x, y := toScreen(p.Pos, ox, oy)
+		t := float32(1 - p.Life/max(p.Max, 0.001))
+		rad := float32(p.Radius) * (0.2 + 0.8*t)
+		if x+rad < 0 || x-rad > viewWidth || y+rad < 0 || y-rad > viewHeight {
+			continue
+		}
+		alpha := float32(math.Max(0, 1-float64(t)))
+		d.SetFillColor(core.RGBA(0xffb347, 0.16*alpha)).
+			BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Fill()
+		d.SetStrokeColor(core.RGBA(0xffd166, 0.85*alpha)).
+			SetLineWidth(2).
+			BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Stroke()
 	}
 }
 
@@ -528,6 +597,32 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 	r.lantern.Radius = lanternRadius + float32(flicker)
 
 	glow := 0
+	for i := range r.halo {
+		if glow == len(r.glows) {
+			break
+		}
+		x, y := toScreen(r.halo[i].pos, ox, oy)
+		if !inView(x, y) {
+			continue
+		}
+		l := r.glows[glow]
+		glow++
+		*l = lights2d.Light{X: x, Y: y, Radius: 20, Color: core.RGBA(0xffb347, 0.75), Intensity: 0.45, Falloff: 2, Enabled: true}
+		r.lights = append(r.lights, l)
+	}
+	for i := range r.patches {
+		if glow == len(r.glows) {
+			break
+		}
+		x, y := toScreen(r.patches[i].Pos, ox, oy)
+		if !inView(x, y) {
+			continue
+		}
+		l := r.glows[glow]
+		glow++
+		*l = lights2d.Light{X: x, Y: y, Radius: float32(r.patches[i].Radius * 1.4), Color: core.RGBA(0xff7a1a, 0.6), Intensity: 0.35, Falloff: 2, Enabled: true}
+		r.lights = append(r.lights, l)
+	}
 	for i := range r.shots {
 		if glow == len(r.glows) {
 			break

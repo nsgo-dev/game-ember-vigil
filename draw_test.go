@@ -284,6 +284,41 @@ func TestEffectsStayWithinTheirCaps(t *testing.T) {
 	}
 }
 
+// TestFrameDrawsNewWeapons checks that Lantern Halo orbs, Cinder Trail patches and Bell Toll pulses render onto the canvas without mutating the run.
+func TestFrameDrawsNewWeapons(t *testing.T) {
+	r := quietRun(t)
+	for i := range r.weaponLevels {
+		r.weaponLevels[i] = 2
+	}
+	a := newTestArena(t, r, 9)
+	stepOnce(r, Controls{})
+	a.sync(r.Snapshot(), r.Events(), stepSeconds)
+
+	d := &core.Drawing{}
+	a.draw(d, 0.5)
+
+	// Keeper + 3 halo orbs = at least 4 sprites.
+	if got := countSprites(d.Ops); got < 4 {
+		t.Fatalf("frame drew %d sprites, want keeper plus Lantern Halo orbs", got)
+	}
+	hasStroke := false
+	hasArc := false
+	for _, op := range d.Ops {
+		if op.Kind == core.DrawStroke {
+			hasStroke = true
+		}
+		if op.Kind == core.DrawArc {
+			hasArc = true
+		}
+	}
+	if !hasArc {
+		t.Fatal("frame drew no arcs for Cinder Trail patches or Bell Toll pulses")
+	}
+	if !hasStroke {
+		t.Fatal("frame drew no stroke ring for Bell Toll pulse")
+	}
+}
+
 // BenchmarkArenaFrame measures a whole frame of a crowded arena: step two hundred enemies that surround the keeper, copy them for drawing, and draw them with their effects.
 func BenchmarkArenaFrame(b *testing.B) {
 	r := NewRun(11)

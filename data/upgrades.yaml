@@ -1,0 +1,57 @@
+version: 1
+weaponSlots: 4
+passiveSlots: 4
+passives:
+  - id: wick
+    name: Wick
+    stat: damage
+    description: +15% weapon damage per level.
+    amount: 0.15
+    maxLevel: 5
+  - id: oil
+    name: Oil
+    stat: cooldown
+    description: -8% weapon cooldown per level.
+    amount: 0.08
+    maxLevel: 5
+  - id: reach
+    name: Reach
+    stat: area
+    description: +12% weapon area per level.
+    amount: 0.12
+    maxLevel: 5
+  - id: step
+    name: Step
+    stat: moveSpeed
+    description: +10 move speed per level.
+    amount: 10
+    maxLevel: 5
+  - id: warmth
+    name: Warmth
+    stat: maxHealth
+    description: +20 max health per level.
+    amount: 20
+    maxLevel: 5
+  - id: mending
+    name: Mending
+    stat: regen
+    description: +0.8 health per second per level.
+    amount: 0.8
+    maxLevel: 5
+  - id: gathering
+    name: Gathering
+    stat: pickup
+    description: +14 ember pickup radius per level.
+    amount: 14
+    maxLevel: 5
+  - id: glow
+    name: Glow
+    stat: xpGain
+    description: +15% XP from embers per level.
+    amount: 0.15
+    maxLevel: 5
+healing:
+  id: ember-heal
+  name: Ember
+  description: Restore 35% of max health.
+  fraction: 0.35

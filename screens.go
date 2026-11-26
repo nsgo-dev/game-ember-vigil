@@ -9,20 +9,29 @@ import (
 
 // Colors of the native screens, which read as the arena's palette.
 var (
-	barColor    = core.RGB(0x0b0d17)
-	textColor   = core.RGB(0xf8fafc)
-	dimColor    = core.RGB(0x8a93a8)
-	panelColor  = core.RGBA(0x111827, 0.92)
-	buttonColor = core.RGB(0xc2410c)
-	healthColor = core.RGB(0xd0453a)
-	xpColor     = core.RGB(0xffb347)
-	flameColor  = core.RGB(0xff7a1a)
+	barColor     = core.RGB(0x0b0d17)
+	textColor    = core.RGB(0xf8fafc)
+	dimColor     = core.RGB(0x8a93a8)
+	panelColor   = core.RGBA(0x111827, 0.92)
+	cardColor    = core.RGBA(0x1a2234, 0.96)
+	cardBorder   = core.RGBA(0x3b4a66, 0.9)
+	buttonColor  = core.RGB(0xc2410c)
+	healthColor  = core.RGB(0xd0453a)
+	xpColor      = core.RGB(0xffb347)
+	flameColor   = core.RGB(0xff7a1a)
+	passiveColor = core.RGB(0x5b4a7f)
+	healColor    = core.RGB(0x3f6b4a)
+	pipEmpty     = core.RGBA(0x8a93a8, 0.3)
 )
 
 // buttonSide is the shortest side of a tappable button in points, and menuButtonWidth keeps a menu's buttons alike.
 const (
 	buttonSide      = 44
 	menuButtonWidth = 160
+	cardWidth       = 176
+	cardMinHeight   = 186
+	cardIconSize    = 36
+	maxHUDWeapons   = 4
 )
 
 // The HUD's sizes in points.
@@ -31,6 +40,24 @@ const (
 	meterHeight = 8
 	hudGap      = 6
 )
+
+// hudSlot is one equipped weapon shown on the HUD.
+type hudSlot struct {
+	id    string
+	name  string
+	level int
+}
+
+// hudCard is one level-up card shown in the level-up modal.
+type hudCard struct {
+	id          string
+	name        string
+	kind        string
+	description string
+	level       int
+	maxLevel    int
+	heal        bool
+}
 
 // hudState is what the native HUD shows, which the shell publishes at hudRate instead of reading the run every frame.
 type hudState struct {
@@ -43,8 +70,10 @@ type hudState struct {
 	xpNeeded  int
 	level     int
 	kills     int
-	// offers are the names of the cards a level-up offers, empty when none is open.
-	offers [offerCount]string
+	cardFocus int
+	weapons   [maxHUDWeapons]hudSlot
+	// offers are the cards a level-up offers, empty when none is open.
+	offers [offerCount]hudCard
 }
 
 // view is the game's whole screen: the arena canvas, and over it the native views of the current screen.
@@ -68,7 +97,7 @@ func (g *emberVigil) view() core.Node {
 		Children: []core.Node{
 			arena,
 			g.when(phaseArena, func() core.Node { return dynamic(g.hudView) }),
-			g.show(func() bool { return g.inRun(PhaseLevelUp) }, g.levelUp),
+			g.show(func() bool { return g.inRun(PhaseLevelUp) }, func() core.Node { return dynamic(g.levelUp) }),
 			g.show(func() bool { return g.inRun(PhaseDefeat) }, g.defeatOverlay),
 			g.when(phaseTitle, g.title),
 			g.when(phasePaused, g.paused),
@@ -100,7 +129,7 @@ func (g *emberVigil) show(when func() bool, screen func() core.Node) core.Node {
 	}
 }
 
-// hudView is the native bar over the arena: the run's clock, health and XP, its level, kills and weapon, and the pause button. Touches elsewhere reach the arena.
+// hudView is the native bar over the arena: the run's clock, health and XP, its level, kills and weapons, and the pause button. Touches elsewhere reach the arena.
 func (g *emberVigil) hudView() core.Node {
 	st := g.hud.Get()
 	health := float64(1)
@@ -140,7 +169,7 @@ func (g *emberVigil) hudView() core.Node {
 							label("hud-kills", "Kills "+strconv.Itoa(st.kills), 12, dimColor),
 						},
 					},
-					g.weaponSlot(),
+					g.weaponSlots(st.weapons),
 				},
 			},
 			button("Pause", buttonSide, g.pause),
@@ -148,36 +177,257 @@ func (g *emberVigil) hudView() core.Node {
 	}
 }
 
-// weaponSlot is the starter weapon's slot, which this milestone fills with Ember Bolt and no more.
-func (g *emberVigil) weaponSlot() core.Node {
+// weaponSlots shows the keeper's equipped weapons, keeping the starter slot identifiable as hud-weapon / hud-weapon-name.
+func (g *emberVigil) weaponSlots(slots [maxHUDWeapons]hudSlot) core.Node {
+	var children []core.Node
+	for i, slot := range slots {
+		if slot.name == "" {
+			continue
+		}
+		boxID, nameID := "hud-weapon-"+strconv.Itoa(i), "hud-weapon-name-"+strconv.Itoa(i)
+		if i == 0 {
+			boxID, nameID = "hud-weapon", "hud-weapon-name"
+		}
+		children = append(children, core.View{
+			TestID: boxID,
+			Style: core.Style{
+				Direction:    core.Row,
+				AlignItems:   core.AlignCenter,
+				Gap:          hudGap,
+				Background:   panelColor,
+				CornerRadius: 6,
+				Padding:      core.Symmetric(4, 8),
+			},
+			Children: []core.Node{
+				core.View{Style: core.Style{Width: core.Pt(10), Height: core.Pt(10), CornerRadius: 5, Background: cardAccent(slot.id, offerWeapon)}},
+				label(nameID, slot.name, 12, textColor),
+			},
+		})
+	}
+	if len(children) == 0 {
+		return core.View{}
+	}
 	return core.View{
-		TestID: "hud-weapon",
+		Style:    core.Style{Direction: core.Row, Gap: hudGap, Wrap: core.Wrap},
+		Children: children,
+	}
+}
+
+// levelUp is the three-card level-up modal: each card shows an icon, name, description and level pips, and can be chosen by tap, 1/2/3 or a gamepad button.
+func (g *emberVigil) levelUp() core.Node {
+	st := g.hud.Get()
+	var cards []core.Node
+	for i, c := range st.offers {
+		if c.name == "" {
+			continue
+		}
+		idx := i
+		focused := i == st.cardFocus
+		cards = append(cards, g.upgradeCard(idx, c, focused))
+	}
+	return panel("level-up",
+		heading("Level "+strconv.Itoa(st.level)),
+		core.View{
+			Style: core.Style{
+				Direction:      core.Row,
+				AlignItems:     core.AlignStretch,
+				JustifyContent: core.JustifyCenter,
+				Gap:            12,
+			},
+			Children: cards,
+		},
+	)
+}
+
+// upgradeCard renders one selectable level-up card button.
+func (g *emberVigil) upgradeCard(index int, c hudCard, focused bool) core.Node {
+	border := cardBorder
+	if focused {
+		border = xpColor
+	}
+	kindLabel := "PASSIVE"
+	switch c.kind {
+	case offerWeapon:
+		kindLabel = "WEAPON"
+	case offerHeal:
+		kindLabel = "HEAL"
+	}
+
+	children := []core.Node{
+		core.View{
+			Style: core.Style{
+				Direction:      core.Row,
+				AlignItems:     core.AlignCenter,
+				JustifyContent: core.JustifySpaceBetween,
+				Width:          core.Pct(100),
+			},
+			Children: []core.Node{
+				core.Text{Content: kindLabel, Style: core.Style{Color: cardAccent(c.id, c.kind), FontSize: 10, FontWeight: core.FontWeightBold}},
+				core.View{
+					Style: core.Style{
+						Background:     panelColor,
+						CornerRadius:   4,
+						Padding:        core.Symmetric(2, 6),
+						AlignItems:     core.AlignCenter,
+						JustifyContent: core.JustifyCenter,
+					},
+					Children: []core.Node{
+						core.Text{Content: strconv.Itoa(index + 1), Style: core.Style{Color: dimColor, FontSize: 10, FontWeight: core.FontWeightBold}},
+					},
+				},
+			},
+		},
+		cardIcon(c.id, c.kind),
+		core.Text{
+			TestID:  "level-up-card-name-" + strconv.Itoa(index),
+			Content: c.name,
+			Style:   core.Style{Color: textColor, FontSize: 15, FontWeight: core.FontWeightBold, TextAlign: core.TextAlignCenter},
+		},
+		core.Text{
+			TestID:  "level-up-card-desc-" + strconv.Itoa(index),
+			Content: c.description,
+			Style:   core.Style{Color: dimColor, FontSize: 12, TextAlign: core.TextAlignCenter},
+		},
+	}
+	if c.maxLevel > 0 {
+		children = append(children, levelPips("level-up-card-pips-"+strconv.Itoa(index), c.level, c.maxLevel))
+	}
+
+	return base.Button{
+		TestID:  "level-up-card-" + strconv.Itoa(index),
+		Label:   c.name,
+		OnPress: func(core.PressEvent) { g.choose(index) },
 		Style: core.Style{
-			Direction:    core.Row,
-			AlignItems:   core.AlignCenter,
-			Gap:          hudGap,
-			Background:   panelColor,
-			CornerRadius: 6,
-			Padding:      core.Symmetric(4, 8),
+			Width:          core.Pt(cardWidth),
+			MinWidth:       core.Pt(buttonSide),
+			MinHeight:      core.Pt(cardMinHeight),
+			Background:     cardColor,
+			BorderWidth:    2,
+			BorderColor:    border,
+			CornerRadius:   12,
+			Padding:        core.All(12),
+			Direction:      core.Column,
+			AlignItems:     core.AlignCenter,
+			JustifyContent: core.JustifySpaceBetween,
+			Gap:            8,
+			Active:         &core.Style{Opacity: core.Alpha(0.85)},
+		},
+		Children: children,
+	}
+}
+
+// cardIconImage is the hook where assets/icons/<id>.png will be returned once #13 and #15 embed stylized card icons.
+func cardIconImage(id string) (core.ImageSource, bool) {
+	return core.ImageSource{}, false
+}
+
+// cardIcon draws the card's embedded icon when available, or a procedural glyph badge as fallback.
+func cardIcon(id, kind string) core.Node {
+	if img, ok := cardIconImage(id); ok {
+		return core.Image{
+			Source: img,
+			Style:  core.Style{Width: core.Pt(cardIconSize), Height: core.Pt(cardIconSize)},
+		}
+	}
+	return core.View{
+		Style: core.Style{
+			Width:          core.Pt(cardIconSize),
+			Height:         core.Pt(cardIconSize),
+			CornerRadius:   10,
+			Background:     cardAccent(id, kind),
+			AlignItems:     core.AlignCenter,
+			JustifyContent: core.JustifyCenter,
 		},
 		Children: []core.Node{
-			core.View{Style: core.Style{Width: core.Pt(10), Height: core.Pt(10), CornerRadius: 5, Background: flameColor}},
-			label("hud-weapon-name", "Ember Bolt", 12, textColor),
+			core.Text{
+				Content: cardGlyph(id),
+				Style:   core.Style{Color: textColor, FontSize: 15, FontWeight: core.FontWeightBold},
+			},
 		},
 	}
 }
 
-// levelUp is the minimal level-up prompt until the full cards arrive: the three offers as buttons, which take a card and resume the run.
-func (g *emberVigil) levelUp() core.Node {
-	st := g.hud.Get()
-	children := []core.Node{heading("Level " + strconv.Itoa(st.level))}
-	for i, name := range st.offers {
-		if name == "" {
-			continue
-		}
-		children = append(children, button(name, menuButtonWidth, func() { g.choose(i) }))
+// cardAccent picks a palette color for a card's kind and id.
+func cardAccent(id, kind string) core.Color {
+	switch id {
+	case "ember-bolt":
+		return flameColor
+	case "lantern-halo":
+		return xpColor
+	case "cinder-trail":
+		return healthColor
+	case "bell-toll":
+		return core.RGB(0x8a93a8)
 	}
-	return panel("level-up", children...)
+	switch kind {
+	case offerWeapon:
+		return flameColor
+	case offerHeal:
+		return healColor
+	default:
+		return passiveColor
+	}
+}
+
+// cardGlyph returns a short fallback symbol for a card until stylized icon art lands.
+func cardGlyph(id string) string {
+	switch id {
+	case "ember-bolt":
+		return "EB"
+	case "lantern-halo":
+		return "LH"
+	case "cinder-trail":
+		return "CT"
+	case "bell-toll":
+		return "BT"
+	case "wick":
+		return "WK"
+	case "oil":
+		return "OL"
+	case "reach":
+		return "RC"
+	case "step":
+		return "ST"
+	case "warmth":
+		return "WM"
+	case "mending":
+		return "MD"
+	case "gathering":
+		return "GT"
+	case "glow":
+		return "GL"
+	case "ember-heal":
+		return "+"
+	default:
+		return "*"
+	}
+}
+
+// levelPips draws maxLevel dots showing owned levels, the incoming level and remaining levels.
+func levelPips(id string, nextLevel, maxLevel int) core.Node {
+	pips := make([]core.Node, 0, maxLevel)
+	for i := range maxLevel {
+		color := pipEmpty
+		switch {
+		case i < nextLevel-1:
+			color = flameColor
+		case i == nextLevel-1:
+			color = xpColor
+		}
+		pips = append(pips, core.View{
+			Style: core.Style{
+				Width:        core.Pt(8),
+				Height:       core.Pt(8),
+				CornerRadius: 4,
+				Background:   color,
+			},
+		})
+	}
+	return core.View{
+		TestID:   id,
+		Style:    core.Style{Direction: core.Row, Gap: 5, AlignItems: core.AlignCenter},
+		Children: pips,
+	}
 }
 
 // defeatOverlay is the minimal end of a run until the full results screen arrives: what the run came to, and the two ways on.
