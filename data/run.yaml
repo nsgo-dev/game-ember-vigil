@@ -15,5 +15,5 @@ embers:
   magnetSpeed: 220
   value: 1
 level:
-  first: 5
+  first: 4
   step: 4
