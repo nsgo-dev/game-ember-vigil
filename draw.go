@@ -11,34 +11,40 @@ import (
 	"github.com/nsgo-dev/nsgo/core"
 )
 
-// The arena's look: how fast its camera catches the keeper, how far the lantern reaches into the dark, and how much the frame may shake.
+// The arena's look: how fast its camera catches the keeper, how far the lantern reaches into the moonlit twilight, and how much the frame may shake.
 const (
-	cameraEase      = 8.0
-	lanternRadius   = 110
-	lanternFalloff  = 2.0
-	ambientDarkness = 0.62
-	shakePixels     = 3.0
+	cameraEase       = 8.0
+	lanternRadius    = 190
+	lanternFalloff   = 1.3
+	lanternIntensity = 0.72
+	ambientDarkness  = 0.26
+	shakePixels      = 3.0
 )
 
-// The arena's effect limits: how long a hit flashes, how long a puff lives, and how many particles and glow lights one frame may hold, so a crowd never costs the frame budget.
+// The arena's effect limits: how long flashes, puffs and flourishes live, and how many particles and glow lights one frame may hold, so a crowd never costs the frame budget.
 const (
-	flashSeconds  = 0.1
-	puffSeconds   = 0.45
-	sparkSeconds  = 0.3
-	trailSeconds  = 0.35
-	maxParticles  = 240
-	maxGlowLights = 24
-	emberTrail    = 0.03
+	flashSeconds          = 0.1
+	puffSeconds           = 0.45
+	sparkSeconds          = 0.3
+	trailSeconds          = 0.35
+	levelFlashSeconds     = 0.55
+	damageVignetteSeconds = 0.45
+	maxParticles          = 240
+	maxGlowLights         = 24
+	emberTrail            = 0.03
 )
 
 // viewMargin is how far outside the canvas a sprite may sit and still draw, which keeps a body half in view whole.
 const viewMargin = 40
 
-// arenaColor is what the canvas shows behind the ground and the darkness.
-var arenaColor = core.RGB(0x0b0d17)
+// arenaColor is what the canvas shows behind the ground and the twilight overlay.
+var arenaColor = core.RGB(0x1b2233)
 
-// hitColor is the colour a struck enemy flashes.
-var hitColor = core.RGB(0xffd9a0)
+// ambientTint is the moonlit twilight tint laid over the arena before point lights brighten it.
+var ambientTint = core.RGBA(0x0c1222, ambientDarkness)
+
+// hitColor is the warm bright colour a struck enemy flashes.
+var hitColor = core.RGB(0xfff1d6)
 
 // The enemy kinds the arena draws, which art.frames holds a picture for each of.
 const (
@@ -133,14 +139,18 @@ const (
 	particleTrail
 )
 
-// effects are the arena's short-lived looks: hit flashes, death puffs, ember trails and the screen's shake. Every list is capped, so a crowd cannot cost a frame.
+// effects are the arena's short-lived looks: hit flashes, death puffs, ember trails, level-up flourish, damage vignette and the screen's shake. Every list is capped, so a crowd cannot cost a frame.
 type effects struct {
 	flash     map[uint64]float64
 	particles []particle
 	// shake is how hard the frame shakes, from 0 to 1, and shakeX and shakeY where it moves the camera this frame.
 	shake          float64
 	shakeX, shakeY float64
-	time           float64
+	// damageVignette is the crimson screen-edge flash intensity [0, 1] when the keeper takes damage.
+	damageVignette float64
+	// levelFlash counts down the expanding golden level-up ring around the keeper.
+	levelFlash float64
+	time       float64
 }
 
 // arenaRenderer draws the run the shell steps: the ground painted once per run, one sprite batch for everything alive, the effects above them and the lantern's light over it all. It copies each snapshot, since a run reuses its buffers, and never changes the run.
@@ -160,6 +170,10 @@ type arenaRenderer struct {
 	seenKeeper bool
 	// invuln is how much of the keeper's invulnerability is left, which the keeper blinks through.
 	invuln float64
+	// lastHealth and maxHealth track keeper HP across steps for damage vignette and low-health cues.
+	lastHealth float64
+	maxHealth  float64
+	seenHealth bool
 
 	keeper     actor
 	enemies    []actor
@@ -184,6 +198,7 @@ type arenaRenderer struct {
 
 	fx           effects
 	shakeEnabled bool
+	quality      qualityProfile
 	cosmetics    *random.Stream
 
 	// fresh is whether a step arrived since the last frame, which a paused run does not do: a frame between steps blends, a frame without a step holds still.
@@ -212,15 +227,16 @@ func newArenaRenderer(a *art) *arenaRenderer {
 		spare:             map[uint64]prevState{},
 		keeperFacingRight: true,
 		shakeEnabled:      true,
+		quality:           defaultQualityProfile(),
 		cosmetics:         random.NewStreams(0).Stream("cosmetics"),
 		fx:                effects{flash: map[uint64]float64{}},
-		lantern:           lights2d.NewLight(0, 0, lanternRadius, core.RGB(0xffb347)),
+		lantern:           lights2d.NewLight(0, 0, lanternRadius, core.RGB(0xffb85c)),
 	}
 	if a != nil && a.sheets.keeper.loaded {
 		r.keeperAnim = a.sheets.keeper.idle
 	}
 	r.lantern.Falloff = lanternFalloff
-	r.lantern.Intensity = 0.5
+	r.lantern.Intensity = lanternIntensity
 	for range maxGlowLights {
 		r.glows = append(r.glows, lights2d.NewLight(0, 0, 0, core.RGB(0xffffff)))
 	}
@@ -261,6 +277,9 @@ func (r *arenaRenderer) startRun(seed uint64) {
 	r.fresh = false
 	r.started, r.seenKeeper = false, false
 	r.invuln = 0
+	r.lastHealth = 0
+	r.maxHealth = 0
+	r.seenHealth = false
 	r.cosmetics = random.NewStreams(seed).Stream("cosmetics")
 }
 
@@ -285,6 +304,10 @@ func (r *arenaRenderer) sync(s Snapshot, events []Event, dt float64) {
 	}
 	r.cam.follow(s.Keeper, r.arena, dt)
 	r.invuln = s.Invulnerable
+	keeperDamaged := r.seenHealth && s.Health < r.lastHealth-1e-6
+	r.lastHealth = s.Health
+	r.maxHealth = s.MaxHealth
+	r.seenHealth = true
 	clear(r.spare)
 	r.trackKeeper(s)
 	r.trackEnemies(s)
@@ -302,7 +325,7 @@ func (r *arenaRenderer) sync(s Snapshot, events []Event, dt float64) {
 		r.animTime += stepDur
 		r.stepKeeperAnimation(stepDur)
 	}
-	r.stepEffects(events, dt)
+	r.stepEffects(events, keeperDamaged, dt)
 	r.emitTrails(dt)
 	r.fresh = true
 }
@@ -450,8 +473,19 @@ func (r *arenaRenderer) setShakeEnabled(enabled bool) {
 	}
 }
 
-// stepEffects moves the particles, fades the flashes and shakes the frame, then adds what this step's events caused.
-func (r *arenaRenderer) stepEffects(events []Event, dt float64) {
+// setQuality applies a resolved quality profile immediately, trimming active particles if over the new cap.
+func (r *arenaRenderer) setQuality(p qualityProfile) {
+	if p.maxParticles <= 0 {
+		p = defaultQualityProfile()
+	}
+	r.quality = p
+	if len(r.fx.particles) > p.maxParticles {
+		r.fx.particles = r.fx.particles[:p.maxParticles]
+	}
+}
+
+// stepEffects moves the particles, fades the flashes, level-up flourish and damage vignette, shakes the frame, then adds what this step's events caused.
+func (r *arenaRenderer) stepEffects(events []Event, keeperDamaged bool, dt float64) {
 	fx := &r.fx
 	fx.time += dt
 	for i := 0; i < len(fx.particles); {
@@ -474,9 +508,15 @@ func (r *arenaRenderer) stepEffects(events []Event, dt float64) {
 			fx.flash[id] = left
 		}
 	}
-	if r.shakeEnabled {
+	if fx.damageVignette > 0 && dt > 0 {
+		fx.damageVignette = math.Max(0, fx.damageVignette-dt/damageVignetteSeconds)
+	}
+	if fx.levelFlash > 0 && dt > 0 {
+		fx.levelFlash = math.Max(0, fx.levelFlash-dt)
+	}
+	if r.shakeEnabled && r.quality.shakeScale > 0 {
 		fx.shake = math.Max(0, fx.shake-2.5*dt)
-		amp := shakePixels * fx.shake * fx.shake
+		amp := shakePixels * r.quality.shakeScale * fx.shake * fx.shake
 		fx.shakeX = amp * math.Sin(fx.time*97)
 		fx.shakeY = amp * math.Cos(fx.time*131)
 	} else {
@@ -485,10 +525,22 @@ func (r *arenaRenderer) stepEffects(events []Event, dt float64) {
 		fx.shakeY = 0
 	}
 
+	if keeperDamaged {
+		fx.damageVignette = 1.0
+		if r.shakeEnabled {
+			fx.shake = math.Min(1, fx.shake+0.45)
+		}
+	}
+
+	hitSparks := 0
 	for _, e := range events {
 		switch e.Kind {
 		case EventHit:
 			fx.flash[e.ID] = flashSeconds
+			if r.quality.hitSparks && hitSparks < 6 {
+				r.burst(e.Pos, particleSpark, 1, 36, sparkSeconds*0.7)
+				hitSparks++
+			}
 		case EventKill:
 			r.burst(e.Pos, particlePuff, 4, 22, puffSeconds)
 			if r.shakeEnabled {
@@ -496,6 +548,12 @@ func (r *arenaRenderer) stepEffects(events []Event, dt float64) {
 			}
 		case EventEmber:
 			r.burst(e.Pos, particleSpark, 2, 30, sparkSeconds)
+		case EventLevelUp:
+			fx.levelFlash = levelFlashSeconds
+			r.burst(r.keeper.pos, particleSpark, 16, 62, sparkSeconds*1.4)
+			if r.shakeEnabled {
+				fx.shake = math.Min(1, fx.shake+0.25)
+			}
 		case EventBossSpawn:
 			r.burst(e.Pos, particlePuff, 14, 48, puffSeconds*1.3)
 			r.burst(e.Pos, particleSpark, 10, 56, sparkSeconds*1.4)
@@ -513,6 +571,7 @@ func (r *arenaRenderer) stepEffects(events []Event, dt float64) {
 				fx.shake = 0.85
 			}
 		case EventDefeat:
+			fx.damageVignette = 1.0
 			if r.shakeEnabled {
 				fx.shake = 1
 			}
@@ -522,11 +581,12 @@ func (r *arenaRenderer) stepEffects(events []Event, dt float64) {
 
 // emitTrails now and then leaves a trail behind an ember on the ground, purely for the eye: the cosmetic stream decides, never the run.
 func (r *arenaRenderer) emitTrails(dt float64) {
-	if dt <= 0 {
+	if dt <= 0 || !r.quality.emberTrails {
 		return
 	}
+	capParticles := r.quality.maxParticles
 	for i := range r.embers {
-		if len(r.fx.particles) >= maxParticles {
+		if len(r.fx.particles) >= capParticles {
 			return
 		}
 		if !r.cosmetics.Chance(emberTrail) {
@@ -542,10 +602,12 @@ func (r *arenaRenderer) emitTrails(dt float64) {
 	}
 }
 
-// burst scatters n particles of kind from pos, each in a direction the cosmetic stream picks.
+// burst scatters n particles of kind from pos, scaled by the active quality preset, each in a direction the cosmetic stream picks.
 func (r *arenaRenderer) burst(pos Vec2, kind, n int, speed, life float64) {
-	for range n {
-		if len(r.fx.particles) >= maxParticles {
+	scaled := max(1, int(math.Round(float64(n)*r.quality.particleScale)))
+	capParticles := r.quality.maxParticles
+	for range scaled {
+		if len(r.fx.particles) >= capParticles {
 			return
 		}
 		dir := Vec2{r.cosmetics.Range(-1, 1), r.cosmetics.Range(-1, 1)}.Normalized()
@@ -602,8 +664,10 @@ func (r *arenaRenderer) draw(d *core.Drawing, alpha float64) {
 	}
 	d.SetImageSmoothing(false)
 	r.drawPulses(d, ox, oy)
+	r.drawLevelFlourish(d, ox, oy)
 
 	r.drawLight(d, w, h)
+	r.drawDamageVignette(d, w, h)
 }
 
 // spriteFlipX reports whether a sprite facing right (facingRight=true) or left (facingRight=false)
@@ -779,31 +843,42 @@ func (r *arenaRenderer) drawBossTelegraph(d *core.Drawing, ox, oy float32) {
 	}
 	x, y := toScreen(b.Pos, ox, oy)
 	p := float32(min(max(b.TelegraphProgress, 0), 1))
-	pulse := float32(0.45 + 0.45*p)
+	pulse := float32(0.5 + 0.45*p)
+	flash := float32(0.85 + 0.15*math.Sin(r.fx.time*26))
 	switch b.Telegraph {
 	case "charge":
 		end := b.Pos.Add(b.TelegraphDir.Scale(b.TelegraphLength))
 		ex, ey := toScreen(end, ox, oy)
-		d.SetStrokeColor(core.RGBA(0xa3341a, 0.35+0.35*p)).
-			SetLineWidth(float32(b.Radius*1.4)).
+		d.SetStrokeColor(core.RGBA(0xa3341a, (0.35+0.38*p)*flash)).
+			SetLineWidth(float32(b.Radius*1.5)).
 			BeginPath().MoveTo(x, y).LineTo(ex, ey).Stroke()
-		d.SetStrokeColor(core.RGBA(0xffd166, pulse)).
-			SetLineWidth(2).
+		d.SetStrokeColor(core.RGBA(0xffd166, pulse*flash)).
+			SetLineWidth(2.5).
 			BeginPath().MoveTo(x, y).LineTo(ex, ey).Stroke()
+		d.SetStrokeColor(core.RGBA(0xfff1d6, 0.7*p)).
+			SetLineWidth(1.5).
+			BeginPath().Arc(x, y, float32(b.Radius)*(1.15+0.25*p), 0, 2*math.Pi, false).Stroke()
 	case "ring":
-		rad := float32(b.TelegraphLength) * (0.45 + 0.55*p)
-		d.SetFillColor(core.RGBA(0xa3341a, 0.14*pulse)).
+		outer := float32(b.TelegraphLength)
+		rad := outer * (0.35 + 0.65*p)
+		d.SetFillColor(core.RGBA(0xa3341a, 0.16*pulse)).
 			BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Fill()
-		d.SetStrokeColor(core.RGBA(0xd7dce8, pulse)).
-			SetLineWidth(2).
+		d.SetStrokeColor(core.RGBA(0xa3341a, 0.45*pulse)).
+			SetLineWidth(1.5).
+			BeginPath().Arc(x, y, outer, 0, 2*math.Pi, false).Stroke()
+		d.SetStrokeColor(core.RGBA(0xfff1d6, pulse*flash)).
+			SetLineWidth(2.2).
 			BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Stroke()
 	case "summon":
 		rad := float32(b.TelegraphLength)
-		d.SetFillColor(core.RGBA(0x5b4a7f, 0.2*pulse)).
+		d.SetFillColor(core.RGBA(0x5b4a7f, 0.24*pulse)).
 			BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Fill()
-		d.SetStrokeColor(core.RGBA(0xffb347, pulse)).
-			SetLineWidth(2).
+		d.SetStrokeColor(core.RGBA(0xffb347, pulse*flash)).
+			SetLineWidth(2.2).
 			BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Stroke()
+		d.SetStrokeColor(core.RGBA(0xffd166, 0.65*p)).
+			SetLineWidth(1.5).
+			BeginPath().Arc(x, y, rad*(0.3+0.7*p), 0, 2*math.Pi, false).Stroke()
 	}
 }
 
@@ -951,18 +1026,64 @@ func (r *arenaRenderer) flasher(left float64) *sprite.Effect {
 	return e
 }
 
-// drawLight lays the darkness over the frame and adds the lantern's light and the glow of shots and embers on top of it.
+// drawLevelFlourish paints an expanding golden ring around the keeper on level-up.
+func (r *arenaRenderer) drawLevelFlourish(d *core.Drawing, ox, oy float32) {
+	if r.fx.levelFlash <= 0 {
+		return
+	}
+	t := float32(1 - r.fx.levelFlash/levelFlashSeconds)
+	alpha := float32(math.Max(0, 1-float64(t)))
+	x, y := toScreen(r.keeper.pos, ox, oy)
+	rad := 14 + 54*t
+	d.SetFillColor(core.RGBA(0xffd166, 0.18*alpha)).
+		BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Fill()
+	d.SetStrokeColor(core.RGBA(0xfff1d6, 0.9*alpha)).
+		SetLineWidth(2.5).
+		BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Stroke()
+}
+
+// drawDamageVignette paints a crimson screen-edge vignette when the keeper takes damage
+// (and a subtle low-health pulse when health drops to 25% or below).
+func (r *arenaRenderer) drawDamageVignette(d *core.Drawing, w, h float32) {
+	alpha := float32(0.46 * r.fx.damageVignette)
+	if r.quality.preset.Effects && r.maxHealth > 0 && r.lastHealth > 0 && r.lastHealth/r.maxHealth <= 0.25 {
+		pulse := float32(0.10 + 0.08*math.Sin(r.fx.time*6))
+		if pulse > alpha {
+			alpha = pulse
+		}
+	}
+	if alpha <= 0.005 {
+		return
+	}
+	cx, cy := w/2, h/2
+	inner := float32(math.Min(float64(w), float64(h))) * 0.34
+	outer := float32(math.Hypot(float64(cx), float64(cy)))
+	grad := core.CanvasRadial(cx, cy, inner, cx, cy, outer,
+		core.GradientStop{Offset: 0, Color: core.RGBA(0xb81d24, 0)},
+		core.GradientStop{Offset: 0.65, Color: core.RGBA(0xb81d24, alpha*0.42)},
+		core.GradientStop{Offset: 1, Color: core.RGBA(0x8c1018, alpha)},
+	)
+	d.Save()
+	d.SetFillGradient(grad)
+	d.FillRect(0, 0, w, h)
+	d.Restore()
+}
+
+// drawLight lays the moonlit twilight tint over the frame and adds the lantern's warm light and the glow of shots and embers on top of it.
 func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 	ox, oy := r.origin()
 	r.lights = append(r.lights[:0], r.lantern)
 	lx, ly := toScreen(r.keeper.pos, ox, oy)
-	flicker := 2.5*math.Sin(r.fx.time*9) + 1.2*math.Sin(r.fx.time*23.7)
+	flicker := 3.0*math.Sin(r.fx.time*9) + 1.4*math.Sin(r.fx.time*23.7)
 	r.lantern.X, r.lantern.Y = lx, ly
 	r.lantern.Radius = lanternRadius + float32(flicker)
+	r.lantern.Falloff = lanternFalloff
+	r.lantern.Intensity = lanternIntensity
 
+	glowLimit := min(r.quality.maxGlowLights, len(r.glows))
 	glow := 0
 	for i := range r.halo {
-		if glow == len(r.glows) {
+		if glow >= glowLimit {
 			break
 		}
 		x, y := toScreen(r.halo[i].pos, ox, oy)
@@ -971,11 +1092,11 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 		}
 		l := r.glows[glow]
 		glow++
-		*l = lights2d.Light{X: x, Y: y, Radius: 20, Color: core.RGBA(0xffb347, 0.75), Intensity: 0.45, Falloff: 2, Enabled: true}
+		*l = lights2d.Light{X: x, Y: y, Radius: 24, Color: core.RGBA(0xffb347, 0.78), Intensity: 0.5, Falloff: 1.6, Enabled: true}
 		r.lights = append(r.lights, l)
 	}
 	for i := range r.patches {
-		if glow == len(r.glows) {
+		if glow >= glowLimit {
 			break
 		}
 		x, y := toScreen(r.patches[i].Pos, ox, oy)
@@ -984,11 +1105,11 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 		}
 		l := r.glows[glow]
 		glow++
-		*l = lights2d.Light{X: x, Y: y, Radius: float32(r.patches[i].Radius * 1.4), Color: core.RGBA(0xff7a1a, 0.6), Intensity: 0.35, Falloff: 2, Enabled: true}
+		*l = lights2d.Light{X: x, Y: y, Radius: float32(r.patches[i].Radius * 1.45), Color: core.RGBA(0xff7a1a, 0.65), Intensity: 0.42, Falloff: 1.6, Enabled: true}
 		r.lights = append(r.lights, l)
 	}
 	for i := range r.shots {
-		if glow == len(r.glows) {
+		if glow >= glowLimit {
 			break
 		}
 		x, y := toScreen(r.shots[i].pos, ox, oy)
@@ -997,11 +1118,11 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 		}
 		l := r.glows[glow]
 		glow++
-		*l = lights2d.Light{X: x, Y: y, Radius: 16, Color: core.RGBA(0xffb347, 0.7), Intensity: 0.4, Falloff: 2, Enabled: true}
+		*l = lights2d.Light{X: x, Y: y, Radius: 18, Color: core.RGBA(0xffb347, 0.75), Intensity: 0.45, Falloff: 1.6, Enabled: true}
 		r.lights = append(r.lights, l)
 	}
 	for i := range r.pickups {
-		if glow == len(r.glows) {
+		if glow >= glowLimit {
 			break
 		}
 		x, y := toScreen(r.pickups[i].pos, ox, oy)
@@ -1010,11 +1131,11 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 		}
 		l := r.glows[glow]
 		glow++
-		*l = lights2d.Light{X: x, Y: y, Radius: 24, Color: core.RGBA(0x3f6b4a, 0.8), Intensity: 0.5, Falloff: 2, Enabled: true}
+		*l = lights2d.Light{X: x, Y: y, Radius: 28, Color: core.RGBA(0x52a868, 0.82), Intensity: 0.55, Falloff: 1.5, Enabled: true}
 		r.lights = append(r.lights, l)
 	}
 	for i := range r.enemyShots {
-		if glow == len(r.glows) {
+		if glow >= glowLimit {
 			break
 		}
 		x, y := toScreen(r.enemyShots[i].pos, ox, oy)
@@ -1023,15 +1144,15 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 		}
 		l := r.glows[glow]
 		glow++
-		c := core.RGBA(0xa3341a, 0.7)
+		c := core.RGBA(0xd6482a, 0.75)
 		if r.enemyShots[i].kind == int(enemyShotBone) {
-			c = core.RGBA(0xd7dce8, 0.65)
+			c = core.RGBA(0xd7dce8, 0.7)
 		}
-		*l = lights2d.Light{X: x, Y: y, Radius: 14, Color: c, Intensity: 0.35, Falloff: 2, Enabled: true}
+		*l = lights2d.Light{X: x, Y: y, Radius: 16, Color: c, Intensity: 0.42, Falloff: 1.6, Enabled: true}
 		r.lights = append(r.lights, l)
 	}
 	for i := range r.embers {
-		if glow == len(r.glows) {
+		if glow >= glowLimit {
 			break
 		}
 		x, y := toScreen(r.embers[i].pos, ox, oy)
@@ -1040,14 +1161,15 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 		}
 		l := r.glows[glow]
 		glow++
-		*l = lights2d.Light{X: x, Y: y, Radius: 12, Color: core.RGBA(0xffd166, 0.55), Intensity: 0.35, Falloff: 2, Enabled: true}
+		*l = lights2d.Light{X: x, Y: y, Radius: 14, Color: core.RGBA(0xffd166, 0.6), Intensity: 0.38, Falloff: 1.7, Enabled: true}
 		r.lights = append(r.lights, l)
 	}
 
 	r.scene = lights2d.Scene{
-		Ambient:        core.RGBA(0x05060c, ambientDarkness),
+		Ambient:        ambientTint,
 		Lights:         r.lights,
-		DisableShadows: true,
+		LightComposite: core.CompositeScreen,
+		DisableShadows: !r.quality.shadows,
 	}
 	r.scene.Draw(d, core.Bounds{Size: core.Size{Width: core.Points(w), Height: core.Points(h)}})
 }

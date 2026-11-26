@@ -12,7 +12,7 @@ Ember Vigil is an NSGo app with one fixed-step game loop. A run is simulated hea
 | `upgrades.go` | The upgrade pool, three-card offers and the derived stat block |
 | `waves.go` | The wave director: timeline, spawn ring, caps and the view it stays outside |
 | `data.go`, `data/` | Tuning YAML and its loaders: version checked, unknown fields refused, canonical round trip |
-| `art.go`, `draw.go` | Palette, embedded sprite-sheet atlases with procedural fallback; world, lighting and effects |
+| `art.go`, `draw.go`, `quality.go` | Palette, embedded sprite-sheet atlases with procedural fallback; world, lighting, effects and quality presets |
 | `screens.go` | Native HUD, title, pause, level-up, defeat and settings views |
 | `audio.go`, `save.go`, `strings/` | Mixer and cues; records and settings; English and Chinese strings |
 | `*_test.go` | Headless shell, run and project tests |

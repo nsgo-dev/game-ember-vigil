@@ -66,4 +66,4 @@ go tool nsgo check -target macos,windows,linux,web
 
 ## 许可证
 
-Ember Vigil 以 [MIT 许可证](LICENSE)发布。
+Ember Vigil 以 [MIT 许可证](LICENSE)发布。占位音频来自 `nsgo-dev/game` 占位素材包（Placeholder art and sound: NSGo Game contributors, CC0）。

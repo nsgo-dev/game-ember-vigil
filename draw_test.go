@@ -7,6 +7,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/nsgo-dev/game/packages/game/quality"
 	"github.com/nsgo-dev/nsgo/core"
 )
 
@@ -278,7 +279,7 @@ func TestEffectsStayWithinTheirCaps(t *testing.T) {
 	}
 	// The flashes only hold the enemies struck this step, and fade.
 	for range 20 {
-		a.stepEffects(nil, stepSeconds)
+		a.stepEffects(nil, false, stepSeconds)
 	}
 	if len(a.fx.flash) != 0 {
 		t.Fatalf("%d flashes outlived the flash's length", len(a.fx.flash))
@@ -665,6 +666,131 @@ func TestUpgradeCardIconsLoadAndFallback(t *testing.T) {
 	}
 }
 
+// TestLightingReadabilityAndGroundContrast verifies the moonlit twilight lighting parameters
+// and procedural forest floor brightness so the arena stays readable across the entire viewport.
+func TestLightingReadabilityAndGroundContrast(t *testing.T) {
+	if ambientDarkness < 0.20 || ambientDarkness > 0.32 {
+		t.Fatalf("ambientDarkness = %v, want in [0.20, 0.32] for moonlit readability", ambientDarkness)
+	}
+	if lanternRadius < 170 || lanternRadius > 210 {
+		t.Fatalf("lanternRadius = %v, want in [170, 210]", lanternRadius)
+	}
+	if lanternFalloff < 1.1 || lanternFalloff > 1.5 {
+		t.Fatalf("lanternFalloff = %v, want in [1.1, 1.5]", lanternFalloff)
+	}
+	if lanternIntensity < 0.65 {
+		t.Fatalf("lanternIntensity = %v, want >= 0.65", lanternIntensity)
+	}
+
+	// Ground base soil should have clearly visible luminance (not near-black).
+	r, g, b, _ := groundSoilBase.Components()
+	luma := 0.2126*r + 0.7152*g + 0.0722*b
+	if luma < 0.16 {
+		t.Fatalf("groundSoilBase luminance = %.3f, want >= 0.16 so ground reads clearly", luma)
+	}
+}
+
+// TestDamageVignetteLevelFlourishAndShakeSetting checks keeper damage vignette rendering,
+// level-up flourish sparks/ring, and strict adherence to the screen shake toggle.
+func TestDamageVignetteLevelFlourishAndShakeSetting(t *testing.T) {
+	a := newArenaRenderer(newArt())
+	a.startRun(17)
+	arena := Vec2{X: 1920, Y: 1280}
+	keeper := Vec2{X: 960, Y: 640}
+
+	// Initial step establishes baseline health.
+	a.sync(Snapshot{Phase: PhasePlaying, Arena: arena, Keeper: keeper, Health: 100, MaxHealth: 100}, nil, stepSeconds)
+	if a.fx.damageVignette != 0 {
+		t.Fatalf("initial damageVignette = %v, want 0", a.fx.damageVignette)
+	}
+
+	// Taking damage triggers damage vignette and shake.
+	a.sync(Snapshot{Phase: PhasePlaying, Arena: arena, Keeper: keeper, Health: 85, MaxHealth: 100}, []Event{{Kind: EventHit, ID: 1}}, stepSeconds)
+	if a.fx.damageVignette < 0.99 {
+		t.Fatalf("damageVignette after keeper damage = %v, want 1.0", a.fx.damageVignette)
+	}
+	if a.fx.shake <= 0 {
+		t.Fatal("keeper damage did not trigger screen shake when enabled")
+	}
+
+	d := &core.Drawing{}
+	a.draw(d, 1)
+	gradients := 0
+	for _, op := range d.Ops {
+		if op.Kind == core.DrawFillGradient {
+			gradients++
+		}
+	}
+	// At least lantern light + damage vignette radial gradient.
+	if gradients < 2 {
+		t.Fatalf("drew %d radial gradients on damaged frame, want >= 2 (lantern + damage vignette)", gradients)
+	}
+
+	// Level-up triggers expanding flourish ring and golden sparks.
+	a.sync(Snapshot{Phase: PhaseLevelUp, Arena: arena, Keeper: keeper, Health: 85, MaxHealth: 100}, []Event{{Kind: EventLevelUp}}, stepSeconds)
+	if a.fx.levelFlash <= 0 {
+		t.Fatal("EventLevelUp did not start levelFlash flourish")
+	}
+	if len(a.fx.particles) == 0 {
+		t.Fatal("EventLevelUp emitted no golden spark particles")
+	}
+
+	// Disabling screen shake clears and suppresses all shake impulses.
+	a.setShakeEnabled(false)
+	a.sync(Snapshot{Phase: PhasePlaying, Arena: arena, Keeper: keeper, Health: 70, MaxHealth: 100}, []Event{{Kind: EventBossSpawn, Pos: keeper}}, stepSeconds)
+	if a.fx.shake != 0 || a.fx.shakeX != 0 || a.fx.shakeY != 0 {
+		t.Fatalf("shake stayed active while disabled: shake=%v (%v,%v)", a.fx.shake, a.fx.shakeX, a.fx.shakeY)
+	}
+
+	// Vignette fades cleanly to zero over time.
+	for range 60 {
+		a.stepEffects(nil, false, stepSeconds)
+	}
+	if a.fx.damageVignette != 0 {
+		t.Fatalf("damageVignette = %v after 1s, want 0", a.fx.damageVignette)
+	}
+}
+
+// TestQualityLimitsParticlesAndGlowLights verifies Low quality enforces tighter particle
+// and glow-light caps than High quality.
+func TestQualityLimitsParticlesAndGlowLights(t *testing.T) {
+	cfg := emberQualityConfig()
+	low := qualityProfileFor(quality.Low, cfg.Presets.For(quality.Low))
+	high := qualityProfileFor(quality.High, cfg.Presets.For(quality.High))
+
+	a := newArenaRenderer(newArt())
+	a.startRun(23)
+	a.setQuality(low)
+
+	arena := Vec2{X: 1920, Y: 1280}
+	keeper := Vec2{X: 960, Y: 640}
+	embers := make([]EmberView, 40)
+	events := make([]Event, 120)
+	for i := range embers {
+		embers[i] = EmberView{Pos: keeper.Add(Vec2{X: float64(i%8) * 12, Y: float64(i/8) * 12})}
+	}
+	for i := range events {
+		events[i] = Event{Kind: EventKill, ID: uint64(i + 1), Pos: keeper}
+	}
+	a.sync(Snapshot{Phase: PhasePlaying, Arena: arena, Keeper: keeper, Embers: embers}, events, stepSeconds)
+	if len(a.fx.particles) > low.maxParticles {
+		t.Fatalf("low quality kept %d particles, above cap %d", len(a.fx.particles), low.maxParticles)
+	}
+
+	d := &core.Drawing{}
+	a.draw(d, 1)
+	if got := len(a.lights); got > 1+low.maxGlowLights {
+		t.Fatalf("low quality emitted %d lights, above 1 lantern + %d glows", got, low.maxGlowLights)
+	}
+
+	a.setQuality(high)
+	d.Ops = d.Ops[:0]
+	a.draw(d, 1)
+	if got := len(a.lights); got <= 1+low.maxGlowLights {
+		t.Fatalf("high quality emitted %d lights, want more than low cap (%d)", got, 1+low.maxGlowLights)
+	}
+}
+
 // BenchmarkArenaFrame measures a whole frame of a crowded arena: step two hundred enemies that surround the keeper, copy them for drawing, and draw them with their effects.
 func BenchmarkArenaFrame(b *testing.B) {
 	r := NewRun(11)
@@ -684,6 +810,62 @@ func BenchmarkArenaFrame(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		r.Step(stepTime, Controls{})
+		a.sync(r.Snapshot(), r.Events(), stepSeconds)
+		d.Ops = d.Ops[:0]
+		a.draw(d, 0.5)
+	}
+}
+
+// BenchmarkWorstWave200Enemies measures the heaviest late-game frame: 200 enemies across all
+// kinds plus the Gloomwarden elite and Hollow King boss with an active telegraph, all four
+// weapons at level 5, enemy projectiles, embers, heal caches, hit flashes and full High quality.
+func BenchmarkWorstWave200Enemies(b *testing.B) {
+	r := NewRun(29)
+	r.director.nextSpawn = math.Inf(1)
+	for i := range r.weaponLevels {
+		r.weaponLevels[i] = 5
+	}
+	r.recomputeStats()
+
+	enemyKinds := len(r.data.enemies.Enemies)
+	for i := range 199 {
+		angle := float64(i) * 2 * math.Pi / 199
+		ring := 48 + float64(i%10)*20
+		pos := r.keeper.pos.Add(Vec2{X: math.Cos(angle), Y: math.Sin(angle)}.Scale(ring))
+		r.addEnemy(i%enemyKinds, pos, 1e6, 1)
+	}
+	r.spawnBoss()
+	if boss := r.bossEnemy(); boss != nil {
+		boss.hp = 1e9
+		boss.maxHP = 1e9
+	}
+	r.boss.state = bossRingWindup
+	r.boss.timer = 0.5
+	r.boss.timerMax = 1.0
+	for i := range 24 {
+		ang := float64(i) * 2 * math.Pi / 24
+		r.addEnemyShot(r.keeper.pos.Add(Vec2{X: math.Cos(ang) * 90, Y: math.Sin(ang) * 90}), Vec2{X: -math.Cos(ang) * 20, Y: -math.Sin(ang) * 20}, 6, 4, 5, uint8(i%2))
+	}
+	for i := range 48 {
+		ang := float64(i) * 2 * math.Pi / 48
+		r.embers = append(r.embers, ember{pos: r.keeper.pos.Add(Vec2{X: math.Cos(ang) * 70, Y: math.Sin(ang) * 70}), value: 1})
+	}
+
+	a := newArenaRenderer(newArt())
+	a.startRun(29)
+	a.setQuality(defaultQualityProfile())
+	r.Step(stepTime, Controls{Move: Vec2{X: 1, Y: 0}})
+	a.sync(r.Snapshot(), r.Events(), stepSeconds)
+	a.fx.damageVignette = 0.7
+
+	d := &core.Drawing{}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		r.keeper.health = r.stats.maxHealth
+		r.xp = 0
+		r.phase = PhasePlaying
+		r.Step(stepTime, Controls{Move: Vec2{X: math.Cos(float64(i) * 0.05), Y: math.Sin(float64(i) * 0.05)}})
 		a.sync(r.Snapshot(), r.Events(), stepSeconds)
 		d.Ops = d.Ops[:0]
 		a.draw(d, 0.5)
