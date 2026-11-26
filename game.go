@@ -19,8 +19,13 @@ const (
 
 // The actions game.yaml binds, which the shell reads by name.
 const (
+	actionLeft    = "left"
+	actionRight   = "right"
 	actionPause   = "pause"
 	actionConfirm = "confirm"
+	actionCard1   = "card_1"
+	actionCard2   = "card_2"
+	actionCard3   = "card_3"
 	axisMoveX     = "move_x"
 	axisMoveY     = "move_y"
 )
@@ -53,8 +58,9 @@ type emberVigil struct {
 	phase *core.Signal[phase]
 	frame *core.Signal[uint64]
 	// hud is what the native views show, published at hudRate rather than every step; hudClock is how long since the last time.
-	hud      *core.Signal[hudState]
-	hudClock time.Duration
+	hud       *core.Signal[hudState]
+	hudClock  time.Duration
+	cardFocus int
 
 	// size is the arena canvas's size when it last drew, which input maps into virtual pixels.
 	size core.Size
@@ -104,12 +110,43 @@ func (g *emberVigil) update(dt time.Duration) {
 	if g.actions.JustPressed(actionPause) {
 		g.togglePause()
 	}
-	if g.actions.JustPressed(actionConfirm) {
+	if g.phase.GetUntracked() == phaseArena && g.run != nil && g.run.Snapshot().Phase == PhaseLevelUp {
+		switch {
+		case g.actions.JustPressed(actionCard1):
+			g.choose(0)
+			return
+		case g.actions.JustPressed(actionCard2):
+			g.choose(1)
+			return
+		case g.actions.JustPressed(actionCard3):
+			g.choose(2)
+			return
+		case g.actions.JustPressed(actionLeft):
+			g.cardFocus = (g.cardFocus + offerCount - 1) % offerCount
+			g.publishHUD()
+		case g.actions.JustPressed(actionRight):
+			g.cardFocus = (g.cardFocus + 1) % offerCount
+			g.publishHUD()
+		case g.actions.JustPressed(actionConfirm):
+			g.choose(g.cardFocus)
+			return
+		}
+	} else if g.actions.JustPressed(actionConfirm) {
 		g.confirm()
 	}
 	if g.phase.GetUntracked() == phaseArena && g.run != nil {
+		prevPhase := g.run.Snapshot().Phase
 		g.run.Step(dt, Controls{Move: Vec2{X: g.actions.Axis(axisMoveX), Y: g.actions.Axis(axisMoveY)}})
-		g.scene.sync(g.run.Snapshot(), g.run.Events(), dt.Seconds())
+		snap := g.run.Snapshot()
+		g.scene.sync(snap, g.run.Events(), dt.Seconds())
+		if snap.Phase != prevPhase {
+			if snap.Phase == PhaseLevelUp {
+				g.cardFocus = 0
+			}
+			g.hudClock = 0
+			g.publishHUD()
+			return
+		}
 		if g.hudClock += dt; g.hudClock >= hudRate {
 			g.hudClock = 0
 			g.publishHUD()
@@ -117,7 +154,7 @@ func (g *emberVigil) update(dt time.Duration) {
 	}
 }
 
-// publishHUD tells the native HUD what the run shows now: its clock, health, XP, level, kills and cards, or nothing when no run is on.
+// publishHUD tells the native HUD what the run shows now: its clock, health, XP, level, kills, build and cards, or nothing when no run is on.
 func (g *emberVigil) publishHUD() {
 	if g.run == nil {
 		g.hud.Set(hudState{})
@@ -133,10 +170,25 @@ func (g *emberVigil) publishHUD() {
 		xpNeeded:  int(math.Ceil(s.XPNeeded)),
 		level:     s.Level,
 		kills:     s.Kills,
+		cardFocus: g.cardFocus,
+	}
+	for i := range st.weapons {
+		if i < len(s.Weapons) {
+			st.weapons[i] = hudSlot{id: s.Weapons[i].ID, name: s.Weapons[i].Name, level: s.Weapons[i].Level}
+		}
 	}
 	for i := range st.offers {
 		if i < len(s.Offers) {
-			st.offers[i] = s.Offers[i].Name
+			o := s.Offers[i]
+			st.offers[i] = hudCard{
+				id:          o.ID,
+				name:        o.Name,
+				kind:        o.Kind,
+				description: o.Description,
+				level:       o.Level,
+				maxLevel:    o.MaxLevel,
+				heal:        o.Heal,
+			}
 		}
 	}
 	g.hud.Set(st)
@@ -160,6 +212,7 @@ func (g *emberVigil) start() {
 	g.run = NewRun(g.seed)
 	g.scene.startRun(g.seed)
 	g.hudClock = 0
+	g.cardFocus = 0
 	g.setPhase(phaseArena)
 	g.publishHUD()
 }
@@ -167,6 +220,8 @@ func (g *emberVigil) start() {
 // choose takes card index of a level-up and resumes the run behind it.
 func (g *emberVigil) choose(index int) {
 	if g.run != nil && g.run.Choose(index) {
+		g.cardFocus = 0
+		g.actions.Reset()
 		g.publishHUD()
 	}
 }
@@ -219,12 +274,8 @@ func (g *emberVigil) closeSettings() {
 // quitApp ends the app.
 func (g *emberVigil) quitApp() { g.cx.Quit() }
 
-// confirm presses the screen's default button, which takes the first card while a level-up waits.
+// confirm presses the screen's default button.
 func (g *emberVigil) confirm() {
-	if g.phase.GetUntracked() == phaseArena && g.run != nil && g.run.Snapshot().Phase == PhaseLevelUp {
-		g.choose(0)
-		return
-	}
 	switch g.phase.GetUntracked() {
 	case phaseTitle:
 		g.start()

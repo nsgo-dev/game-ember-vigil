@@ -221,7 +221,7 @@ func TestArenaSurvivesAResize(t *testing.T) {
 // TestButtonsAreTouchFriendly checks that every button on every screen takes at least buttonSide points and stays inside the window.
 func TestButtonsAreTouchFriendly(t *testing.T) {
 	const windowWidth, windowHeight = 960, 540
-	app, _ := startEmberVigil(t)
+	app, g := startEmberVigil(t)
 
 	check := func(screen string) {
 		t.Helper()
@@ -247,6 +247,9 @@ func TestButtonsAreTouchFriendly(t *testing.T) {
 	press(t, app, "role:button Back")
 	press(t, app, "role:button Start")
 	check("arena")
+	g.run.xp = g.run.xpNeeded()
+	app.Advance(2 * frame)
+	check("level-up")
 }
 
 // TestTheHUDFollowsTheRun checks that the native HUD shows the run's clock, level, kills and starter weapon, and keeps up with them.
@@ -276,14 +279,14 @@ func TestTheHUDFollowsTheRun(t *testing.T) {
 	}
 }
 
-// TestALevelUpCardIsChosenFromThePrompt checks that a level-up offers its cards as buttons, that a press takes one and that the run carries on.
+// TestALevelUpCardIsChosenFromThePrompt checks that a level-up shows three rich cards (name, description, pips), pauses the run, and resumes after a tap.
 func TestALevelUpCardIsChosenFromThePrompt(t *testing.T) {
 	app, g := startEmberVigil(t)
 	press(t, app, "role:button Start")
 
 	// Exactly the XP for the next level, which the run spends on three cards on its next step.
 	g.run.xp = g.run.xpNeeded()
-	app.Advance(8 * frame)
+	app.Advance(2 * frame)
 	if p := g.run.Snapshot().Phase; p != PhaseLevelUp {
 		t.Fatalf("the run's phase with a level's XP is %v, want PhaseLevelUp", p)
 	}
@@ -292,8 +295,24 @@ func TestALevelUpCardIsChosenFromThePrompt(t *testing.T) {
 	if len(offers) != offerCount {
 		t.Fatalf("the level-up offered %d cards, want %d", len(offers), offerCount)
 	}
-	for _, o := range offers {
+	for i, o := range offers {
 		app.Find("role:button " + o.Name)
+		if got := app.Find("id:level-up-card-name-" + string(rune('0'+i))).Text; got != o.Name {
+			t.Fatalf("card %d name = %q, want %q", i, got, o.Name)
+		}
+		if got := app.Find("id:level-up-card-desc-" + string(rune('0'+i))).Text; got != o.Description {
+			t.Fatalf("card %d description = %q, want %q", i, got, o.Description)
+		}
+		if o.MaxLevel > 0 {
+			app.Find("id:level-up-card-pips-" + string(rune('0'+i)))
+		}
+	}
+
+	// Run stays paused while the modal is open.
+	pausedAt := g.run.Snapshot().Time
+	app.Advance(10 * frame)
+	if g.run.Snapshot().Time != pausedAt {
+		t.Fatalf("the run advanced from %v to %v while level-up cards were open", pausedAt, g.run.Snapshot().Time)
 	}
 
 	press(t, app, "role:button "+offers[0].Name)
@@ -310,6 +329,46 @@ func TestALevelUpCardIsChosenFromThePrompt(t *testing.T) {
 	app.Advance(10 * frame)
 	if g.run.Snapshot().Time <= before {
 		t.Fatalf("the run lasted %v seconds after the card, want more than %v", g.run.Snapshot().Time, before)
+	}
+}
+
+// TestLevelUpCardChosenWithNumberKeyAndConfirm checks choosing a level-up card with 1/2/3 keys and with directional focus + confirm.
+func TestLevelUpCardChosenWithNumberKeyAndConfirm(t *testing.T) {
+	app, g := startEmberVigil(t)
+	press(t, app, "role:button Start")
+
+	// Choose the second card using Digit2.
+	g.run.xp = g.run.xpNeeded()
+	app.Advance(2 * frame)
+	app.Find("id:level-up")
+	app.KeyCodeDown("Digit2")
+	app.Advance(2 * frame)
+	app.KeyCodeUp("Digit2")
+	app.Advance(frame)
+	if p := g.run.Snapshot().Phase; p != PhasePlaying {
+		t.Fatalf("phase after pressing 2 = %v, want PhasePlaying", p)
+	}
+	if app.Exists("id:level-up") {
+		t.Fatal("level-up modal stayed open after pressing 2")
+	}
+
+	// Open another level-up, move focus right and press Enter to confirm.
+	g.run.xp = g.run.xpNeeded()
+	app.Advance(2 * frame)
+	app.Find("id:level-up")
+	app.KeyCodeDown("KeyD")
+	app.Advance(2 * frame)
+	app.KeyCodeUp("KeyD")
+	app.Advance(frame)
+	if g.cardFocus != 1 {
+		t.Fatalf("cardFocus after KeyD = %d, want 1", g.cardFocus)
+	}
+	app.KeyDown("enter")
+	app.Advance(2 * frame)
+	app.KeyUp("enter")
+	app.Advance(frame)
+	if p := g.run.Snapshot().Phase; p != PhasePlaying {
+		t.Fatalf("phase after Enter = %v, want PhasePlaying", p)
 	}
 }
 

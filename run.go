@@ -14,7 +14,10 @@ const (
 	maxEnemies  = 400
 	maxShots    = 256
 	maxEmbers   = 512
+	maxPatches  = 64
+	maxPulses   = 16
 	maxEvents   = 256
+	maxShotHits = 8
 )
 
 // Vec2 is a position, a direction or a velocity in world units, whose X grows right and Y grows down.
@@ -47,6 +50,12 @@ func (v Vec2) Normalized() Vec2 {
 	return Vec2{v.X / l, v.Y / l}
 }
 
+// Rotated returns v turned by radians.
+func (v Vec2) Rotated(radians float64) Vec2 {
+	c, s := math.Cos(radians), math.Sin(radians)
+	return Vec2{X: v.X*c - v.Y*s, Y: v.X*s + v.Y*c}
+}
+
 // Controls is one step's input: where the bound axes point the keeper, each in [-1, 1].
 type Controls struct {
 	Move Vec2
@@ -68,9 +77,9 @@ const (
 type EventKind uint8
 
 const (
-	// EventShot is a shot leaving the keeper.
+	// EventShot is a shot or pulse leaving the keeper.
 	EventShot EventKind = iota
-	// EventHit is a shot or a contact taking health off a target.
+	// EventHit is a weapon or a contact taking health off a target.
 	EventHit
 	// EventKill is an enemy dying.
 	EventKill
@@ -115,17 +124,39 @@ type enemy struct {
 	knockbackResist float64
 	knockback       Vec2
 	embers          int
+	// Per-target weapon cooldowns so lingering weapons do not tick every step.
+	haloHit  float64
+	trailHit float64
 }
 
 // shot is one Ember Bolt in flight.
 type shot struct {
-	id        uint64
-	pos       Vec2
-	vel       Vec2
-	damage    float64
-	radius    float64
-	knockback float64
-	life      float64
+	id         uint64
+	pos        Vec2
+	vel        Vec2
+	damage     float64
+	radius     float64
+	knockback  float64
+	life       float64
+	pierceLeft int
+	hitIDs     [maxShotHits]uint64
+	hitCount   int
+}
+
+func (s *shot) alreadyHit(id uint64) bool {
+	for i := range s.hitCount {
+		if s.hitIDs[i] == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *shot) recordHit(id uint64) {
+	if s.hitCount < len(s.hitIDs) {
+		s.hitIDs[s.hitCount] = id
+		s.hitCount++
+	}
 }
 
 // ember is XP an enemy left on the ground, which flies to the keeper once it is close enough.
@@ -133,6 +164,26 @@ type ember struct {
 	pos       Vec2
 	value     int
 	attracted bool
+}
+
+// patch is one burning ground patch left by Cinder Trail.
+type patch struct {
+	id     uint64
+	pos    Vec2
+	radius float64
+	damage float64
+	tick   float64
+	life   float64
+	max    float64
+}
+
+// pulse is one expanding shockwave ring from Bell Toll.
+type pulse struct {
+	id     uint64
+	pos    Vec2
+	radius float64
+	life   float64
+	max    float64
 }
 
 // Run is one run of the game, simulated headlessly: no views, devices, sound or storage, and no wall clock. The shell steps it one fixed step at a time and draws what its snapshot and events say.
@@ -147,19 +198,23 @@ type Run struct {
 	phase Phase
 	time  float64
 
-	keeper         keeper
-	stats          stats
-	weaponCooldown float64
+	keeper          keeper
+	stats           stats
+	weaponCooldowns []float64
+	haloAngle       float64
 
 	enemies []enemy
 	shots   []shot
 	embers  []ember
+	patches []patch
+	pulses  []pulse
 
 	director director
 	grid     grid
 
-	// upgradeLevels holds each upgrade's level, in the order data/run.yaml lists the pool.
-	upgradeLevels []int
+	// weaponLevels and passiveLevels hold each card's level, in the order data/weapons.yaml and data/upgrades.yaml list them.
+	weaponLevels  []int
+	passiveLevels []int
 	offersNow     []offer
 
 	xp     float64
@@ -181,18 +236,25 @@ func NewRun(seed uint64) *Run { return newRunWith(mustGameData(), seed) }
 func newRunWith(d *gameData, seed uint64) *Run {
 	streams := random.NewStreams(seed)
 	r := &Run{
-		data:          d,
-		spawns:        streams.Stream("spawns"),
-		offers:        streams.Stream("offers"),
-		drops:         streams.Stream("drops"),
-		phase:         PhasePlaying,
-		level:         1,
-		upgradeLevels: make([]int, len(d.run.Upgrades)),
-		offersNow:     make([]offer, 0, offerCount),
-		events:        make([]Event, 0, maxEvents),
-		enemies:       make([]enemy, 0, maxEnemies),
-		shots:         make([]shot, 0, maxShots),
-		embers:        make([]ember, 0, maxEmbers),
+		data:            d,
+		spawns:          streams.Stream("spawns"),
+		offers:          streams.Stream("offers"),
+		drops:           streams.Stream("drops"),
+		phase:           PhasePlaying,
+		level:           1,
+		weaponLevels:    make([]int, len(d.weapons.Weapons)),
+		weaponCooldowns: make([]float64, len(d.weapons.Weapons)),
+		passiveLevels:   make([]int, len(d.upgrades.Passives)),
+		offersNow:       make([]offer, 0, offerCount),
+		events:          make([]Event, 0, maxEvents),
+		enemies:         make([]enemy, 0, maxEnemies),
+		shots:           make([]shot, 0, maxShots),
+		embers:          make([]ember, 0, maxEmbers),
+		patches:         make([]patch, 0, maxPatches),
+		pulses:          make([]pulse, 0, maxPulses),
+	}
+	if len(r.weaponLevels) > 0 {
+		r.weaponLevels[d.starterWeapon] = 1
 	}
 	r.keeper = keeper{pos: Vec2{d.run.Arena.Width / 2, d.run.Arena.Height / 2}, health: d.run.Keeper.Health}
 	r.recomputeStats()
@@ -212,7 +274,7 @@ func (r *Run) Step(dt time.Duration, controls Controls) {
 		return
 	}
 
-	// Move the keeper, then tick its timers.
+	// Move the keeper, then tick its timers and regeneration.
 	move := controls.Move
 	if !finite(move.X) || !finite(move.Y) {
 		move = Vec2{}
@@ -222,7 +284,18 @@ func (r *Run) Step(dt time.Duration, controls Controls) {
 	}
 	r.keeper.pos = r.clamp(r.keeper.pos.Add(move.Scale(r.stats.moveSpeed*stepSeconds)), r.data.run.Keeper.Radius)
 	r.keeper.invuln = math.Max(0, r.keeper.invuln-stepSeconds)
-	r.weaponCooldown -= stepSeconds
+	if r.stats.regen > 0 && r.keeper.health > 0 && r.keeper.health < r.stats.maxHealth {
+		r.keeper.health = math.Min(r.stats.maxHealth, r.keeper.health+r.stats.regen*stepSeconds)
+	}
+	for i := range r.weaponCooldowns {
+		r.weaponCooldowns[i] = math.Max(0, r.weaponCooldowns[i]-stepSeconds)
+	}
+	for i := range r.enemies {
+		e := &r.enemies[i]
+		e.haloHit = math.Max(0, e.haloHit-stepSeconds)
+		e.trailHit = math.Max(0, e.trailHit-stepSeconds)
+	}
+	r.tickPulses()
 
 	// Spawn from the timeline, then move the world.
 	r.director.step(r)
@@ -235,9 +308,10 @@ func (r *Run) Step(dt time.Duration, controls Controls) {
 	r.grid.build(r.enemies)
 	r.moveShots()
 
-	// Hit, fire, bury the dead and gather what they left.
+	// Hit, fire weapons, bury the dead and gather what they left.
 	r.contact()
-	r.fire()
+	r.stepWeapons()
+	r.stepPatches()
 	r.reap()
 	r.gatherEmbers()
 
@@ -255,11 +329,14 @@ func (r *Run) Choose(index int) bool {
 		return false
 	}
 	o := r.offersNow[index]
-	beforeMax := r.stats.maxHealth
-	if o.heal {
-		r.keeper.health = math.Min(r.stats.maxHealth, r.keeper.health+r.stats.maxHealth*r.data.run.Healing.Fraction)
-	} else {
-		r.upgradeLevels[o.upgrade]++
+	switch {
+	case o.heal:
+		r.keeper.health = math.Min(r.stats.maxHealth, r.keeper.health+r.stats.maxHealth*r.data.upgrades.Healing.Fraction)
+	case o.kind == offerWeapon:
+		r.weaponLevels[o.index]++
+	case o.kind == offerPassive:
+		beforeMax := r.stats.maxHealth
+		r.passiveLevels[o.index]++
 		r.recomputeStats()
 		// Health a card adds is health the keeper gains at once, so a bigger heart is not a weaker card.
 		r.keeper.health = math.Min(r.stats.maxHealth, r.keeper.health+r.stats.maxHealth-beforeMax)
@@ -290,7 +367,7 @@ func (r *Run) moveEnemy(e *enemy) {
 	}
 	vel = vel.Add(e.knockback)
 	e.pos = r.clamp(e.pos.Add(vel.Scale(stepSeconds)), e.radius)
-	drag := math.Exp(-r.data.run.Weapon.KnockbackDrag * stepSeconds)
+	drag := math.Exp(-r.data.weapons.KnockbackDrag * stepSeconds)
 	e.knockback = e.knockback.Scale(drag)
 }
 
@@ -323,25 +400,32 @@ func (r *Run) separate() {
 	}
 }
 
-// moveShots flies each shot on, hits the first enemy it reaches and drops it when it is spent.
+// moveShots flies each shot on, hits enemies along its path up to its pierce limit, and drops it when spent.
 func (r *Run) moveShots() {
 	for i := 0; i < len(r.shots); {
 		s := &r.shots[i]
 		s.pos = s.pos.Add(s.vel.Scale(stepSeconds))
 		s.life -= stepSeconds
-		hit := false
+		spent := false
 		r.grid.nearby(s.pos, s.radius+r.maxRadius, func(j int) bool {
 			e := &r.enemies[j]
+			if s.alreadyHit(e.id) {
+				return true
+			}
 			reach := s.radius + e.radius
 			if e.pos.Sub(s.pos).LenSq() > reach*reach {
 				return true
 			}
-			r.hitEnemy(j, s)
-			hit = true
+			r.hitEnemy(j, s.damage, s.knockback, e.pos.Sub(s.pos), s.vel)
+			s.recordHit(e.id)
+			if s.pierceLeft > 0 {
+				s.pierceLeft--
+				return true
+			}
+			spent = true
 			return false
 		})
-		spent := hit || s.life <= 0 || !r.inside(s.pos, s.radius)
-		if !spent {
+		if !spent && s.life > 0 && r.inside(s.pos, s.radius) {
 			i++
 			continue
 		}
@@ -351,16 +435,18 @@ func (r *Run) moveShots() {
 	}
 }
 
-// hitEnemy takes s's damage off enemy j and pushes it along the shot.
-func (r *Run) hitEnemy(j int, s *shot) {
+// hitEnemy takes damage off enemy j and pushes it along dir (falling back to fallbackDir when dir is zero).
+func (r *Run) hitEnemy(j int, damage, knockback float64, dir, fallbackDir Vec2) {
 	e := &r.enemies[j]
-	e.hp -= s.damage
-	push := e.pos.Sub(s.pos).Normalized()
-	if push == (Vec2{}) {
-		push = s.vel.Normalized()
+	e.hp -= damage
+	if knockback > 0 {
+		push := dir.Normalized()
+		if push == (Vec2{}) {
+			push = fallbackDir.Normalized()
+		}
+		e.knockback = e.knockback.Add(push.Scale(knockback * (1 - e.knockbackResist)))
 	}
-	e.knockback = e.knockback.Add(push.Scale(s.knockback * (1 - e.knockbackResist)))
-	r.emit(Event{Kind: EventHit, ID: e.id, Pos: e.pos, Value: s.damage})
+	r.emit(Event{Kind: EventHit, ID: e.id, Pos: e.pos, Value: damage})
 }
 
 // contact takes the first touching enemy's damage off the keeper, once per invulnerability window.
@@ -381,12 +467,39 @@ func (r *Run) contact() {
 	}
 }
 
-// fire shoots Ember Bolt at the nearest enemy in range once its cooldown has run out.
-func (r *Run) fire() {
-	if r.weaponCooldown > 0 || len(r.shots) >= maxShots {
+// stepWeapons fires and updates every weapon the keeper owns.
+func (r *Run) stepWeapons() {
+	for i := range r.data.weapons.Weapons {
+		level := r.weaponLevels[i]
+		if level <= 0 {
+			continue
+		}
+		w := &r.data.weapons.Weapons[i]
+		lvl := &w.Levels[level-1]
+		switch w.Kind {
+		case weaponBolt:
+			r.stepBolt(i, w, lvl)
+		case weaponHalo:
+			r.stepHalo(w, lvl)
+		case weaponTrail:
+			r.stepTrail(i, w, lvl)
+		case weaponBell:
+			r.stepBell(i, w, lvl)
+		}
+	}
+}
+
+// weaponCooldown returns w's effective cooldown after passive modifiers and its floor.
+func (r *Run) weaponCooldown(w *weaponDef, base float64) float64 {
+	return math.Max(w.CooldownMin, base*r.stats.cooldownMul)
+}
+
+// stepBolt fires Ember Bolt at the nearest enemy in range once its cooldown has run out.
+func (r *Run) stepBolt(index int, w *weaponDef, lvl *weaponLevelDef) {
+	if r.weaponCooldowns[index] > 0 || len(r.shots) >= maxShots {
 		return
 	}
-	target, ok := r.nearestEnemy(r.keeper.pos, r.data.run.Weapon.Range)
+	target, ok := r.nearestEnemy(r.keeper.pos, w.Range)
 	if !ok {
 		return
 	}
@@ -394,18 +507,150 @@ func (r *Run) fire() {
 	if dir == (Vec2{}) {
 		dir = Vec2{X: 1}
 	}
-	w := r.data.run.Weapon
-	r.shots = append(r.shots, shot{
-		id:        r.takeID(),
-		pos:       r.keeper.pos,
-		vel:       dir.Scale(w.ShotSpeed),
-		damage:    r.stats.damage,
-		radius:    w.ShotRadius,
-		knockback: w.Knockback,
-		life:      w.ShotLife,
+	damage := lvl.Damage * r.stats.damageMul
+	radius := w.ShotRadius * r.stats.areaMul
+	fired := false
+	for k := range lvl.Count {
+		if len(r.shots) >= maxShots {
+			break
+		}
+		angle := (float64(k) - float64(lvl.Count-1)/2) * w.Spread
+		shotDir := dir.Rotated(angle)
+		id := r.takeID()
+		r.shots = append(r.shots, shot{
+			id:         id,
+			pos:        r.keeper.pos,
+			vel:        shotDir.Scale(w.ShotSpeed),
+			damage:     damage,
+			radius:     radius,
+			knockback:  lvl.Knockback,
+			life:       w.ShotLife,
+			pierceLeft: lvl.Pierce,
+		})
+		r.emit(Event{Kind: EventShot, ID: id, Pos: r.keeper.pos})
+		fired = true
+	}
+	if fired {
+		r.weaponCooldowns[index] = r.weaponCooldown(w, lvl.Cooldown)
+	}
+}
+
+// stepHalo spins Lantern Halo's orbiting embers around the keeper and scorches enemies they touch.
+func (r *Run) stepHalo(w *weaponDef, lvl *weaponLevelDef) {
+	r.haloAngle = math.Mod(r.haloAngle+w.OrbitSpeed*stepSeconds, 2*math.Pi)
+	orbit := lvl.Radius * r.stats.areaMul
+	orbRadius := w.OrbRadius * r.stats.areaMul
+	damage := lvl.Damage * r.stats.damageMul
+	perTarget := r.weaponCooldown(w, lvl.Cooldown)
+	step := 2 * math.Pi / float64(lvl.Count)
+	for k := range lvl.Count {
+		ang := r.haloAngle + float64(k)*step
+		pos := r.keeper.pos.Add(Vec2{X: math.Cos(ang) * orbit, Y: math.Sin(ang) * orbit})
+		r.grid.nearby(pos, orbRadius+r.maxRadius, func(j int) bool {
+			e := &r.enemies[j]
+			if e.haloHit > 0 {
+				return true
+			}
+			reach := orbRadius + e.radius
+			if e.pos.Sub(pos).LenSq() > reach*reach {
+				return true
+			}
+			r.hitEnemy(j, damage, lvl.Knockback, e.pos.Sub(r.keeper.pos), e.pos.Sub(pos))
+			e.haloHit = perTarget
+			return true
+		})
+	}
+}
+
+// stepTrail drops a burning patch at the keeper's feet when Cinder Trail's cooldown is ready.
+func (r *Run) stepTrail(index int, w *weaponDef, lvl *weaponLevelDef) {
+	if r.weaponCooldowns[index] > 0 || len(r.patches) >= maxPatches {
+		return
+	}
+	r.patches = append(r.patches, patch{
+		id:     r.takeID(),
+		pos:    r.keeper.pos,
+		radius: lvl.Radius * r.stats.areaMul,
+		damage: lvl.Damage * r.stats.damageMul,
+		tick:   r.weaponCooldown(w, lvl.Tick),
+		life:   lvl.Duration,
+		max:    lvl.Duration,
 	})
-	r.weaponCooldown = r.stats.cooldown
-	r.emit(Event{Kind: EventShot, ID: r.shots[len(r.shots)-1].id, Pos: r.keeper.pos})
+	r.weaponCooldowns[index] = r.weaponCooldown(w, lvl.Cooldown)
+}
+
+// stepPatches burns enemies standing in active ground patches and removes expired ones.
+func (r *Run) stepPatches() {
+	for i := 0; i < len(r.patches); {
+		p := &r.patches[i]
+		p.life -= stepSeconds
+		if p.life <= 0 {
+			last := len(r.patches) - 1
+			r.patches[i] = r.patches[last]
+			r.patches = r.patches[:last]
+			continue
+		}
+		r.grid.nearby(p.pos, p.radius+r.maxRadius, func(j int) bool {
+			e := &r.enemies[j]
+			if e.trailHit > 0 {
+				return true
+			}
+			reach := p.radius + e.radius
+			if e.pos.Sub(p.pos).LenSq() > reach*reach {
+				return true
+			}
+			r.hitEnemy(j, p.damage, 0, Vec2{}, Vec2{})
+			e.trailHit = p.tick
+			return true
+		})
+		i++
+	}
+}
+
+// stepBell rings Bell Toll, damaging and knocking back every enemy within its pulse radius.
+func (r *Run) stepBell(index int, w *weaponDef, lvl *weaponLevelDef) {
+	if r.weaponCooldowns[index] > 0 {
+		return
+	}
+	radius := lvl.Radius * r.stats.areaMul
+	damage := lvl.Damage * r.stats.damageMul
+	r.grid.nearby(r.keeper.pos, radius+r.maxRadius, func(j int) bool {
+		e := &r.enemies[j]
+		reach := radius + e.radius
+		d := e.pos.Sub(r.keeper.pos)
+		if d.LenSq() > reach*reach {
+			return true
+		}
+		r.hitEnemy(j, damage, lvl.Knockback, d, Vec2{X: 1})
+		return true
+	})
+	id := r.takeID()
+	if len(r.pulses) < maxPulses {
+		r.pulses = append(r.pulses, pulse{
+			id:     id,
+			pos:    r.keeper.pos,
+			radius: radius,
+			life:   w.Duration,
+			max:    w.Duration,
+		})
+	}
+	r.emit(Event{Kind: EventShot, ID: id, Pos: r.keeper.pos, Value: radius})
+	r.weaponCooldowns[index] = r.weaponCooldown(w, lvl.Cooldown)
+}
+
+// tickPulses ages visual Bell Toll shockwave rings and removes expired ones.
+func (r *Run) tickPulses() {
+	for i := 0; i < len(r.pulses); {
+		p := &r.pulses[i]
+		p.life -= stepSeconds
+		if p.life <= 0 {
+			last := len(r.pulses) - 1
+			r.pulses[i] = r.pulses[last]
+			r.pulses = r.pulses[:last]
+			continue
+		}
+		i++
+	}
 }
 
 // nearestEnemy returns the position of the closest enemy within radius of center, breaking ties by its position in the slice, so the same seed aims the same way.
@@ -460,17 +705,19 @@ func (r *Run) dropEmbers(e *enemy) {
 // gatherEmbers pulls the embers near the keeper in and gives their XP up when they reach it.
 func (r *Run) gatherEmbers() {
 	em := r.data.run.Embers
+	magnet := r.stats.pickupRadius
 	for i := 0; i < len(r.embers); {
 		e := &r.embers[i]
 		to := r.keeper.pos.Sub(e.pos)
 		dist := to.Len()
-		if dist <= em.MagnetRadius {
+		if dist <= magnet {
 			e.attracted = true
 		}
 		if e.attracted {
 			if dist <= r.data.run.Keeper.Radius+em.Radius {
-				r.xp += float64(e.value)
-				r.emit(Event{Kind: EventEmber, Pos: e.pos, Value: float64(e.value)})
+				gain := float64(e.value) * r.stats.xpMul
+				r.xp += gain
+				r.emit(Event{Kind: EventEmber, Pos: e.pos, Value: gain})
 				last := len(r.embers) - 1
 				r.embers[i] = r.embers[last]
 				r.embers = r.embers[:last]
@@ -532,22 +779,27 @@ func (r *Run) inside(p Vec2, radius float64) bool {
 
 // Snapshot is a read-only view of the run for the shell to draw, which the next Step invalidates: its slices reuse the run's buffers.
 type Snapshot struct {
-	Phase        Phase       `json:"phase"`
-	Time         float64     `json:"time"`
-	Arena        Vec2        `json:"arena"`
-	Keeper       Vec2        `json:"keeper"`
-	KeeperRadius float64     `json:"keeperRadius"`
-	Health       float64     `json:"health"`
-	MaxHealth    float64     `json:"maxHealth"`
-	Invulnerable float64     `json:"invulnerable"`
-	Level        int         `json:"level"`
-	XP           float64     `json:"xp"`
-	XPNeeded     float64     `json:"xpNeeded"`
-	Kills        int         `json:"kills"`
-	Enemies      []EnemyView `json:"enemies"`
-	Shots        []ShotView  `json:"shots"`
-	Embers       []EmberView `json:"embers"`
-	Offers       []OfferView `json:"offers"`
+	Phase        Phase         `json:"phase"`
+	Time         float64       `json:"time"`
+	Arena        Vec2          `json:"arena"`
+	Keeper       Vec2          `json:"keeper"`
+	KeeperRadius float64       `json:"keeperRadius"`
+	Health       float64       `json:"health"`
+	MaxHealth    float64       `json:"maxHealth"`
+	Invulnerable float64       `json:"invulnerable"`
+	Level        int           `json:"level"`
+	XP           float64       `json:"xp"`
+	XPNeeded     float64       `json:"xpNeeded"`
+	Kills        int           `json:"kills"`
+	Enemies      []EnemyView   `json:"enemies"`
+	Shots        []ShotView    `json:"shots"`
+	Embers       []EmberView   `json:"embers"`
+	Halo         []HaloOrbView `json:"halo"`
+	Patches      []PatchView   `json:"patches"`
+	Pulses       []PulseView   `json:"pulses"`
+	Weapons      []SlotView    `json:"weapons"`
+	Passives     []SlotView    `json:"passives"`
+	Offers       []OfferView   `json:"offers"`
 }
 
 // EnemyView is one enemy as a snapshot shows it.
@@ -573,13 +825,48 @@ type EmberView struct {
 	Value int  `json:"value"`
 }
 
+// HaloOrbView is one Lantern Halo ember orbiting the keeper.
+type HaloOrbView struct {
+	Pos    Vec2    `json:"pos"`
+	Radius float64 `json:"radius"`
+}
+
+// PatchView is one burning Cinder Trail patch on the ground.
+type PatchView struct {
+	ID     uint64  `json:"id"`
+	Pos    Vec2    `json:"pos"`
+	Radius float64 `json:"radius"`
+	Life   float64 `json:"life"`
+	Max    float64 `json:"max"`
+}
+
+// PulseView is one expanding Bell Toll shockwave ring.
+type PulseView struct {
+	ID     uint64  `json:"id"`
+	Pos    Vec2    `json:"pos"`
+	Radius float64 `json:"radius"`
+	Life   float64 `json:"life"`
+	Max    float64 `json:"max"`
+}
+
+// SlotView is one owned weapon or passive slot in the keeper's build.
+type SlotView struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Level    int    `json:"level"`
+	MaxLevel int    `json:"maxLevel"`
+}
+
 // OfferView is one level-up card as a snapshot shows it.
 type OfferView struct {
-	Name     string `json:"name"`
-	Stat     string `json:"stat,omitempty"`
-	Level    int    `json:"level,omitempty"`
-	MaxLevel int    `json:"maxLevel,omitempty"`
-	Heal     bool   `json:"heal,omitempty"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Kind        string `json:"kind"`
+	Stat        string `json:"stat,omitempty"`
+	Description string `json:"description,omitempty"`
+	Level       int    `json:"level,omitempty"`
+	MaxLevel    int    `json:"maxLevel,omitempty"`
+	Heal        bool   `json:"heal,omitempty"`
 }
 
 // Snapshot builds the run's view for this step.
@@ -619,10 +906,60 @@ func (r *Run) Snapshot() Snapshot {
 	for i := range r.embers {
 		s.Embers = append(s.Embers, EmberView{Pos: r.embers[i].pos, Value: r.embers[i].value})
 	}
+	s.Halo = s.Halo[:0]
+	for i := range r.data.weapons.Weapons {
+		level := r.weaponLevels[i]
+		if level <= 0 || r.data.weapons.Weapons[i].Kind != weaponHalo {
+			continue
+		}
+		w := &r.data.weapons.Weapons[i]
+		lvl := &w.Levels[level-1]
+		orbit := lvl.Radius * r.stats.areaMul
+		orbRadius := w.OrbRadius * r.stats.areaMul
+		step := 2 * math.Pi / float64(lvl.Count)
+		for k := range lvl.Count {
+			ang := r.haloAngle + float64(k)*step
+			pos := r.keeper.pos.Add(Vec2{X: math.Cos(ang) * orbit, Y: math.Sin(ang) * orbit})
+			s.Halo = append(s.Halo, HaloOrbView{Pos: pos, Radius: orbRadius})
+		}
+	}
+	s.Patches = s.Patches[:0]
+	for i := range r.patches {
+		p := &r.patches[i]
+		s.Patches = append(s.Patches, PatchView{ID: p.id, Pos: p.pos, Radius: p.radius, Life: p.life, Max: p.max})
+	}
+	s.Pulses = s.Pulses[:0]
+	for i := range r.pulses {
+		p := &r.pulses[i]
+		s.Pulses = append(s.Pulses, PulseView{ID: p.id, Pos: p.pos, Radius: p.radius, Life: p.life, Max: p.max})
+	}
+	s.Weapons = s.Weapons[:0]
+	for i := range r.data.weapons.Weapons {
+		if lvl := r.weaponLevels[i]; lvl > 0 {
+			w := &r.data.weapons.Weapons[i]
+			s.Weapons = append(s.Weapons, SlotView{ID: w.ID, Name: w.Name, Level: lvl, MaxLevel: len(w.Levels)})
+		}
+	}
+	s.Passives = s.Passives[:0]
+	for i := range r.data.upgrades.Passives {
+		if lvl := r.passiveLevels[i]; lvl > 0 {
+			p := &r.data.upgrades.Passives[i]
+			s.Passives = append(s.Passives, SlotView{ID: p.ID, Name: p.Name, Level: lvl, MaxLevel: p.MaxLevel})
+		}
+	}
 	s.Offers = s.Offers[:0]
 	for i := range r.offersNow {
 		o := &r.offersNow[i]
-		s.Offers = append(s.Offers, OfferView{Name: o.name, Stat: o.stat, Level: o.level, MaxLevel: o.maxLevel, Heal: o.heal})
+		s.Offers = append(s.Offers, OfferView{
+			ID:          o.id,
+			Name:        o.name,
+			Kind:        o.kind,
+			Stat:        o.stat,
+			Description: o.description,
+			Level:       o.level,
+			MaxLevel:    o.maxLevel,
+			Heal:        o.heal,
+		})
 	}
 	return *s
 }

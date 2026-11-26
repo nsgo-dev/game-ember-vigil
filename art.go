@@ -140,6 +140,16 @@ var pictures = []picture{
 		"999baab.",
 		"9999....",
 	}},
+	{name: "halo", rows: []string{
+		"..9999..",
+		".9aaaa9.",
+		"9aabbaa9",
+		"9ab66ba9",
+		"9ab66ba9",
+		"9aabbaa9",
+		".9aaaa9.",
+		"..9999..",
+	}},
 	{name: "spark", rows: []string{
 		".66.",
 		"6bb6",
@@ -210,7 +220,7 @@ type pixels struct {
 // frames are the atlas's frames by name, so drawing reads a field instead of looking a string up for every sprite.
 type frames struct {
 	keeper, mite, moth, husk sprite.Frame
-	ember, bolt              sprite.Frame
+	ember, bolt, halo        sprite.Frame
 	spark, puff, trail       sprite.Frame
 	grass, fern, stone       sprite.Frame
 	mushroom, twig           sprite.Frame
@@ -268,6 +278,7 @@ func framesOf(m map[string]sprite.Frame) frames {
 		husk:     get("husk"),
 		ember:    get("ember"),
 		bolt:     get("bolt"),
+		halo:     get("halo"),
 		spark:    get("spark"),
 		puff:     get("puff"),
 		trail:    get("trail"),

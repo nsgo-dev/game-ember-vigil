@@ -269,10 +269,196 @@ func TestAStepReportsAtMostMaxEvents(t *testing.T) {
 // TestSteadyStateStepsAllocateNothing checks that a step in a quiet run reuses memory, as the fixed-step loop needs.
 func TestSteadyStateStepsAllocateNothing(t *testing.T) {
 	r := quietRun(t)
+	for i := range r.weaponLevels {
+		r.weaponLevels[i] = 3
+	}
+	putEnemy(t, r, 2, Vec2{X: 36})
 	stepOnce(r, Controls{})
 	controls := Controls{Move: Vec2{X: 0.5, Y: 0.5}}
 	if allocs := testing.AllocsPerRun(120, func() { r.Step(stepTime, controls) }); allocs != 0 {
 		t.Fatalf("a step allocated %v times, want none", allocs)
+	}
+}
+
+// weaponByName returns the index of weapon name in r's data.
+func weaponByName(t *testing.T, r *Run, name string) int {
+	t.Helper()
+	idx, ok := r.data.weaponIndex(name)
+	if !ok {
+		t.Fatalf("weapon %q not found", name)
+	}
+	return idx
+}
+
+// TestEmberBoltScalesProjectilesAndPierce checks that higher Ember Bolt levels fire more projectiles and pierce through multiple enemies.
+func TestEmberBoltScalesProjectilesAndPierce(t *testing.T) {
+	r := quietRun(t)
+	bolt := weaponByName(t, r, "Ember Bolt")
+	r.weaponLevels[bolt] = 5
+	// Line up three sturdy Husks along +X so the center shot pierces all three.
+	putEnemy(t, r, 2, Vec2{X: 30})
+	putEnemy(t, r, 2, Vec2{X: 55})
+	putEnemy(t, r, 2, Vec2{X: 80})
+
+	stepOnce(r, Controls{})
+	if got := len(r.shots); got != 3 {
+		t.Fatalf("level 5 Ember Bolt fired %d shots, want 3", got)
+	}
+	hitByID := map[uint64]bool{}
+	for range 30 {
+		stepOnce(r, Controls{})
+		for _, ev := range r.Events() {
+			if ev.Kind == EventHit {
+				hitByID[ev.ID] = true
+			}
+		}
+	}
+	if len(hitByID) != 3 {
+		t.Fatalf("level 5 piercing Ember Bolt hit %d distinct enemies, want 3", len(hitByID))
+	}
+}
+
+// TestLanternHaloOrbitsAndScorchesWithPerTargetCooldown checks that Lantern Halo orbits, damages nearby enemies, respects per-target cooldown and scales with level.
+func TestLanternHaloOrbitsAndScorchesWithPerTargetCooldown(t *testing.T) {
+	r := quietRun(t)
+	bolt := weaponByName(t, r, "Ember Bolt")
+	halo := weaponByName(t, r, "Lantern Halo")
+	r.weaponLevels[bolt] = 0
+	r.weaponLevels[halo] = 1
+
+	snap := r.Snapshot()
+	if len(snap.Halo) != 2 {
+		t.Fatalf("level 1 Lantern Halo has %d orbs, want 2", len(snap.Halo))
+	}
+	// Place a Husk directly on the orbit ring and advance until scorched.
+	putEnemy(t, r, 2, Vec2{X: 34})
+	startHP := r.enemies[0].hp
+	hits := 0
+	for range 120 {
+		stepOnce(r, Controls{})
+		for _, ev := range r.Events() {
+			if ev.Kind == EventHit {
+				hits++
+			}
+		}
+		if hits > 0 {
+			break
+		}
+	}
+	if hits == 0 || r.enemies[0].hp >= startHP {
+		t.Fatal("Lantern Halo dealt no damage to an enemy on its orbit")
+	}
+	// The very next step must not hit again because of the per-target cooldown.
+	hpAfterHit := r.enemies[0].hp
+	stepOnce(r, Controls{})
+	if r.enemies[0].hp != hpAfterHit {
+		t.Fatal("Lantern Halo hit the same enemy on consecutive steps")
+	}
+
+	r.weaponLevels[halo] = 5
+	if got := len(r.Snapshot().Halo); got != 5 {
+		t.Fatalf("level 5 Lantern Halo has %d orbs, want 5", got)
+	}
+}
+
+// TestCinderTrailDropsBurningPatchesAndScales checks that Cinder Trail drops patches that burn enemies on a tick interval and scale with level.
+func TestCinderTrailDropsBurningPatchesAndScales(t *testing.T) {
+	r := quietRun(t)
+	bolt := weaponByName(t, r, "Ember Bolt")
+	trail := weaponByName(t, r, "Cinder Trail")
+	r.weaponLevels[bolt] = 0
+	r.weaponLevels[trail] = 1
+
+	putEnemy(t, r, 2, Vec2{X: 10})
+	startHP := r.enemies[0].hp
+	stepOnce(r, Controls{})
+	if len(r.patches) != 1 {
+		t.Fatalf("Cinder Trail left %d patches, want 1", len(r.patches))
+	}
+	if r.enemies[0].hp >= startHP {
+		t.Fatal("Cinder Trail patch dealt no damage to an enemy standing in it")
+	}
+	hpAfterFirstTick := r.enemies[0].hp
+	stepOnce(r, Controls{})
+	if r.enemies[0].hp != hpAfterFirstTick {
+		t.Fatal("Cinder Trail burned the same enemy on consecutive steps")
+	}
+	r1Radius := r.patches[0].radius
+
+	r.patches = r.patches[:0]
+	r.weaponLevels[trail] = 5
+	r.weaponCooldowns[trail] = 0
+	stepOnce(r, Controls{})
+	if r.patches[0].radius <= r1Radius {
+		t.Fatalf("level 5 Cinder Trail radius %v did not scale above level 1 radius %v", r.patches[0].radius, r1Radius)
+	}
+}
+
+// TestBellTollPulsesDamageAndKnockback checks that Bell Toll rings a shockwave that damages, pushes back and scales with level.
+func TestBellTollPulsesDamageAndKnockback(t *testing.T) {
+	r := quietRun(t)
+	bolt := weaponByName(t, r, "Ember Bolt")
+	bell := weaponByName(t, r, "Bell Toll")
+	r.weaponLevels[bolt] = 0
+	r.weaponLevels[bell] = 1
+
+	putEnemy(t, r, 0, Vec2{X: 40})
+	startDist := r.enemies[0].pos.Sub(r.keeper.pos).Len()
+	stepOnce(r, Controls{})
+	if len(r.pulses) != 1 {
+		t.Fatalf("Bell Toll created %d pulses, want 1", len(r.pulses))
+	}
+	if r.Snapshot().Kills != 1 {
+		// Ash Mite has 10 HP, Bell Toll lv1 deals 12 damage -> killed immediately.
+		t.Fatalf("level 1 Bell Toll kills = %d, want 1", r.Snapshot().Kills)
+	}
+	// Test knockback on a tougher Husk that survives the level 5 hit.
+	r.addEnemy(2, r.keeper.pos.Add(Vec2{X: 40}), 2, 1)
+	r.weaponLevels[bell] = 5
+	r.weaponCooldowns[bell] = 0
+	stepOnce(r, Controls{})
+	if len(r.enemies) == 0 {
+		t.Fatal("expected tough Husk to survive and be knocked back")
+	}
+	if r.enemies[0].knockback.X <= 0 {
+		t.Fatalf("Bell Toll gave Husk knockback %+v, want positive X push", r.enemies[0].knockback)
+	}
+	if r.pulses[len(r.pulses)-1].radius <= startDist {
+		t.Fatalf("level 5 Bell Toll radius %v did not exceed %v", r.pulses[len(r.pulses)-1].radius, startDist)
+	}
+}
+
+// TestPassiveEffectsInRun checks Mending regeneration, Gathering pickup radius and Glow XP gain during steps.
+func TestPassiveEffectsInRun(t *testing.T) {
+	r := quietRun(t)
+	for i, p := range r.data.upgrades.Passives {
+		switch p.Stat {
+		case statRegen, statPickup, statXPGain:
+			r.passiveLevels[i] = 2
+		}
+	}
+	r.recomputeStats()
+
+	// Mending regenerates missing health over time.
+	r.keeper.health = 50
+	for range 60 {
+		stepOnce(r, Controls{})
+	}
+	if r.keeper.health <= 50 {
+		t.Fatalf("Mending did not regenerate health: got %v, want > 50", r.keeper.health)
+	}
+
+	// Gathering pulls in an ember placed beyond the base magnet radius, and Glow scales its XP.
+	far := r.data.run.Embers.MagnetRadius + 15
+	r.embers = append(r.embers, ember{pos: r.keeper.pos.Add(Vec2{X: far}), value: 1})
+	for range 120 {
+		stepOnce(r, Controls{})
+		if r.xp > 0 {
+			break
+		}
+	}
+	if math.Abs(r.xp-r.stats.xpMul) > 1e-9 {
+		t.Fatalf("collected ember gave %v XP, want %v with Glow", r.xp, r.stats.xpMul)
 	}
 }
 

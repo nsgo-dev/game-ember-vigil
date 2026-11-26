@@ -20,17 +20,36 @@ var dataFS embed.FS
 
 // The schema version each data file must declare, which its loader accepts and its encoder writes.
 const (
-	runVersion   = 1
-	enemyVersion = 1
-	waveVersion  = 1
-	fileRun      = "data/run.yaml"
-	fileEnemies  = "data/enemies.yaml"
-	fileWaves    = "data/waves.yaml"
-	// statDamage, statCooldown, statMoveSpeed and statMaxHealth are the stats an upgrade card raises, as an upgrade's stat field names them.
+	runVersion     = 1
+	weaponVersion  = 1
+	upgradeVersion = 1
+	enemyVersion   = 1
+	waveVersion    = 1
+	fileRun        = "data/run.yaml"
+	fileWeapons    = "data/weapons.yaml"
+	fileUpgrades   = "data/upgrades.yaml"
+	fileEnemies    = "data/enemies.yaml"
+	fileWaves      = "data/waves.yaml"
+)
+
+// Weapon kinds as data/weapons.yaml names them.
+const (
+	weaponBolt  = "bolt"
+	weaponHalo  = "halo"
+	weaponTrail = "trail"
+	weaponBell  = "bell"
+)
+
+// Passive stats as data/upgrades.yaml names them.
+const (
 	statDamage    = "damage"
 	statCooldown  = "cooldown"
+	statArea      = "area"
 	statMoveSpeed = "moveSpeed"
 	statMaxHealth = "maxHealth"
+	statRegen     = "regen"
+	statPickup    = "pickup"
+	statXPGain    = "xpGain"
 )
 
 // A kind of enemy movement, as an enemy's motion field names it.
@@ -43,21 +62,21 @@ const (
 
 // gameData is every tuning file a run reads, loaded and cross-checked once at startup.
 type gameData struct {
-	run     runFile
-	enemies enemyFile
-	waves   waveFile
+	run           runFile
+	weapons       weaponFile
+	upgrades      upgradeFile
+	enemies       enemyFile
+	waves         waveFile
+	starterWeapon int
 }
 
-// runFile is data/run.yaml: the arena, the keeper, the starter weapon, the embers, the level curve and the upgrade pool.
+// runFile is data/run.yaml: the arena, the keeper, the embers and the level curve.
 type runFile struct {
-	Version  int          `yaml:"version"`
-	Arena    arenaDef     `yaml:"arena"`
-	Keeper   keeperDef    `yaml:"keeper"`
-	Weapon   weaponDef    `yaml:"weapon"`
-	Embers   emberDef     `yaml:"embers"`
-	Level    levelDef     `yaml:"level"`
-	Upgrades []upgradeDef `yaml:"upgrades"`
-	Healing  healDef      `yaml:"healing"`
+	Version int       `yaml:"version"`
+	Arena   arenaDef  `yaml:"arena"`
+	Keeper  keeperDef `yaml:"keeper"`
+	Embers  emberDef  `yaml:"embers"`
+	Level   levelDef  `yaml:"level"`
 }
 
 // arenaDef is the run's world bounds, in world units, which are virtual pixels at zoom one.
@@ -74,19 +93,6 @@ type keeperDef struct {
 	Invulnerable float64 `yaml:"invulnerable"`
 }
 
-// weaponDef is the starter weapon Ember Bolt: an auto-aimed shot, one at a time, at the nearest enemy in range.
-type weaponDef struct {
-	Damage        float64 `yaml:"damage"`
-	Cooldown      float64 `yaml:"cooldown"`
-	CooldownMin   float64 `yaml:"cooldownMin"`
-	Range         float64 `yaml:"range"`
-	ShotSpeed     float64 `yaml:"shotSpeed"`
-	ShotRadius    float64 `yaml:"shotRadius"`
-	ShotLife      float64 `yaml:"shotLife"`
-	Knockback     float64 `yaml:"knockback"`
-	KnockbackDrag float64 `yaml:"knockbackDrag"`
-}
-
 // emberDef is what an enemy leaves behind and how it reaches the keeper.
 type emberDef struct {
 	Radius       float64 `yaml:"radius"`
@@ -101,18 +107,69 @@ type levelDef struct {
 	Step  float64 `yaml:"step"`
 }
 
-// upgradeDef is one card in the upgrade pool: a stat it raises by Amount at each level, up to MaxLevel.
-type upgradeDef struct {
-	Name     string  `yaml:"name"`
-	Stat     string  `yaml:"stat"`
-	Amount   float64 `yaml:"amount"`
-	MaxLevel int     `yaml:"maxLevel"`
+// weaponFile is data/weapons.yaml: the starter weapon name, knockback decay and every weapon's levels.
+type weaponFile struct {
+	Version       int         `yaml:"version"`
+	Starter       string      `yaml:"starter"`
+	KnockbackDrag float64     `yaml:"knockbackDrag"`
+	Weapons       []weaponDef `yaml:"weapons"`
+}
+
+// weaponDef is one weapon's identity, kind-specific geometry and per-level scaling.
+type weaponDef struct {
+	ID          string           `yaml:"id"`
+	Name        string           `yaml:"name"`
+	Kind        string           `yaml:"kind"`
+	Description string           `yaml:"description"`
+	CooldownMin float64          `yaml:"cooldownMin"`
+	Range       float64          `yaml:"range,omitempty"`
+	ShotSpeed   float64          `yaml:"shotSpeed,omitempty"`
+	ShotRadius  float64          `yaml:"shotRadius,omitempty"`
+	ShotLife    float64          `yaml:"shotLife,omitempty"`
+	Spread      float64          `yaml:"spread,omitempty"`
+	OrbRadius   float64          `yaml:"orbRadius,omitempty"`
+	OrbitSpeed  float64          `yaml:"orbitSpeed,omitempty"`
+	Duration    float64          `yaml:"duration,omitempty"`
+	Levels      []weaponLevelDef `yaml:"levels"`
+}
+
+// weaponLevelDef is one level of a weapon.
+type weaponLevelDef struct {
+	Damage    float64 `yaml:"damage"`
+	Cooldown  float64 `yaml:"cooldown"`
+	Knockback float64 `yaml:"knockback,omitempty"`
+	Count     int     `yaml:"count,omitempty"`
+	Pierce    int     `yaml:"pierce,omitempty"`
+	Radius    float64 `yaml:"radius,omitempty"`
+	Duration  float64 `yaml:"duration,omitempty"`
+	Tick      float64 `yaml:"tick,omitempty"`
+}
+
+// upgradeFile is data/upgrades.yaml: slot caps, passives and the fallback healing card.
+type upgradeFile struct {
+	Version      int          `yaml:"version"`
+	WeaponSlots  int          `yaml:"weaponSlots"`
+	PassiveSlots int          `yaml:"passiveSlots"`
+	Passives     []passiveDef `yaml:"passives"`
+	Healing      healDef      `yaml:"healing"`
+}
+
+// passiveDef is one passive card in the upgrade pool: a stat it raises by Amount at each level, up to MaxLevel.
+type passiveDef struct {
+	ID          string  `yaml:"id"`
+	Name        string  `yaml:"name"`
+	Stat        string  `yaml:"stat"`
+	Description string  `yaml:"description"`
+	Amount      float64 `yaml:"amount"`
+	MaxLevel    int     `yaml:"maxLevel"`
 }
 
 // healDef is the card that fills an offer when fewer than three upgrades remain.
 type healDef struct {
-	Name     string  `yaml:"name"`
-	Fraction float64 `yaml:"fraction"`
+	ID          string  `yaml:"id"`
+	Name        string  `yaml:"name"`
+	Description string  `yaml:"description"`
+	Fraction    float64 `yaml:"fraction"`
 }
 
 // enemyFile is data/enemies.yaml: every enemy kind the waves send.
@@ -173,13 +230,29 @@ type mixDef struct {
 	Weight float64 `yaml:"weight"`
 }
 
-// loadGameData reads, decodes and cross-checks the three tuning files.
+// loadGameData reads, decodes and cross-checks the tuning files.
 func loadGameData(fsys fs.FS) (*gameData, error) {
 	runBytes, err := fs.ReadFile(fsys, fileRun)
 	if err != nil {
 		return nil, err
 	}
 	run, err := parseRunFile(fileRun, runBytes)
+	if err != nil {
+		return nil, err
+	}
+	weaponBytes, err := fs.ReadFile(fsys, fileWeapons)
+	if err != nil {
+		return nil, err
+	}
+	weapons, err := parseWeaponFile(fileWeapons, weaponBytes)
+	if err != nil {
+		return nil, err
+	}
+	upgradeBytes, err := fs.ReadFile(fsys, fileUpgrades)
+	if err != nil {
+		return nil, err
+	}
+	upgrades, err := parseUpgradeFile(fileUpgrades, upgradeBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -199,15 +272,22 @@ func loadGameData(fsys fs.FS) (*gameData, error) {
 	if err != nil {
 		return nil, err
 	}
-	d := &gameData{run: *run, enemies: *enemies, waves: *waves}
+	d := &gameData{run: *run, weapons: *weapons, upgrades: *upgrades, enemies: *enemies, waves: *waves}
 	if err := d.check(); err != nil {
 		return nil, err
 	}
 	return d, nil
 }
 
-// check resolves the names the waves use and prepares what a spawn reads, which a single file cannot check alone.
+// check resolves the names the files reference across each other, which a single file cannot check alone.
 func (d *gameData) check() error {
+	if len(d.weapons.Weapons) > 0 {
+		starter, ok := d.weaponIndex(d.weapons.Starter)
+		if !ok {
+			return fmt.Errorf("%s: starter weapon %q not found", fileWeapons, d.weapons.Starter)
+		}
+		d.starterWeapon = starter
+	}
 	for si := range d.waves.Spans {
 		span := &d.waves.Spans[si]
 		span.weights = make([]float64, len(span.Enemies))
@@ -220,6 +300,16 @@ func (d *gameData) check() error {
 		}
 	}
 	return nil
+}
+
+// weaponIndex returns the position of the weapon called name in the weapons file.
+func (d *gameData) weaponIndex(name string) (int, bool) {
+	for i := range d.weapons.Weapons {
+		if d.weapons.Weapons[i].Name == name {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 // enemyIndex returns the position of the enemy kind called name in the enemies file.
@@ -235,6 +325,30 @@ func (d *gameData) enemyIndex(name string) (int, bool) {
 // parseRunFile decodes and validates data/run.yaml, refusing unknown fields, trailing documents and values a run cannot use.
 func parseRunFile(file string, data []byte) (*runFile, error) {
 	var f runFile
+	if err := decodeStrict(file, data, &f); err != nil {
+		return nil, err
+	}
+	if err := f.validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", file, err)
+	}
+	return &f, nil
+}
+
+// parseWeaponFile decodes and validates data/weapons.yaml.
+func parseWeaponFile(file string, data []byte) (*weaponFile, error) {
+	var f weaponFile
+	if err := decodeStrict(file, data, &f); err != nil {
+		return nil, err
+	}
+	if err := f.validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", file, err)
+	}
+	return &f, nil
+}
+
+// parseUpgradeFile decodes and validates data/upgrades.yaml.
+func parseUpgradeFile(file string, data []byte) (*upgradeFile, error) {
+	var f upgradeFile
 	if err := decodeStrict(file, data, &f); err != nil {
 		return nil, err
 	}
@@ -318,27 +432,6 @@ func (r *runFile) validate() error {
 	case !finite(r.Keeper.Invulnerable) || r.Keeper.Invulnerable < 0:
 		return fmt.Errorf("keeper invulnerable %v is negative", r.Keeper.Invulnerable)
 	}
-	w := r.Weapon
-	switch {
-	case !positive(w.Damage):
-		return fmt.Errorf("weapon damage %v is not above 0", w.Damage)
-	case !positive(w.Cooldown):
-		return fmt.Errorf("weapon cooldown %v is not above 0", w.Cooldown)
-	case !positive(w.CooldownMin) || w.CooldownMin > w.Cooldown:
-		return fmt.Errorf("weapon cooldownMin %v is not above 0 and at most %v", w.CooldownMin, w.Cooldown)
-	case !positive(w.Range):
-		return fmt.Errorf("weapon range %v is not above 0", w.Range)
-	case !positive(w.ShotSpeed):
-		return fmt.Errorf("weapon shotSpeed %v is not above 0", w.ShotSpeed)
-	case !positive(w.ShotRadius):
-		return fmt.Errorf("weapon shotRadius %v is not above 0", w.ShotRadius)
-	case !positive(w.ShotLife):
-		return fmt.Errorf("weapon shotLife %v is not above 0", w.ShotLife)
-	case !finite(w.Knockback) || w.Knockback < 0:
-		return fmt.Errorf("weapon knockback %v is negative", w.Knockback)
-	case !positive(w.KnockbackDrag):
-		return fmt.Errorf("weapon knockbackDrag %v is not above 0", w.KnockbackDrag)
-	}
 	e := r.Embers
 	switch {
 	case !positive(e.Radius):
@@ -354,36 +447,219 @@ func (r *runFile) validate() error {
 	case !finite(r.Level.Step) || r.Level.Step < 0:
 		return fmt.Errorf("level step %v is negative", r.Level.Step)
 	}
-	if len(r.Upgrades) == 0 {
-		return errors.New("no upgrades")
+	return nil
+}
+
+func (f *weaponFile) validate() error {
+	switch {
+	case f.Version != weaponVersion:
+		return fmt.Errorf("version %d, want %d", f.Version, weaponVersion)
+	case f.Starter == "":
+		return errors.New("starter weapon is empty")
+	case !positive(f.KnockbackDrag):
+		return fmt.Errorf("knockbackDrag %v is not above 0", f.KnockbackDrag)
+	case len(f.Weapons) == 0:
+		return errors.New("no weapons")
 	}
-	for i := range r.Upgrades {
-		u := &r.Upgrades[i]
-		if u.Name == "" {
-			return fmt.Errorf("upgrade %d has no name", i)
+	foundStarter := false
+	for i := range f.Weapons {
+		w := &f.Weapons[i]
+		if err := w.validate(); err != nil {
+			return err
 		}
-		switch u.Stat {
-		case statDamage, statCooldown, statMoveSpeed, statMaxHealth:
+		if w.Name == f.Starter {
+			foundStarter = true
+		}
+		for _, other := range f.Weapons[:i] {
+			if other.ID == w.ID {
+				return fmt.Errorf("weapon id %q is defined twice", w.ID)
+			}
+			if other.Name == w.Name {
+				return fmt.Errorf("weapon %q is defined twice", w.Name)
+			}
+		}
+	}
+	if !foundStarter {
+		return fmt.Errorf("starter weapon %q is not defined", f.Starter)
+	}
+	return nil
+}
+
+func (w *weaponDef) validate() error {
+	if w.ID == "" {
+		return errors.New("a weapon has no id")
+	}
+	if w.Name == "" {
+		return fmt.Errorf("weapon %q has no name", w.ID)
+	}
+	fail := func(format string, args ...any) error {
+		return fmt.Errorf("weapon %q: %s", w.Name, fmt.Sprintf(format, args...))
+	}
+	switch {
+	case w.Description == "":
+		return fail("has no description")
+	case !positive(w.CooldownMin):
+		return fail("cooldownMin %v is not above 0", w.CooldownMin)
+	case len(w.Levels) == 0:
+		return fail("has no levels")
+	}
+	switch w.Kind {
+	case weaponBolt:
+		switch {
+		case !positive(w.Range):
+			return fail("range %v is not above 0", w.Range)
+		case !positive(w.ShotSpeed):
+			return fail("shotSpeed %v is not above 0", w.ShotSpeed)
+		case !positive(w.ShotRadius):
+			return fail("shotRadius %v is not above 0", w.ShotRadius)
+		case !positive(w.ShotLife):
+			return fail("shotLife %v is not above 0", w.ShotLife)
+		case !finite(w.Spread) || w.Spread < 0:
+			return fail("spread %v is negative", w.Spread)
+		case w.OrbRadius != 0 || w.OrbitSpeed != 0 || w.Duration != 0:
+			return fail("sets fields for another weapon kind")
+		}
+	case weaponHalo:
+		switch {
+		case !positive(w.OrbRadius):
+			return fail("orbRadius %v is not above 0", w.OrbRadius)
+		case !positive(w.OrbitSpeed):
+			return fail("orbitSpeed %v is not above 0", w.OrbitSpeed)
+		case w.Range != 0 || w.ShotSpeed != 0 || w.ShotRadius != 0 || w.ShotLife != 0 || w.Spread != 0 || w.Duration != 0:
+			return fail("sets fields for another weapon kind")
+		}
+	case weaponTrail:
+		if w.Range != 0 || w.ShotSpeed != 0 || w.ShotRadius != 0 || w.ShotLife != 0 || w.Spread != 0 || w.OrbRadius != 0 || w.OrbitSpeed != 0 || w.Duration != 0 {
+			return fail("sets fields for another weapon kind")
+		}
+	case weaponBell:
+		switch {
+		case !positive(w.Duration):
+			return fail("duration %v is not above 0", w.Duration)
+		case w.Range != 0 || w.ShotSpeed != 0 || w.ShotRadius != 0 || w.ShotLife != 0 || w.Spread != 0 || w.OrbRadius != 0 || w.OrbitSpeed != 0:
+			return fail("sets fields for another weapon kind")
+		}
+	default:
+		return fail("kind %q is not %s, %s, %s or %s", w.Kind, weaponBolt, weaponHalo, weaponTrail, weaponBell)
+	}
+	for i := range w.Levels {
+		if err := w.Levels[i].validate(w.Kind, w.CooldownMin); err != nil {
+			return fmt.Errorf("weapon %q: level %d: %w", w.Name, i+1, err)
+		}
+	}
+	return nil
+}
+
+func (l *weaponLevelDef) validate(kind string, cooldownMin float64) error {
+	switch {
+	case !positive(l.Damage):
+		return fmt.Errorf("damage %v is not above 0", l.Damage)
+	case !positive(l.Cooldown):
+		return fmt.Errorf("cooldown %v is not above 0", l.Cooldown)
+	case cooldownMin > l.Cooldown:
+		return fmt.Errorf("cooldown %v is below cooldownMin %v", l.Cooldown, cooldownMin)
+	case !finite(l.Knockback) || l.Knockback < 0:
+		return fmt.Errorf("knockback %v is negative", l.Knockback)
+	}
+	switch kind {
+	case weaponBolt:
+		if l.Count < 1 {
+			return fmt.Errorf("count %d is not at least 1", l.Count)
+		}
+		if l.Pierce < 0 || l.Pierce >= maxShotHits {
+			return fmt.Errorf("pierce %d is not in [0, %d)", l.Pierce, maxShotHits)
+		}
+		if l.Radius != 0 || l.Duration != 0 || l.Tick != 0 {
+			return errors.New("sets fields for another weapon kind")
+		}
+	case weaponHalo:
+		if l.Count < 1 {
+			return fmt.Errorf("count %d is not at least 1", l.Count)
+		}
+		if !positive(l.Radius) {
+			return fmt.Errorf("radius %v is not above 0", l.Radius)
+		}
+		if l.Pierce != 0 || l.Duration != 0 || l.Tick != 0 {
+			return errors.New("sets fields for another weapon kind")
+		}
+	case weaponTrail:
+		if !positive(l.Radius) {
+			return fmt.Errorf("radius %v is not above 0", l.Radius)
+		}
+		if !positive(l.Duration) {
+			return fmt.Errorf("duration %v is not above 0", l.Duration)
+		}
+		if !positive(l.Tick) {
+			return fmt.Errorf("tick %v is not above 0", l.Tick)
+		}
+		if l.Count != 0 || l.Pierce != 0 {
+			return errors.New("sets fields for another weapon kind")
+		}
+	case weaponBell:
+		if !positive(l.Radius) {
+			return fmt.Errorf("radius %v is not above 0", l.Radius)
+		}
+		if l.Count != 0 || l.Pierce != 0 || l.Duration != 0 || l.Tick != 0 {
+			return errors.New("sets fields for another weapon kind")
+		}
+	}
+	return nil
+}
+
+func (f *upgradeFile) validate() error {
+	switch {
+	case f.Version != upgradeVersion:
+		return fmt.Errorf("version %d, want %d", f.Version, upgradeVersion)
+	case f.WeaponSlots < 1:
+		return fmt.Errorf("weaponSlots %d is not at least 1", f.WeaponSlots)
+	case f.PassiveSlots < 1:
+		return fmt.Errorf("passiveSlots %d is not at least 1", f.PassiveSlots)
+	case len(f.Passives) == 0:
+		return errors.New("no passives")
+	}
+	for i := range f.Passives {
+		p := &f.Passives[i]
+		if p.ID == "" {
+			return fmt.Errorf("passive %d has no id", i)
+		}
+		if p.Name == "" {
+			return fmt.Errorf("passive %q has no name", p.ID)
+		}
+		if p.Description == "" {
+			return fmt.Errorf("passive %q has no description", p.Name)
+		}
+		switch p.Stat {
+		case statDamage, statCooldown, statArea, statMoveSpeed, statMaxHealth, statRegen, statPickup, statXPGain:
 		default:
-			return fmt.Errorf("upgrade %q: stat %q is not %s, %s, %s or %s", u.Name, u.Stat, statDamage, statCooldown, statMoveSpeed, statMaxHealth)
+			return fmt.Errorf("passive %q: unknown stat %q", p.Name, p.Stat)
 		}
-		if !positive(u.Amount) {
-			return fmt.Errorf("upgrade %q: amount %v is not above 0", u.Name, u.Amount)
+		if !positive(p.Amount) {
+			return fmt.Errorf("passive %q: amount %v is not above 0", p.Name, p.Amount)
 		}
-		if u.MaxLevel < 1 {
-			return fmt.Errorf("upgrade %q: maxLevel %d is not at least 1", u.Name, u.MaxLevel)
+		if p.MaxLevel < 1 {
+			return fmt.Errorf("passive %q: maxLevel %d is not at least 1", p.Name, p.MaxLevel)
 		}
-		for _, other := range r.Upgrades[:i] {
-			if other.Name == u.Name {
-				return fmt.Errorf("upgrade %q is defined twice", u.Name)
+		if p.Stat == statCooldown && p.Amount*float64(p.MaxLevel) >= 1 {
+			return fmt.Errorf("passive %q: cooldown reduction reaches 100%%", p.Name)
+		}
+		for _, other := range f.Passives[:i] {
+			if other.ID == p.ID {
+				return fmt.Errorf("passive id %q is defined twice", p.ID)
+			}
+			if other.Name == p.Name {
+				return fmt.Errorf("passive %q is defined twice", p.Name)
 			}
 		}
 	}
 	switch {
-	case r.Healing.Name == "":
+	case f.Healing.ID == "":
+		return errors.New("healing card has no id")
+	case f.Healing.Name == "":
 		return errors.New("healing card has no name")
-	case !finite(r.Healing.Fraction) || r.Healing.Fraction <= 0 || r.Healing.Fraction > 1:
-		return fmt.Errorf("healing fraction %v is not in (0, 1]", r.Healing.Fraction)
+	case f.Healing.Description == "":
+		return errors.New("healing card has no description")
+	case !finite(f.Healing.Fraction) || f.Healing.Fraction <= 0 || f.Healing.Fraction > 1:
+		return fmt.Errorf("healing fraction %v is not in (0, 1]", f.Healing.Fraction)
 	}
 	return nil
 }

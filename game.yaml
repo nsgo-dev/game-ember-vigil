@@ -66,6 +66,24 @@ input:
           key: enter
         - kind: gamepadButton
           button: south
+    - name: card_1
+      bindings:
+        - kind: keyCode
+          code: Digit1
+        - kind: gamepadButton
+          button: west
+    - name: card_2
+      bindings:
+        - kind: keyCode
+          code: Digit2
+        - kind: gamepadButton
+          button: north
+    - name: card_3
+      bindings:
+        - kind: keyCode
+          code: Digit3
+        - kind: gamepadButton
+          button: east
   axes:
     - name: move_x
       negative: left
