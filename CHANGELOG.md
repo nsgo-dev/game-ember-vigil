@@ -10,3 +10,4 @@
 - Integrate animated stylized 2D sprite sheets with idle/walk transitions, facing flips, projectile rotation and embedded upgrade card icons, keeping procedural art as a clean fallback (#15, #21 by @oneo-me).
 - Add the title screen with embedded key art and best records, persistent versioned settings and records in `core.Storage`, pause settings and quit confirmation, and live English and Simplified Chinese localization (#6, #22 by @oneo-me).
 - Add the sound mixer, CC0 placeholder music and SFX cues, brighter moonlit arena lighting and forest floor readability, level-up flourish, damage vignette, and adaptive low/medium/high quality presets (#7, #23 by @oneo-me).
+- Integrate the hand-painted Cinderwood Grove arena tiles, forest props and border canopy with procedural fallback, and wire the remaining two-row boss/elite (`hollow_king.png`, `gloomwarden.png`) and weapon (`lantern_halo.png`, `cinder_trail.png`, `bell_toll.png`) sprite sheets (#25, #27 by @oneo-me).
