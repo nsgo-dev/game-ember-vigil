@@ -58,6 +58,10 @@ const (
 	motionChase = "chase"
 	// motionDrift walks at the keeper while swaying across the line between them.
 	motionDrift = "drift"
+	// motionRanged approaches to a preferred distance and fires at the keeper.
+	motionRanged = "ranged"
+	// motionOrbit circles the keeper at an orbit radius while firing.
+	motionOrbit = "orbit"
 )
 
 // gameData is every tuning file a run reads, loaded and cross-checked once at startup.
@@ -180,15 +184,21 @@ type enemyFile struct {
 
 // enemyDef is a kind of enemy: how it moves, how hard it hits and what it leaves behind.
 type enemyDef struct {
-	Name            string   `yaml:"name"`
-	Motion          string   `yaml:"motion"`
-	Health          float64  `yaml:"health"`
-	Speed           float64  `yaml:"speed"`
-	Radius          float64  `yaml:"radius"`
-	Damage          float64  `yaml:"damage"`
-	KnockbackResist float64  `yaml:"knockbackResist"`
-	Embers          int      `yaml:"embers"`
-	Drift           driftDef `yaml:"drift,omitempty"`
+	Name            string       `yaml:"name"`
+	Motion          string       `yaml:"motion"`
+	Elite           bool         `yaml:"elite,omitempty"`
+	Health          float64      `yaml:"health"`
+	Speed           float64      `yaml:"speed"`
+	Radius          float64      `yaml:"radius"`
+	Damage          float64      `yaml:"damage"`
+	KnockbackResist float64      `yaml:"knockbackResist"`
+	Embers          int          `yaml:"embers"`
+	HealDrop        float64      `yaml:"healDrop,omitempty"`
+	Drift           driftDef     `yaml:"drift,omitempty"`
+	Ranged          rangedDef    `yaml:"ranged,omitempty"`
+	Orbit           orbitDef     `yaml:"orbit,omitempty"`
+	Shot            enemyShotDef `yaml:"shot,omitempty"`
+	Split           splitDef     `yaml:"split,omitempty"`
 }
 
 // driftDef is how a drifting enemy sways: Amplitude is the fraction of its speed across its course, and Period is how long one sway takes, in seconds.
@@ -197,12 +207,90 @@ type driftDef struct {
 	Period    float64 `yaml:"period"`
 }
 
-// waveFile is data/waves.yaml: the spawn timeline, the ring spawns appear on and the global living cap.
+// rangedDef is how a ranged enemy holds its distance from the keeper.
+type rangedDef struct {
+	KeepDistance float64 `yaml:"keepDistance"`
+}
+
+// orbitDef is the preferred distance an orbiting enemy circles the keeper at.
+type orbitDef struct {
+	Radius float64 `yaml:"radius"`
+}
+
+// enemyShotDef is the projectile a ranged or orbiting enemy fires toward the keeper.
+type enemyShotDef struct {
+	Range    float64 `yaml:"range"`
+	Cooldown float64 `yaml:"cooldown"`
+	Speed    float64 `yaml:"speed"`
+	Radius   float64 `yaml:"radius"`
+	Life     float64 `yaml:"life"`
+	Damage   float64 `yaml:"damage"`
+}
+
+// splitDef is what an enemy breaks into when it dies.
+type splitDef struct {
+	Enemy string `yaml:"enemy"`
+	Count int    `yaml:"count"`
+}
+
+// waveFile is data/waves.yaml: the spawn timeline, surges, elites, the Hollow King boss, the spawn ring and the global living cap.
 type waveFile struct {
-	Version  int       `yaml:"version"`
-	MaxAlive int       `yaml:"maxAlive"`
-	Ring     ringDef   `yaml:"ring"`
-	Spans    []spanDef `yaml:"spans"`
+	Version  int             `yaml:"version"`
+	MaxAlive int             `yaml:"maxAlive"`
+	Ring     ringDef         `yaml:"ring"`
+	Spans    []spanDef       `yaml:"spans"`
+	Surges   []surgeDef      `yaml:"surges,omitempty"`
+	Elites   []eliteSpawnDef `yaml:"elites,omitempty"`
+	Boss     bossDef         `yaml:"boss"`
+}
+
+// surgeDef is a scheduled burst of enemies at a fixed second on the run clock.
+type surgeDef struct {
+	At     float64 `yaml:"at"`
+	Enemy  string  `yaml:"enemy"`
+	Count  int     `yaml:"count"`
+	Health float64 `yaml:"health"`
+	Damage float64 `yaml:"damage"`
+}
+
+// eliteSpawnDef is a scheduled elite spawn at a fixed second on the run clock.
+type eliteSpawnDef struct {
+	At     float64 `yaml:"at"`
+	Enemy  string  `yaml:"enemy"`
+	Health float64 `yaml:"health"`
+	Damage float64 `yaml:"damage"`
+}
+
+// bossDef is the Hollow King's arrival time, base stats and three-phase attack tuning.
+type bossDef struct {
+	At              float64        `yaml:"at"`
+	Name            string         `yaml:"name"`
+	Health          float64        `yaml:"health"`
+	Speed           float64        `yaml:"speed"`
+	Radius          float64        `yaml:"radius"`
+	Damage          float64        `yaml:"damage"`
+	KnockbackResist float64        `yaml:"knockbackResist"`
+	ClearRadius     float64        `yaml:"clearRadius"`
+	Phases          []bossPhaseDef `yaml:"phases"`
+}
+
+// bossPhaseDef is one phase of the Hollow King's attack cycle, active once its health fraction drops to or below Threshold.
+type bossPhaseDef struct {
+	Threshold      float64 `yaml:"threshold"`
+	SpeedMul       float64 `yaml:"speedMul"`
+	Cooldown       float64 `yaml:"cooldown"`
+	ChargeWindup   float64 `yaml:"chargeWindup"`
+	ChargeDuration float64 `yaml:"chargeDuration"`
+	ChargeSpeed    float64 `yaml:"chargeSpeed"`
+	RingWindup     float64 `yaml:"ringWindup"`
+	BoneCount      int     `yaml:"boneCount"`
+	BoneSpeed      float64 `yaml:"boneSpeed"`
+	BoneRadius     float64 `yaml:"boneRadius"`
+	BoneLife       float64 `yaml:"boneLife"`
+	BoneDamage     float64 `yaml:"boneDamage"`
+	SummonWindup   float64 `yaml:"summonWindup"`
+	SummonEnemy    string  `yaml:"summonEnemy"`
+	SummonCount    int     `yaml:"summonCount"`
 }
 
 // ringDef is how far from the keeper, in world units, a spawn may appear.
@@ -288,6 +376,18 @@ func (d *gameData) check() error {
 		}
 		d.starterWeapon = starter
 	}
+	for i := range d.enemies.Enemies {
+		e := &d.enemies.Enemies[i]
+		if e.Split.Enemy != "" {
+			idx, ok := d.enemyIndex(e.Split.Enemy)
+			if !ok {
+				return fmt.Errorf("%s: enemy %q: split target %q not found", fileEnemies, e.Name, e.Split.Enemy)
+			}
+			if idx == i || d.enemies.Enemies[idx].Split.Enemy != "" {
+				return fmt.Errorf("%s: enemy %q: split target %q cannot split again", fileEnemies, e.Name, e.Split.Enemy)
+			}
+		}
+	}
 	for si := range d.waves.Spans {
 		span := &d.waves.Spans[si]
 		span.weights = make([]float64, len(span.Enemies))
@@ -297,6 +397,24 @@ func (d *gameData) check() error {
 				return fmt.Errorf("%s: span %d: no enemy %q", fileWaves, si, mix.Name)
 			}
 			span.weights[mi] = mix.Weight
+		}
+	}
+	for i := range d.waves.Surges {
+		s := &d.waves.Surges[i]
+		if _, ok := d.enemyIndex(s.Enemy); !ok {
+			return fmt.Errorf("%s: surge %d: no enemy %q", fileWaves, i, s.Enemy)
+		}
+	}
+	for i := range d.waves.Elites {
+		el := &d.waves.Elites[i]
+		if _, ok := d.enemyIndex(el.Enemy); !ok {
+			return fmt.Errorf("%s: elite %d: no enemy %q", fileWaves, i, el.Enemy)
+		}
+	}
+	for i := range d.waves.Boss.Phases {
+		p := &d.waves.Boss.Phases[i]
+		if _, ok := d.enemyIndex(p.SummonEnemy); !ok {
+			return fmt.Errorf("%s: boss phase %d: no enemy %q", fileWaves, i+1, p.SummonEnemy)
 		}
 	}
 	return nil
@@ -693,8 +811,8 @@ func (e *enemyDef) validate() error {
 		return fmt.Errorf("enemy %q: %s", e.Name, fmt.Sprintf(format, args...))
 	}
 	switch {
-	case e.Motion != motionChase && e.Motion != motionDrift:
-		return fail("motion %q is not %s or %s", e.Motion, motionChase, motionDrift)
+	case e.Motion != motionChase && e.Motion != motionDrift && e.Motion != motionRanged && e.Motion != motionOrbit:
+		return fail("motion %q is not %s, %s, %s or %s", e.Motion, motionChase, motionDrift, motionRanged, motionOrbit)
 	case !positive(e.Health):
 		return fail("health %v is not above 0", e.Health)
 	case !positive(e.Speed):
@@ -707,6 +825,13 @@ func (e *enemyDef) validate() error {
 		return fail("knockbackResist %v is not in [0, 1]", e.KnockbackResist)
 	case e.Embers < 0:
 		return fail("embers %d is negative", e.Embers)
+	case !finite(e.HealDrop) || e.HealDrop < 0 || e.HealDrop > 1:
+		return fail("healDrop %v is not in [0, 1]", e.HealDrop)
+	}
+	if e.Split != (splitDef{}) {
+		if e.Split.Enemy == "" || e.Split.Count < 1 {
+			return fail("split needs an enemy name and count at least 1")
+		}
 	}
 	switch e.Motion {
 	case motionDrift:
@@ -716,10 +841,51 @@ func (e *enemyDef) validate() error {
 		if !positive(e.Drift.Period) {
 			return fail("a drifting enemy needs a drift period above 0")
 		}
-	case motionChase:
-		if e.Drift != (driftDef{}) {
-			return fail("a chasing enemy has drift values")
+		if e.Ranged != (rangedDef{}) || e.Orbit != (orbitDef{}) || e.Shot != (enemyShotDef{}) {
+			return fail("sets fields for another motion kind")
 		}
+	case motionChase:
+		if e.Drift != (driftDef{}) || e.Ranged != (rangedDef{}) || e.Orbit != (orbitDef{}) || e.Shot != (enemyShotDef{}) {
+			return fail("a chasing enemy sets fields for another motion kind")
+		}
+	case motionRanged:
+		if !positive(e.Ranged.KeepDistance) {
+			return fail("ranged keepDistance %v is not above 0", e.Ranged.KeepDistance)
+		}
+		if err := e.Shot.validate(); err != nil {
+			return fail("shot: %v", err)
+		}
+		if e.Drift != (driftDef{}) || e.Orbit != (orbitDef{}) {
+			return fail("sets fields for another motion kind")
+		}
+	case motionOrbit:
+		if !positive(e.Orbit.Radius) {
+			return fail("orbit radius %v is not above 0", e.Orbit.Radius)
+		}
+		if err := e.Shot.validate(); err != nil {
+			return fail("shot: %v", err)
+		}
+		if e.Drift != (driftDef{}) || e.Ranged != (rangedDef{}) {
+			return fail("sets fields for another motion kind")
+		}
+	}
+	return nil
+}
+
+func (s *enemyShotDef) validate() error {
+	switch {
+	case !positive(s.Range):
+		return fmt.Errorf("range %v is not above 0", s.Range)
+	case !positive(s.Cooldown):
+		return fmt.Errorf("cooldown %v is not above 0", s.Cooldown)
+	case !positive(s.Speed):
+		return fmt.Errorf("speed %v is not above 0", s.Speed)
+	case !positive(s.Radius):
+		return fmt.Errorf("radius %v is not above 0", s.Radius)
+	case !positive(s.Life):
+		return fmt.Errorf("life %v is not above 0", s.Life)
+	case !positive(s.Damage):
+		return fmt.Errorf("damage %v is not above 0", s.Damage)
 	}
 	return nil
 }
@@ -751,6 +917,129 @@ func (f *waveFile) validate() error {
 		if s.MaxAlive > f.MaxAlive {
 			return fmt.Errorf("span %d: maxAlive %d is above the file's %d", i, s.MaxAlive, f.MaxAlive)
 		}
+	}
+	for i := range f.Surges {
+		s := &f.Surges[i]
+		if err := s.validate(); err != nil {
+			return fmt.Errorf("surge %d: %w", i, err)
+		}
+		if i > 0 && s.At < f.Surges[i-1].At {
+			return fmt.Errorf("surge %d at %v is before surge %d at %v", i, s.At, i-1, f.Surges[i-1].At)
+		}
+	}
+	for i := range f.Elites {
+		el := &f.Elites[i]
+		if err := el.validate(); err != nil {
+			return fmt.Errorf("elite %d: %w", i, err)
+		}
+		if i > 0 && el.At < f.Elites[i-1].At {
+			return fmt.Errorf("elite %d at %v is before elite %d at %v", i, el.At, i-1, f.Elites[i-1].At)
+		}
+	}
+	if err := f.Boss.validate(); err != nil {
+		return fmt.Errorf("boss: %w", err)
+	}
+	return nil
+}
+
+func (s *surgeDef) validate() error {
+	switch {
+	case !finite(s.At) || s.At < 0:
+		return fmt.Errorf("at %v is negative", s.At)
+	case s.Enemy == "":
+		return errors.New("enemy is empty")
+	case s.Count < 1:
+		return fmt.Errorf("count %d is not at least 1", s.Count)
+	case !positive(s.Health):
+		return fmt.Errorf("health %v is not above 0", s.Health)
+	case !positive(s.Damage):
+		return fmt.Errorf("damage %v is not above 0", s.Damage)
+	}
+	return nil
+}
+
+func (e *eliteSpawnDef) validate() error {
+	switch {
+	case !finite(e.At) || e.At < 0:
+		return fmt.Errorf("at %v is negative", e.At)
+	case e.Enemy == "":
+		return errors.New("enemy is empty")
+	case !positive(e.Health):
+		return fmt.Errorf("health %v is not above 0", e.Health)
+	case !positive(e.Damage):
+		return fmt.Errorf("damage %v is not above 0", e.Damage)
+	}
+	return nil
+}
+
+func (b *bossDef) validate() error {
+	switch {
+	case !positive(b.At):
+		return fmt.Errorf("at %v is not above 0", b.At)
+	case b.Name == "":
+		return errors.New("name is empty")
+	case !positive(b.Health):
+		return fmt.Errorf("health %v is not above 0", b.Health)
+	case !positive(b.Speed):
+		return fmt.Errorf("speed %v is not above 0", b.Speed)
+	case !positive(b.Radius):
+		return fmt.Errorf("radius %v is not above 0", b.Radius)
+	case !positive(b.Damage):
+		return fmt.Errorf("damage %v is not above 0", b.Damage)
+	case !finite(b.KnockbackResist) || b.KnockbackResist < 0 || b.KnockbackResist > 1:
+		return fmt.Errorf("knockbackResist %v is not in [0, 1]", b.KnockbackResist)
+	case !finite(b.ClearRadius) || b.ClearRadius < 0:
+		return fmt.Errorf("clearRadius %v is negative", b.ClearRadius)
+	case len(b.Phases) != 3:
+		return fmt.Errorf("phases = %d, want 3", len(b.Phases))
+	}
+	for i := range b.Phases {
+		p := &b.Phases[i]
+		if err := p.validate(); err != nil {
+			return fmt.Errorf("phase %d: %w", i+1, err)
+		}
+		if i == 0 && p.Threshold != 1 {
+			return fmt.Errorf("phase 1 threshold %v, want 1", p.Threshold)
+		}
+		if i > 0 && (p.Threshold <= 0 || p.Threshold >= b.Phases[i-1].Threshold) {
+			return fmt.Errorf("phase %d threshold %v must decrease from %v", i+1, p.Threshold, b.Phases[i-1].Threshold)
+		}
+	}
+	return nil
+}
+
+func (p *bossPhaseDef) validate() error {
+	switch {
+	case !positive(p.Threshold) || p.Threshold > 1:
+		return fmt.Errorf("threshold %v is not in (0, 1]", p.Threshold)
+	case !positive(p.SpeedMul):
+		return fmt.Errorf("speedMul %v is not above 0", p.SpeedMul)
+	case !positive(p.Cooldown):
+		return fmt.Errorf("cooldown %v is not above 0", p.Cooldown)
+	case !positive(p.ChargeWindup):
+		return fmt.Errorf("chargeWindup %v is not above 0", p.ChargeWindup)
+	case !positive(p.ChargeDuration):
+		return fmt.Errorf("chargeDuration %v is not above 0", p.ChargeDuration)
+	case !positive(p.ChargeSpeed):
+		return fmt.Errorf("chargeSpeed %v is not above 0", p.ChargeSpeed)
+	case !positive(p.RingWindup):
+		return fmt.Errorf("ringWindup %v is not above 0", p.RingWindup)
+	case p.BoneCount < 1:
+		return fmt.Errorf("boneCount %d is not at least 1", p.BoneCount)
+	case !positive(p.BoneSpeed):
+		return fmt.Errorf("boneSpeed %v is not above 0", p.BoneSpeed)
+	case !positive(p.BoneRadius):
+		return fmt.Errorf("boneRadius %v is not above 0", p.BoneRadius)
+	case !positive(p.BoneLife):
+		return fmt.Errorf("boneLife %v is not above 0", p.BoneLife)
+	case !positive(p.BoneDamage):
+		return fmt.Errorf("boneDamage %v is not above 0", p.BoneDamage)
+	case !positive(p.SummonWindup):
+		return fmt.Errorf("summonWindup %v is not above 0", p.SummonWindup)
+	case p.SummonEnemy == "":
+		return errors.New("summonEnemy is empty")
+	case p.SummonCount < 1:
+		return fmt.Errorf("summonCount %d is not at least 1", p.SummonCount)
 	}
 	return nil
 }

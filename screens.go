@@ -63,15 +63,21 @@ type hudCard struct {
 type hudState struct {
 	phase Phase
 	// time is the run's clock as minutes and seconds.
-	time      string
-	health    int
-	maxHealth int
-	xp        int
-	xpNeeded  int
-	level     int
-	kills     int
-	cardFocus int
-	weapons   [maxHUDWeapons]hudSlot
+	time          string
+	health        int
+	maxHealth     int
+	xp            int
+	xpNeeded      int
+	level         int
+	kills         int
+	cardFocus     int
+	bossActive    bool
+	bossName      string
+	bossHealth    int
+	bossMaxHealth int
+	bossPhase     int
+	newRecord     bool
+	weapons       [maxHUDWeapons]hudSlot
 	// offers are the cards a level-up offers, empty when none is open.
 	offers [offerCount]hudCard
 }
@@ -98,7 +104,7 @@ func (g *emberVigil) view() core.Node {
 			arena,
 			g.when(phaseArena, func() core.Node { return dynamic(g.hudView) }),
 			g.show(func() bool { return g.inRun(PhaseLevelUp) }, func() core.Node { return dynamic(g.levelUp) }),
-			g.show(func() bool { return g.inRun(PhaseDefeat) }, g.defeatOverlay),
+			g.show(func() bool { return g.inRun(PhaseVictory) || g.inRun(PhaseDefeat) }, func() core.Node { return dynamic(g.resultsOverlay) }),
 			g.when(phaseTitle, g.title),
 			g.when(phasePaused, g.paused),
 			g.when(phaseSettings, g.settings),
@@ -141,6 +147,60 @@ func (g *emberVigil) hudView() core.Node {
 		xp = float64(st.xp) / float64(st.xpNeeded)
 	}
 
+	topChildren := []core.Node{
+		core.View{
+			Style: core.Style{Direction: core.Column, AlignItems: core.AlignStart, Gap: hudGap},
+			Children: []core.Node{
+				core.Text{TestID: "hud-timer", Content: st.time, Style: core.Style{Color: textColor, FontSize: 18, FontWeight: core.FontWeightBold}},
+				meter("hud-health", health, healthColor),
+				meter("hud-xp", xp, xpColor),
+				core.View{
+					Style: core.Style{Direction: core.Row, Gap: 12},
+					Children: []core.Node{
+						label("hud-level", "Level "+strconv.Itoa(st.level), 12, textColor),
+						label("hud-kills", "Kills "+strconv.Itoa(st.kills), 12, dimColor),
+					},
+				},
+				g.weaponSlots(st.weapons),
+			},
+		},
+	}
+	if st.bossActive {
+		bossFrac := float64(0)
+		if st.bossMaxHealth > 0 {
+			bossFrac = float64(st.bossHealth) / float64(st.bossMaxHealth)
+		}
+		phaseTag := "Phase I"
+		switch st.bossPhase {
+		case 2:
+			phaseTag = "Phase II"
+		case 3:
+			phaseTag = "Phase III"
+		}
+		topChildren = append(topChildren, core.View{
+			TestID: "hud-boss",
+			Style: core.Style{
+				Direction:    core.Column,
+				AlignItems:   core.AlignCenter,
+				Gap:          4,
+				Background:   panelColor,
+				CornerRadius: 8,
+				Padding:      core.Symmetric(6, 12),
+			},
+			Children: []core.Node{
+				core.View{
+					Style: core.Style{Direction: core.Row, Gap: 8, AlignItems: core.AlignCenter},
+					Children: []core.Node{
+						label("hud-boss-name", st.bossName, 13, textColor),
+						label("hud-boss-phase", phaseTag, 11, xpColor),
+					},
+				},
+				wideMeter("hud-boss-health", 220, 10, bossFrac, healthColor),
+			},
+		})
+	}
+	topChildren = append(topChildren, button("Pause", buttonSide, g.pause))
+
 	return core.View{
 		TestID:        "hud",
 		PointerEvents: core.PointerEventsBoxNone,
@@ -155,25 +215,7 @@ func (g *emberVigil) hudView() core.Node {
 			Padding:        core.All(12),
 			PaddingEnv:     core.EnvAll(core.EnvSafeArea),
 		},
-		Children: []core.Node{
-			core.View{
-				Style: core.Style{Direction: core.Column, AlignItems: core.AlignStart, Gap: hudGap},
-				Children: []core.Node{
-					core.Text{TestID: "hud-timer", Content: st.time, Style: core.Style{Color: textColor, FontSize: 18, FontWeight: core.FontWeightBold}},
-					meter("hud-health", health, healthColor),
-					meter("hud-xp", xp, xpColor),
-					core.View{
-						Style: core.Style{Direction: core.Row, Gap: 12},
-						Children: []core.Node{
-							label("hud-level", "Level "+strconv.Itoa(st.level), 12, textColor),
-							label("hud-kills", "Kills "+strconv.Itoa(st.kills), 12, dimColor),
-						},
-					},
-					g.weaponSlots(st.weapons),
-				},
-			},
-			button("Pause", buttonSide, g.pause),
-		},
+		Children: topChildren,
 	}
 }
 
@@ -430,16 +472,43 @@ func levelPips(id string, nextLevel, maxLevel int) core.Node {
 	}
 }
 
-// defeatOverlay is the minimal end of a run until the full results screen arrives: what the run came to, and the two ways on.
-func (g *emberVigil) defeatOverlay() core.Node {
+// resultsOverlay is the end-of-run screen for victory and defeat: outcome, time, kills, level, record status and actions.
+func (g *emberVigil) resultsOverlay() core.Node {
 	st := g.hud.Get()
-	return panel("defeat",
-		heading("The ember goes out"),
-		line("Time "+st.time),
-		line("Kills "+strconv.Itoa(st.kills)),
-		line("Level "+strconv.Itoa(st.level)),
-		button("Retry", menuButtonWidth, g.start),
-		button("Title", menuButtonWidth, g.quitRun),
+	badgeText, badgeColor, titleText := "DEFEAT", healthColor, "The ember goes out"
+	if st.phase == PhaseVictory {
+		badgeText, badgeColor, titleText = "VICTORY", xpColor, "Dawn breaks"
+	}
+	recordText, recordColor := "No new record", dimColor
+	if st.newRecord {
+		recordText, recordColor = "New record", xpColor
+	}
+	return panel("results",
+		label("results-outcome", badgeText, 12, badgeColor),
+		heading(titleText),
+		core.View{
+			Style: core.Style{
+				Direction:    core.Column,
+				AlignItems:   core.AlignCenter,
+				Gap:          6,
+				Background:   cardColor,
+				CornerRadius: 10,
+				Padding:      core.Symmetric(12, 24),
+			},
+			Children: []core.Node{
+				label("results-time", "Time "+st.time, 15, textColor),
+				label("results-kills", "Kills "+strconv.Itoa(st.kills), 15, textColor),
+				label("results-level", "Level "+strconv.Itoa(st.level), 15, textColor),
+				label("results-record", recordText, 13, recordColor),
+			},
+		},
+		core.View{
+			Style: core.Style{Direction: core.Row, Gap: 12},
+			Children: []core.Node{
+				button("Play Again", menuButtonWidth, g.start),
+				button("Title", menuButtonWidth, g.quitRun),
+			},
+		},
 	)
 }
 
@@ -506,11 +575,6 @@ func heading(text string) core.Node {
 	return core.Text{Content: text, Style: core.Style{Color: textColor, FontSize: 26, FontWeight: core.FontWeightBold}}
 }
 
-// line is one quiet line of a screen, such as a run's time.
-func line(text string) core.Node {
-	return core.Text{Content: text, Style: core.Style{Color: dimColor, FontSize: 15}}
-}
-
 // label is a small HUD text, which tests find by id.
 func label(id, text string, size core.Points, color core.Color) core.Node {
 	return core.Text{TestID: id, Content: text, Style: core.Style{Color: color, FontSize: size, FontWeight: core.FontWeightBold}}
@@ -518,18 +582,23 @@ func label(id, text string, size core.Points, color core.Color) core.Node {
 
 // meter is a bar that fills by fraction, from 0 to 1.
 func meter(id string, fraction float64, color core.Color) core.Node {
+	return wideMeter(id, meterWidth, meterHeight, fraction, color)
+}
+
+// wideMeter is a bar of explicit size that fills by fraction, from 0 to 1.
+func wideMeter(id string, width, height core.Points, fraction float64, color core.Color) core.Node {
 	f := float32(min(max(fraction, 0), 1)) * 100
 	return core.View{
 		TestID: id,
 		Style: core.Style{
-			Width:        core.Pt(meterWidth),
-			Height:       core.Pt(meterHeight),
+			Width:        core.Pt(width),
+			Height:       core.Pt(height),
 			CornerRadius: 4,
 			Overflow:     core.Hidden,
 			Background:   core.RGBA(0x020617, 0.7),
 		},
 		Children: []core.Node{
-			core.View{Style: core.Style{Width: core.Pct(f), Height: core.Pt(meterHeight), Background: color}},
+			core.View{Style: core.Style{Width: core.Pct(f), Height: core.Pt(height), Background: color}},
 		},
 	}
 }

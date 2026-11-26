@@ -62,6 +62,13 @@ type emberVigil struct {
 	hudClock  time.Duration
 	cardFocus int
 
+	// Session record placeholder until persistent storage lands in #6.
+	hasRecord     bool
+	bestTime      float64
+	bestKills     int
+	bestLevel     int
+	lastNewRecord bool
+
 	// size is the arena canvas's size when it last drew, which input maps into virtual pixels.
 	size core.Size
 }
@@ -143,6 +150,9 @@ func (g *emberVigil) update(dt time.Duration) {
 			if snap.Phase == PhaseLevelUp {
 				g.cardFocus = 0
 			}
+			if snap.Phase == PhaseVictory || snap.Phase == PhaseDefeat {
+				g.recordResult(snap)
+			}
 			g.hudClock = 0
 			g.publishHUD()
 			return
@@ -162,15 +172,21 @@ func (g *emberVigil) publishHUD() {
 	}
 	s := g.run.Snapshot()
 	st := hudState{
-		phase:     s.Phase,
-		time:      clockText(s.Time),
-		health:    max(0, int(math.Ceil(s.Health))),
-		maxHealth: int(math.Round(s.MaxHealth)),
-		xp:        int(math.Round(s.XP)),
-		xpNeeded:  int(math.Ceil(s.XPNeeded)),
-		level:     s.Level,
-		kills:     s.Kills,
-		cardFocus: g.cardFocus,
+		phase:         s.Phase,
+		time:          clockText(s.Time),
+		health:        max(0, int(math.Ceil(s.Health))),
+		maxHealth:     int(math.Round(s.MaxHealth)),
+		xp:            int(math.Round(s.XP)),
+		xpNeeded:      int(math.Ceil(s.XPNeeded)),
+		level:         s.Level,
+		kills:         s.Kills,
+		cardFocus:     g.cardFocus,
+		bossActive:    s.Boss.Active,
+		bossName:      s.Boss.Name,
+		bossHealth:    max(0, int(math.Ceil(s.Boss.Health))),
+		bossMaxHealth: int(math.Round(s.Boss.MaxHealth)),
+		bossPhase:     s.Boss.Phase,
+		newRecord:     g.lastNewRecord,
 	}
 	for i := range st.weapons {
 		if i < len(s.Weapons) {
@@ -206,6 +222,22 @@ func (g *emberVigil) setPhase(p phase) {
 	g.actions.Reset()
 }
 
+// recordResult updates the in-session record placeholder when a run ends in victory or defeat.
+func (g *emberVigil) recordResult(s Snapshot) {
+	isNew := !g.hasRecord || s.Time > g.bestTime || s.Kills > g.bestKills || s.Level > g.bestLevel
+	if !g.hasRecord || s.Time > g.bestTime {
+		g.bestTime = s.Time
+	}
+	if !g.hasRecord || s.Kills > g.bestKills {
+		g.bestKills = s.Kills
+	}
+	if !g.hasRecord || s.Level > g.bestLevel {
+		g.bestLevel = s.Level
+	}
+	g.hasRecord = true
+	g.lastNewRecord = isNew
+}
+
 // start begins a run from the wall clock's seed, which the run itself never reads, and keeps that seed for the arena's ground.
 func (g *emberVigil) start() {
 	g.seed = uint64(time.Now().UnixNano())
@@ -213,6 +245,7 @@ func (g *emberVigil) start() {
 	g.scene.startRun(g.seed)
 	g.hudClock = 0
 	g.cardFocus = 0
+	g.lastNewRecord = false
 	g.setPhase(phaseArena)
 	g.publishHUD()
 }
@@ -279,6 +312,12 @@ func (g *emberVigil) confirm() {
 	switch g.phase.GetUntracked() {
 	case phaseTitle:
 		g.start()
+	case phaseArena:
+		if g.run != nil {
+			if p := g.run.Snapshot().Phase; p == PhaseVictory || p == PhaseDefeat {
+				g.start()
+			}
+		}
 	case phasePaused:
 		g.resume()
 	case phaseSettings:

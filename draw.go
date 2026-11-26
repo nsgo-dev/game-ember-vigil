@@ -44,6 +44,11 @@ const (
 	kindMite = iota
 	kindMoth
 	kindHusk
+	kindThornling
+	kindWisp
+	kindShade
+	kindGloomwarden
+	kindHollowKing
 )
 
 // enemyKind maps a snapshot's enemy name to the picture the arena draws for it.
@@ -53,6 +58,16 @@ func enemyKind(name string) int {
 		return kindMoth
 	case "Husk":
 		return kindHusk
+	case "Thornling":
+		return kindThornling
+	case "Wisp":
+		return kindWisp
+	case "Shade":
+		return kindShade
+	case "Gloomwarden":
+		return kindGloomwarden
+	case "Hollow King":
+		return kindHollowKing
 	default:
 		return kindMite
 	}
@@ -135,13 +150,16 @@ type arenaRenderer struct {
 	// invuln is how much of the keeper's invulnerability is left, which the keeper blinks through.
 	invuln float64
 
-	keeper  actor
-	enemies []actor
-	shots   []actor
-	embers  []actor
-	halo    []actor
-	patches []PatchView
-	pulses  []PulseView
+	keeper     actor
+	enemies    []actor
+	shots      []actor
+	enemyShots []actor
+	embers     []actor
+	pickups    []actor
+	halo       []actor
+	patches    []PatchView
+	pulses     []PulseView
+	boss       BossView
 
 	// before holds where each id was last step so a frame between steps can blend; spare is the map the next step fills, swapped in when it is done.
 	before, spare map[uint64]Vec2
@@ -190,10 +208,13 @@ func (r *arenaRenderer) startRun(seed uint64) {
 	r.keeper = actor{}
 	r.enemies = r.enemies[:0]
 	r.shots = r.shots[:0]
+	r.enemyShots = r.enemyShots[:0]
 	r.embers = r.embers[:0]
+	r.pickups = r.pickups[:0]
 	r.halo = r.halo[:0]
 	r.patches = r.patches[:0]
 	r.pulses = r.pulses[:0]
+	r.boss = BossView{}
 	clear(r.before)
 	clear(r.spare)
 	r.fx = effects{flash: map[uint64]float64{}}
@@ -229,11 +250,14 @@ func (r *arenaRenderer) sync(s Snapshot, events []Event, dt float64) {
 	r.trackKeeper(s)
 	r.trackEnemies(s)
 	r.trackShots(s)
+	r.trackEnemyShots(s)
+	r.trackPickups(s)
 	r.before, r.spare = r.spare, r.before
 	r.trackEmbers(s)
 	r.trackHalo(s)
 	r.patches = append(r.patches[:0], s.Patches...)
 	r.pulses = append(r.pulses[:0], s.Pulses...)
+	r.boss = s.Boss
 	r.stepEffects(events, dt)
 	r.emitTrails(dt)
 	r.fresh = true
@@ -261,6 +285,22 @@ func (r *arenaRenderer) trackShots(s Snapshot) {
 	r.shots = growActors(r.shots, len(s.Shots))
 	for i, sh := range s.Shots {
 		r.shots[i] = r.tracked(r.shots[i], sh.ID, 0, sh.Radius, sh.Pos)
+	}
+}
+
+// trackEnemyShots copies enemy projectiles, blending them by id.
+func (r *arenaRenderer) trackEnemyShots(s Snapshot) {
+	r.enemyShots = growActors(r.enemyShots, len(s.EnemyShots))
+	for i, sh := range s.EnemyShots {
+		r.enemyShots[i] = r.tracked(r.enemyShots[i], sh.ID, int(sh.Kind), sh.Radius, sh.Pos)
+	}
+}
+
+// trackPickups copies elite healing caches, blending them by id.
+func (r *arenaRenderer) trackPickups(s Snapshot) {
+	r.pickups = growActors(r.pickups, len(s.Pickups))
+	for i, p := range s.Pickups {
+		r.pickups[i] = r.tracked(r.pickups[i], p.ID, 0, 6, p.Pos)
 	}
 }
 
@@ -347,6 +387,16 @@ func (r *arenaRenderer) stepEffects(events []Event, dt float64) {
 			fx.shake = math.Min(1, fx.shake+0.12)
 		case EventEmber:
 			r.burst(e.Pos, particleSpark, 2, 30, sparkSeconds)
+		case EventBossSpawn:
+			r.burst(e.Pos, particlePuff, 14, 48, puffSeconds*1.3)
+			r.burst(e.Pos, particleSpark, 10, 56, sparkSeconds*1.4)
+			fx.shake = 0.9
+		case EventBossPhase:
+			r.burst(e.Pos, particleSpark, 12, 60, sparkSeconds*1.3)
+			fx.shake = math.Min(1, fx.shake+0.65)
+		case EventVictory:
+			r.burst(e.Pos, particleSpark, 24, 70, sparkSeconds*1.6)
+			fx.shake = 0.85
 		case EventDefeat:
 			fx.shake = 1
 		}
@@ -408,11 +458,14 @@ func (r *arenaRenderer) draw(d *core.Drawing, alpha float64) {
 	ox, oy := r.origin()
 	d.DrawImageFrom(r.groundSource, ox, oy, w, h, 0, 0, w, h)
 	r.drawPatches(d, ox, oy)
+	r.drawBossTelegraph(d, ox, oy)
 
 	r.used, r.flashing = 0, 0
 	r.addEmbers(ox, oy)
+	r.addPickups(ox, oy)
 	r.addEnemies(ox, oy)
 	r.addShots(ox, oy)
+	r.addEnemyShots(ox, oy)
 	r.addHalo(ox, oy)
 	r.addKeeper(ox, oy)
 	r.addParticles(ox, oy)
@@ -447,7 +500,17 @@ func (r *arenaRenderer) addEmbers(ox, oy float32) {
 	}
 }
 
-// addEnemies adds the living enemies, with a struck one flashing toward hitColor, and a moth bobbing on the wing.
+// addPickups adds elite healing caches waiting on the ground.
+func (r *arenaRenderer) addPickups(ox, oy float32) {
+	for i := range r.pickups {
+		s := r.add(r.art.frames.cache, r.pickups[i], ox, oy, 1, 1)
+		if s != nil {
+			s.Y += float32(math.Round(math.Sin(r.fx.time*5 + float64(r.pickups[i].id))))
+		}
+	}
+}
+
+// addEnemies adds the living enemies, with a struck one flashing toward hitColor, and flying foes bobbing.
 func (r *arenaRenderer) addEnemies(ox, oy float32) {
 	f := r.art.frames
 	for i := range r.enemies {
@@ -458,12 +521,22 @@ func (r *arenaRenderer) addEnemies(ox, oy float32) {
 			frame = f.moth
 		case kindHusk:
 			frame = f.husk
+		case kindThornling:
+			frame = f.thornling
+		case kindWisp:
+			frame = f.wisp
+		case kindShade:
+			frame = f.shade
+		case kindGloomwarden:
+			frame = f.gloomwarden
+		case kindHollowKing:
+			frame = f.hollowking
 		}
 		s := r.add(frame, *e, ox, oy, 1, 2)
 		if s == nil {
 			continue
 		}
-		if e.kind == kindMoth {
+		if e.kind == kindMoth || e.kind == kindWisp {
 			s.Y += float32(math.Round(math.Sin(r.fx.time*6 + float64(e.id))))
 		}
 		if left, ok := r.fx.flash[e.id]; ok {
@@ -476,6 +549,54 @@ func (r *arenaRenderer) addEnemies(ox, oy float32) {
 func (r *arenaRenderer) addShots(ox, oy float32) {
 	for i := range r.shots {
 		r.add(r.art.frames.bolt, r.shots[i], ox, oy, 1, 3)
+	}
+}
+
+// addEnemyShots adds Thornling, Wisp and Hollow King projectiles in flight.
+func (r *arenaRenderer) addEnemyShots(ox, oy float32) {
+	f := r.art.frames
+	for i := range r.enemyShots {
+		frame := f.thorn
+		if r.enemyShots[i].kind == int(enemyShotBone) {
+			frame = f.bone
+		}
+		r.add(frame, r.enemyShots[i], ox, oy, 1, 3)
+	}
+}
+
+// drawBossTelegraph paints the Hollow King's wind-up warning on the ground before sprites draw.
+func (r *arenaRenderer) drawBossTelegraph(d *core.Drawing, ox, oy float32) {
+	b := r.boss
+	if !b.Active || b.Telegraph == "" {
+		return
+	}
+	x, y := toScreen(b.Pos, ox, oy)
+	p := float32(min(max(b.TelegraphProgress, 0), 1))
+	pulse := float32(0.45 + 0.45*p)
+	switch b.Telegraph {
+	case "charge":
+		end := b.Pos.Add(b.TelegraphDir.Scale(b.TelegraphLength))
+		ex, ey := toScreen(end, ox, oy)
+		d.SetStrokeColor(core.RGBA(0xa3341a, 0.35+0.35*p)).
+			SetLineWidth(float32(b.Radius*1.4)).
+			BeginPath().MoveTo(x, y).LineTo(ex, ey).Stroke()
+		d.SetStrokeColor(core.RGBA(0xffd166, pulse)).
+			SetLineWidth(2).
+			BeginPath().MoveTo(x, y).LineTo(ex, ey).Stroke()
+	case "ring":
+		rad := float32(b.TelegraphLength) * (0.45 + 0.55*p)
+		d.SetFillColor(core.RGBA(0xa3341a, 0.14*pulse)).
+			BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Fill()
+		d.SetStrokeColor(core.RGBA(0xd7dce8, pulse)).
+			SetLineWidth(2).
+			BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Stroke()
+	case "summon":
+		rad := float32(b.TelegraphLength)
+		d.SetFillColor(core.RGBA(0x5b4a7f, 0.2*pulse)).
+			BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Fill()
+		d.SetStrokeColor(core.RGBA(0xffb347, pulse)).
+			SetLineWidth(2).
+			BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Stroke()
 	}
 }
 
@@ -634,6 +755,36 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 		l := r.glows[glow]
 		glow++
 		*l = lights2d.Light{X: x, Y: y, Radius: 16, Color: core.RGBA(0xffb347, 0.7), Intensity: 0.4, Falloff: 2, Enabled: true}
+		r.lights = append(r.lights, l)
+	}
+	for i := range r.pickups {
+		if glow == len(r.glows) {
+			break
+		}
+		x, y := toScreen(r.pickups[i].pos, ox, oy)
+		if !inView(x, y) {
+			continue
+		}
+		l := r.glows[glow]
+		glow++
+		*l = lights2d.Light{X: x, Y: y, Radius: 24, Color: core.RGBA(0x3f6b4a, 0.8), Intensity: 0.5, Falloff: 2, Enabled: true}
+		r.lights = append(r.lights, l)
+	}
+	for i := range r.enemyShots {
+		if glow == len(r.glows) {
+			break
+		}
+		x, y := toScreen(r.enemyShots[i].pos, ox, oy)
+		if !inView(x, y) {
+			continue
+		}
+		l := r.glows[glow]
+		glow++
+		c := core.RGBA(0xa3341a, 0.7)
+		if r.enemyShots[i].kind == int(enemyShotBone) {
+			c = core.RGBA(0xd7dce8, 0.65)
+		}
+		*l = lights2d.Light{X: x, Y: y, Radius: 14, Color: c, Intensity: 0.35, Falloff: 2, Enabled: true}
 		r.lights = append(r.lights, l)
 	}
 	for i := range r.embers {
