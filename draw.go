@@ -11,14 +11,13 @@ import (
 	"github.com/nsgo-dev/nsgo/core"
 )
 
-// The arena's look: how fast its camera catches the keeper, how far the lantern reaches into the moonlit twilight, and how much the frame may shake.
+// The arena's look: how fast its camera catches the keeper, how dark the moonlit twilight is, how far the keeper sees through the fog of war, and how much the frame may shake.
 const (
-	cameraEase       = 8.0
-	lanternRadius    = 190
-	lanternFalloff   = 1.3
-	lanternIntensity = 0.72
-	ambientDarkness  = 0.26
-	shakePixels      = 3.0
+	cameraEase      = 8.0
+	ambientDarkness = 0.26
+	visionClear     = 120.0
+	visionSolid     = 210.0
+	shakePixels     = 3.0
 )
 
 // The arena's effect limits: how long flashes, puffs and flourishes live, and how many particles and glow lights one frame may hold, so a crowd never costs the frame budget.
@@ -156,7 +155,7 @@ type effects struct {
 	time       float64
 }
 
-// arenaRenderer draws the run the shell steps: the ground painted once per run, one sprite batch for everything alive, the effects above them and the lantern's light over it all. It copies each snapshot, since a run reuses its buffers, and never changes the run.
+// arenaRenderer draws the run the shell steps: the ground painted once per run, one sprite batch for everything alive, the effects and glows above them and the fog of war over it all. It copies each snapshot, since a run reuses its buffers, and never changes the run.
 type arenaRenderer struct {
 	art   *art
 	arena Vec2
@@ -165,6 +164,10 @@ type arenaRenderer struct {
 	// ground is the arena painted once from the run's seed, and groundSource what the canvas draws its camera's crop from.
 	ground       *image.RGBA
 	groundSource core.ImageSource
+	// fog is the fog of war's coarse mask over the arena's edges, painted with the ground, and fogMargin the band it covers.
+	fog       *image.RGBA
+	fogSource core.ImageSource
+	fogMargin float64
 
 	cam     camera
 	alpha   float64
@@ -207,7 +210,7 @@ type arenaRenderer struct {
 	// fresh is whether a step arrived since the last frame, which a paused run does not do: a frame between steps blends, a frame without a step holds still.
 	fresh bool
 
-	// batch, pool, effects, lights and the lantern are reused every frame, so drawing a steady frame allocates nothing.
+	// batch, pool, effects and lights are reused every frame, so drawing a steady frame allocates nothing.
 	batch        sprite.Batch
 	sheetBatch   sprite.Batch
 	patchBatch   sprite.Batch
@@ -223,7 +226,6 @@ type arenaRenderer struct {
 	scene        lights2d.Scene
 	lights       []*lights2d.Light
 	glows        []*lights2d.Light
-	lantern      *lights2d.Light
 }
 
 // newArenaRenderer prepares the arena's art, which every run of the app shares.
@@ -237,13 +239,10 @@ func newArenaRenderer(a *art) *arenaRenderer {
 		quality:           defaultQualityProfile(),
 		cosmetics:         random.NewStreams(0).Stream("cosmetics"),
 		fx:                effects{flash: map[uint64]float64{}},
-		lantern:           lights2d.NewLight(0, 0, lanternRadius, core.RGB(0xffb85c)),
 	}
 	if a != nil && a.sheets.keeper.loaded {
 		r.keeperAnim = a.sheets.keeper.idle
 	}
-	r.lantern.Falloff = lanternFalloff
-	r.lantern.Intensity = lanternIntensity
 	for range maxGlowLights {
 		r.glows = append(r.glows, lights2d.NewLight(0, 0, 0, core.RGB(0xffffff)))
 	}
@@ -255,6 +254,8 @@ func (r *arenaRenderer) startRun(seed uint64) {
 	r.seed = seed
 	r.ground = nil
 	r.groundSource = core.ImageSource{}
+	r.fog = nil
+	r.fogSource = core.ImageSource{}
 	r.keeper = actor{}
 	r.enemies = r.enemies[:0]
 	r.shots = r.shots[:0]
@@ -299,12 +300,47 @@ func (r *arenaRenderer) paintGround() {
 	}
 	r.ground = r.art.newGround(r.seed, int(r.arena.X), int(r.arena.Y))
 	r.groundSource = core.ImageSource{Pixels: r.ground, Version: 1}
+	r.fog = nil
+	r.fogSource = core.ImageSource{}
+	if r.fogMargin > 0 {
+		r.fog = newFogMask(r.seed, int(r.arena.X), int(r.arena.Y), r.fogMargin)
+		r.fogSource = core.ImageSource{Pixels: r.fog, Version: 1}
+	}
+}
+
+// drawFog lays the fog of war over the frame: the crop of the arena edges' coarse mask, scaled up smoothly, and the
+// darkness past the keeper's sight, so whatever roams beyond either stays hidden until it comes close.
+func (r *arenaRenderer) drawFog(d *core.Drawing, ox, oy, w, h float32) {
+	if r.fog != nil {
+		d.SetImageSmoothing(true)
+		d.DrawImageFrom(r.fogSource, ox/fogScale, oy/fogScale, w/fogScale, h/fogScale, 0, 0, w, h)
+		d.SetImageSmoothing(false)
+	}
+	if !r.seenKeeper {
+		return
+	}
+	k := r.keeper
+	x := float32(k.was.X+(k.pos.X-k.was.X)*r.alpha) - ox
+	y := float32(k.was.Y+(k.pos.Y-k.was.Y)*r.alpha) - oy
+	// The gradient runs past the farthest corner, so its last stop covers the whole frame however a canvas pads it.
+	outer := float32(math.Hypot(float64(w), float64(h)))
+	at := func(v float64) float32 { return float32(v) / outer }
+	grad := core.CanvasRadial(x, y, 0, x, y, outer,
+		core.GradientStop{Offset: at(visionClear), Color: core.RGBA(fogRGB, 0)},
+		core.GradientStop{Offset: at((visionClear + visionSolid) / 2), Color: core.RGBA(fogRGB, 0.62)},
+		core.GradientStop{Offset: at(visionSolid), Color: fogColor},
+		core.GradientStop{Offset: 1, Color: fogColor},
+	)
+	d.Save()
+	d.SetFillGradient(grad)
+	d.FillRect(0, 0, w, h)
+	d.Restore()
 }
 
 // sync copies a step's snapshot and events for drawing: where everything is this step, where it was last, and the effects the step caused.
 func (r *arenaRenderer) sync(s Snapshot, events []Event, dt float64) {
-	if s.Arena != r.arena {
-		r.arena = s.Arena
+	if r.ground == nil || s.Arena != r.arena || s.Fog != r.fogMargin {
+		r.arena, r.fogMargin = s.Arena, s.Fog
 		r.paintGround()
 	}
 	if !r.started {
@@ -686,6 +722,7 @@ func (r *arenaRenderer) draw(d *core.Drawing, alpha float64) {
 	r.drawLevelFlourish(d, ox, oy)
 
 	r.drawLight(d, w, h)
+	r.drawFog(d, ox, oy, w, h)
 	r.drawDamageVignette(d, w, h)
 }
 
@@ -1226,16 +1263,10 @@ func (r *arenaRenderer) drawDamageVignette(d *core.Drawing, w, h float32) {
 	d.Restore()
 }
 
-// drawLight lays the moonlit twilight tint over the frame and adds the lantern's warm light and the glow of shots and embers on top of it.
+// drawLight lays the moonlit twilight tint over the frame and adds the glow of shots and embers on top of it.
 func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 	ox, oy := r.origin()
-	r.lights = append(r.lights[:0], r.lantern)
-	lx, ly := toScreen(r.keeper.pos, ox, oy)
-	flicker := 3.0*math.Sin(r.fx.time*9) + 1.4*math.Sin(r.fx.time*23.7)
-	r.lantern.X, r.lantern.Y = lx, ly
-	r.lantern.Radius = lanternRadius + float32(flicker)
-	r.lantern.Falloff = lanternFalloff
-	r.lantern.Intensity = lanternIntensity
+	r.lights = r.lights[:0]
 
 	glowLimit := min(r.quality.maxGlowLights, len(r.glows))
 	glow := 0

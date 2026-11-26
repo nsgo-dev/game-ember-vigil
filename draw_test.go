@@ -31,7 +31,7 @@ func countSprites(ops []core.DrawOp) int {
 		switch {
 		case op.Kind == core.DrawAtlas && op.Atlas != nil:
 			n += len(*op.Atlas)
-		case op.Kind == core.DrawImage && op.Image != nil && op.Image.Pixels != nil && !isGround(op.Image):
+		case op.Kind == core.DrawImage && op.Image != nil && op.Image.Pixels != nil && !isGround(op.Image) && !coversView(op):
 			n++
 		}
 	}
@@ -39,6 +39,11 @@ func countSprites(ops []core.DrawOp) int {
 }
 
 // isGround reports whether an image is the arena's whole ground rather than a sprite's atlas.
+// coversView reports whether a drawn image fills the whole view, as the fog of war's crop does, which no sprite does.
+func coversView(op core.DrawOp) bool {
+	return op.X == 0 && op.Y == 0 && op.W == viewWidth && op.H == viewHeight
+}
+
 func isGround(img *core.ImageSource) bool {
 	if img.Pixels == nil {
 		return false
@@ -220,15 +225,15 @@ func TestFrameDrawsTheRunAndItsGround(t *testing.T) {
 		t.Fatal("drawing changed the run")
 	}
 
-	// The frame also lays the darkness and the lantern's glow over the world.
-	lights := 0
+	// The frame also lays the fog of war's crop over the world.
+	fog := 0
 	for _, op := range d.Ops {
-		if op.Kind == core.DrawFillGradient {
-			lights++
+		if op.Kind == core.DrawImage && op.Image != nil && op.Image.Pixels == a.fog {
+			fog++
 		}
 	}
-	if lights == 0 {
-		t.Fatal("the frame drew no light gradient over the darkness")
+	if a.fog == nil || fog != 1 {
+		t.Fatalf("the frame drew %d fog crops, want 1", fog)
 	}
 }
 
@@ -394,7 +399,7 @@ func TestEmbeddedSpriteSheetsSliceCleanly(t *testing.T) {
 		wantCellH        float32
 		wantFacesLeft    bool
 	}{
-		{"keeper", a.sheets.keeper, 4, 4, 0, 64, 64, true},
+		{"keeper", a.sheets.keeper, 4, 4, 0, 64, 64, false},
 		{"mite", a.sheets.mite, 4, 4, 0, 64, 64, false},
 		{"moth", a.sheets.moth, 4, 4, 0, 64, 64, false},
 		{"husk", a.sheets.husk, 4, 4, 0, 64, 64, false},
@@ -749,8 +754,8 @@ func TestSpriteFacingFlipsAndBoltRotation(t *testing.T) {
 	if !foundKeeper || !foundMite || !foundBolt {
 		t.Fatalf("missing sheet sprites: keeper=%v mite=%v bolt=%v", foundKeeper, foundMite, foundBolt)
 	}
-	if !keeperFlip {
-		t.Fatal("keeper moving right had FlipX=false, want FlipX=true because keeper.png defaults left")
+	if keeperFlip {
+		t.Fatal("keeper moving right had FlipX=true, want FlipX=false because keeper.png defaults right")
 	}
 	if !miteFlip {
 		t.Fatal("mite moving left had FlipX=false, want FlipX=true because mite.png defaults right")
@@ -759,7 +764,7 @@ func TestSpriteFacingFlipsAndBoltRotation(t *testing.T) {
 		t.Fatalf("bolt flying down had Rotation=%v, want pi/2", boltRot)
 	}
 
-	// Step 3: reverse horizontal directions -> keeper moves left (FlipX=false), mite moves right (FlipX=false).
+	// Step 3: reverse horizontal directions -> keeper moves left (FlipX=true), mite moves right (FlipX=false).
 	keeperPos.X -= 3
 	mitePos.X += 2
 	a.sync(Snapshot{
@@ -771,8 +776,8 @@ func TestSpriteFacingFlipsAndBoltRotation(t *testing.T) {
 	d.Ops = d.Ops[:0]
 	a.draw(d, 1)
 	for _, s := range a.sheetSprites {
-		if s.Z == 4 && s.FlipX {
-			t.Fatal("keeper moving left had FlipX=true, want FlipX=false")
+		if s.Z == 4 && !s.FlipX {
+			t.Fatal("keeper moving left had FlipX=false, want FlipX=true")
 		}
 		if s.Z == 2 && s.FlipX {
 			t.Fatal("mite moving right had FlipX=true, want FlipX=false")
@@ -875,15 +880,6 @@ func TestLightingReadabilityAndGroundContrast(t *testing.T) {
 	if ambientDarkness < 0.20 || ambientDarkness > 0.32 {
 		t.Fatalf("ambientDarkness = %v, want in [0.20, 0.32] for moonlit readability", ambientDarkness)
 	}
-	if lanternRadius < 170 || lanternRadius > 210 {
-		t.Fatalf("lanternRadius = %v, want in [170, 210]", lanternRadius)
-	}
-	if lanternFalloff < 1.1 || lanternFalloff > 1.5 {
-		t.Fatalf("lanternFalloff = %v, want in [1.1, 1.5]", lanternFalloff)
-	}
-	if lanternIntensity < 0.65 {
-		t.Fatalf("lanternIntensity = %v, want >= 0.65", lanternIntensity)
-	}
 
 	// Ground base soil should have clearly visible luminance (not near-black).
 	r, g, b, _ := groundSoilBase.Components()
@@ -924,9 +920,9 @@ func TestDamageVignetteLevelFlourishAndShakeSetting(t *testing.T) {
 			gradients++
 		}
 	}
-	// At least lantern light + damage vignette radial gradient.
-	if gradients < 2 {
-		t.Fatalf("drew %d radial gradients on damaged frame, want >= 2 (lantern + damage vignette)", gradients)
+	// At least the damage vignette's radial gradient.
+	if gradients < 1 {
+		t.Fatalf("drew %d radial gradients on damaged frame, want >= 1 (damage vignette)", gradients)
 	}
 
 	// Level-up triggers expanding flourish ring and golden sparks.
@@ -982,15 +978,15 @@ func TestQualityLimitsParticlesAndGlowLights(t *testing.T) {
 
 	d := &core.Drawing{}
 	a.draw(d, 1)
-	if got := len(a.lights); got > 1+low.maxGlowLights {
-		t.Fatalf("low quality emitted %d lights, above 1 lantern + %d glows", got, low.maxGlowLights)
+	if got := len(a.lights); got > low.maxGlowLights {
+		t.Fatalf("low quality emitted %d lights, above %d glows", got, low.maxGlowLights)
 	}
 
 	a.setQuality(high)
 	d.Ops = d.Ops[:0]
 	a.draw(d, 1)
-	if got := len(a.lights); got <= 1+low.maxGlowLights {
-		t.Fatalf("high quality emitted %d lights, want more than low cap (%d)", got, 1+low.maxGlowLights)
+	if got := len(a.lights); got <= low.maxGlowLights {
+		t.Fatalf("high quality emitted %d lights, want more than low cap (%d)", got, low.maxGlowLights)
 	}
 }
 
@@ -1072,5 +1068,47 @@ func BenchmarkWorstWave200Enemies(b *testing.B) {
 		a.sync(r.Snapshot(), r.Events(), stepSeconds)
 		d.Ops = d.Ops[:0]
 		a.draw(d, 0.5)
+	}
+}
+
+// TestFogOfWarCoversTheArenaEdgesAndLeavesTheFieldClear checks that the fog mask is clear inside the field and solid at the arena's border, and that a seed paints the same fog.
+func TestFogOfWarCoversTheArenaEdgesAndLeavesTheFieldClear(t *testing.T) {
+	const w, h, fog = 2400, 1760, 240
+	m := newFogMask(3, w, h, fog)
+	alpha := func(x, y int) uint8 { return m.Pix[m.PixOffset(x/fogScale, y/fogScale)+3] }
+	for _, p := range [][2]int{{w / 2, h / 2}, {fog + 8, h / 2}, {w / 2, fog + 8}, {w - fog - 8, h - fog - 8}} {
+		if a := alpha(p[0], p[1]); a > 40 {
+			t.Fatalf("fog at field point %v has alpha %d, want nearly clear", p, a)
+		}
+	}
+	for _, p := range [][2]int{{0, 0}, {20, h / 2}, {w / 2, h - 20}, {w - 20, 20}} {
+		if a := alpha(p[0], p[1]); a != 255 {
+			t.Fatalf("fog at border point %v has alpha %d, want solid", p, a)
+		}
+	}
+	if again := newFogMask(3, w, h, fog); string(again.Pix) != string(m.Pix) {
+		t.Fatal("the same seed painted a different fog")
+	}
+}
+
+// TestFogOfWarDarkensPastTheKeepersSight checks that a frame lays a radial fog centred on the keeper, clear within its sight and solid beyond.
+func TestFogOfWarDarkensPastTheKeepersSight(t *testing.T) {
+	if visionClear <= 0 || visionClear >= visionSolid {
+		t.Fatalf("sight clears to %v and turns solid at %v, want a clear area inside a fading rim", visionClear, visionSolid)
+	}
+	r := quietRun(t)
+	a := newTestArena(t, r, 5)
+	stepOnce(r, Controls{})
+	a.sync(r.Snapshot(), r.Events(), stepSeconds)
+	d := &core.Drawing{}
+	a.draw(d, 1)
+	fog := 0
+	for _, op := range d.Ops {
+		if op.Kind == core.DrawFillGradient {
+			fog++
+		}
+	}
+	if fog == 0 {
+		t.Fatal("the frame laid no fog past the keeper's sight")
 	}
 }

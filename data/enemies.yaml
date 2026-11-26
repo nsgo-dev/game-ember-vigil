@@ -2,7 +2,7 @@ version: 1
 enemies:
   - name: Ash Mite
     motion: chase
-    health: 14
+    health: 16
     speed: 35
     radius: 7
     damage: 10
@@ -10,7 +10,7 @@ enemies:
     embers: 1
   - name: Moth
     motion: drift
-    health: 9
+    health: 10
     speed: 68
     radius: 6
     damage: 8
@@ -21,7 +21,7 @@ enemies:
       period: 1.5
   - name: Husk
     motion: chase
-    health: 48
+    health: 53
     speed: 22
     radius: 11
     damage: 20
@@ -29,7 +29,7 @@ enemies:
     embers: 3
   - name: Thornling
     motion: ranged
-    health: 28
+    health: 31
     speed: 30
     radius: 8
     damage: 12
@@ -46,7 +46,7 @@ enemies:
       damage: 10
   - name: Wisp
     motion: orbit
-    health: 20
+    health: 23
     speed: 54
     radius: 7
     damage: 10
@@ -63,7 +63,7 @@ enemies:
       damage: 9
   - name: Shade
     motion: chase
-    health: 36
+    health: 40
     speed: 42
     radius: 9
     damage: 14
@@ -75,7 +75,7 @@ enemies:
   - name: Gloomwarden
     motion: chase
     elite: true
-    health: 420
+    health: 467
     speed: 32
     radius: 16
     damage: 22

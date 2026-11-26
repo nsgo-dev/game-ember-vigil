@@ -83,10 +83,12 @@ type runFile struct {
 	Level   levelDef  `yaml:"level"`
 }
 
-// arenaDef is the run's world bounds, in world units, which are virtual pixels at zoom one.
+// arenaDef is the run's world bounds, in world units, which are virtual pixels at zoom one. Fog is the band
+// along every edge that the fog of war covers: enemies roam it, but the keeper and what it collects stay inside.
 type arenaDef struct {
 	Width  float64 `yaml:"width"`
 	Height float64 `yaml:"height"`
+	Fog    float64 `yaml:"fog"`
 }
 
 // keeperDef is the keeper's size, speed and health before any upgrade.
@@ -544,6 +546,8 @@ func (r *runFile) validate() error {
 		return fmt.Errorf("version %d, want %d", r.Version, runVersion)
 	case !positive(r.Arena.Width) || !positive(r.Arena.Height):
 		return fmt.Errorf("arena %vx%v is not above 0", r.Arena.Width, r.Arena.Height)
+	case !finite(r.Arena.Fog) || r.Arena.Fog < 0 || 2*r.Arena.Fog >= min(r.Arena.Width, r.Arena.Height):
+		return fmt.Errorf("arena fog %v is not from 0 to under half the arena", r.Arena.Fog)
 	case !positive(r.Keeper.Radius):
 		return fmt.Errorf("keeper radius %v is not above 0", r.Keeper.Radius)
 	case !positive(r.Keeper.Speed):
