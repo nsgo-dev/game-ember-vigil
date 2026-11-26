@@ -5,6 +5,7 @@ import (
 	"image"
 	"math"
 	"testing"
+	"testing/fstest"
 
 	"github.com/nsgo-dev/nsgo/core"
 )
@@ -357,6 +358,310 @@ func TestFrameDrawsNewEnemiesPickupsAndBossTelegraph(t *testing.T) {
 	}
 	if !hasLine {
 		t.Fatal("boss charge telegraph drew no line")
+	}
+}
+
+// TestEmbeddedSpriteSheetsSliceCleanly checks that the embedded #13 sprite sheets decode, slice into the expected frame counts and cell sizes, pack without overlap, and preserve facing metadata.
+func TestEmbeddedSpriteSheetsSliceCleanly(t *testing.T) {
+	a := newArt()
+	if a.sheetAtlas == nil || a.sheetAtlas.Image.Pixels == nil {
+		t.Fatal("embedded sprite sheets produced no sheetAtlas")
+	}
+	b := a.sheetAtlas.Image.Pixels.Bounds()
+
+	checks := []struct {
+		name           string
+		actor          sheetActor
+		wantIdleFrames int
+		wantMoveFrames int
+		wantCellW      float32
+		wantCellH      float32
+		wantFacesLeft  bool
+	}{
+		{"keeper", a.sheets.keeper, 4, 4, 64, 64, true},
+		{"mite", a.sheets.mite, 4, 4, 64, 64, false},
+		{"moth", a.sheets.moth, 4, 4, 64, 64, false},
+		{"husk", a.sheets.husk, 4, 4, 64, 64, false},
+		{"ember", a.sheets.ember, 4, 4, 32, 32, false},
+		{"bolt", a.sheets.bolt, 4, 4, 32, 32, false},
+	}
+	for _, tc := range checks {
+		if !tc.actor.loaded {
+			t.Fatalf("sheet %q was not loaded", tc.name)
+		}
+		if len(tc.actor.idle.Frames) != tc.wantIdleFrames {
+			t.Fatalf("sheet %q idle has %d frames, want %d", tc.name, len(tc.actor.idle.Frames), tc.wantIdleFrames)
+		}
+		if len(tc.actor.move.Frames) != tc.wantMoveFrames {
+			t.Fatalf("sheet %q move has %d frames, want %d", tc.name, len(tc.actor.move.Frames), tc.wantMoveFrames)
+		}
+		if tc.actor.defaultFacesLeft != tc.wantFacesLeft {
+			t.Fatalf("sheet %q defaultFacesLeft = %v, want %v", tc.name, tc.actor.defaultFacesLeft, tc.wantFacesLeft)
+		}
+		if tc.actor.scale <= 0 {
+			t.Fatalf("sheet %q scale = %v, want positive", tc.name, tc.actor.scale)
+		}
+		for _, af := range tc.actor.move.Frames {
+			f := af.Frame
+			if f.W != tc.wantCellW || f.H != tc.wantCellH {
+				t.Fatalf("sheet %q frame %q size = %vx%v, want %vx%v", tc.name, f.Name, f.W, f.H, tc.wantCellW, tc.wantCellH)
+			}
+			if f.PivotX != f.W/2 || f.PivotY != f.H/2 {
+				t.Fatalf("sheet %q frame %q pivot = (%v,%v), want center", tc.name, f.Name, f.PivotX, f.PivotY)
+			}
+		}
+	}
+
+	// Verify keeper idle and walk clips use distinct rows/frames.
+	if a.sheets.keeper.idle.Frames[0].Frame.Name == a.sheets.keeper.move.Frames[0].Frame.Name {
+		t.Fatal("keeper idle and walk clips share the same first frame")
+	}
+
+	// Verify no two packed frames in sheetAtlas overlap and all fit inside the atlas bounds.
+	all := make([]string, 0, len(a.sheetAtlas.Frames))
+	for name, f := range a.sheetAtlas.Frames {
+		if f.X < 0 || f.Y < 0 || f.X+f.W > float32(b.Dx()) || f.Y+f.H > float32(b.Dy()) {
+			t.Fatalf("sheet frame %q = %+v lies outside %v", name, f, b)
+		}
+		all = append(all, name)
+	}
+	for i := 0; i < len(all); i++ {
+		f := a.sheetAtlas.Frames[all[i]]
+		for j := i + 1; j < len(all); j++ {
+			o := a.sheetAtlas.Frames[all[j]]
+			if f.X < o.X+o.W && o.X < f.X+f.W && f.Y < o.Y+o.H && o.Y < f.Y+f.H {
+				t.Fatalf("sheet frames %q and %q overlap", all[i], all[j])
+			}
+		}
+	}
+}
+
+// TestAnimationAdvancesAndFreezesWhenPaused checks idle/walk transitions, animation progression, per-id phase offsets, and freezing when paused.
+func TestAnimationAdvancesAndFreezesWhenPaused(t *testing.T) {
+	a := newArenaRenderer(newArt())
+	a.startRun(42)
+	arena := Vec2{X: 1920, Y: 1280}
+	pos := Vec2{X: 960, Y: 640}
+
+	// Initial idle step.
+	a.sync(Snapshot{Phase: PhasePlaying, Arena: arena, Keeper: pos}, nil, stepSeconds)
+	idleStart := a.keeperAnim.Frame().Name
+	if a.keeperAnimMoving {
+		t.Fatal("stationary keeper switched to walk animation")
+	}
+
+	// Advance enough fixed steps for idle to step to the next frame.
+	for range 15 {
+		a.sync(Snapshot{Phase: PhasePlaying, Arena: arena, Keeper: pos}, nil, stepSeconds)
+	}
+	if got := a.keeperAnim.Frame().Name; got == idleStart {
+		t.Fatalf("keeper idle stayed on %q after 15 steps", got)
+	}
+
+	// Start moving: keeper should switch to walk clip and advance frames.
+	pos.X += 4
+	a.sync(Snapshot{Phase: PhasePlaying, Arena: arena, Keeper: pos}, nil, stepSeconds)
+	if !a.keeperAnimMoving {
+		t.Fatal("moving keeper did not switch to walk animation")
+	}
+	walkStart := a.keeperAnim.Frame().Name
+	for range 10 {
+		pos.X += 2
+		a.sync(Snapshot{Phase: PhasePlaying, Arena: arena, Keeper: pos}, nil, stepSeconds)
+	}
+	if got := a.keeperAnim.Frame().Name; got == walkStart {
+		t.Fatalf("keeper walk stayed on %q after 10 moving steps", got)
+	}
+
+	// Pause via PhaseLevelUp: animTime and keeper frame must freeze.
+	frozenTime := a.animTime
+	frozenFrame := a.keeperAnim.Frame().Name
+	for range 20 {
+		a.sync(Snapshot{Phase: PhaseLevelUp, Arena: arena, Keeper: pos}, nil, stepSeconds)
+	}
+	if a.animTime != frozenTime || a.keeperAnim.Frame().Name != frozenFrame {
+		t.Fatalf("animation advanced while paused: time %v->%v, frame %q->%q", frozenTime, a.animTime, frozenFrame, a.keeperAnim.Frame().Name)
+	}
+
+	// Verify per-id phase offsets spread enemies across frames rather than locking them together.
+	seen := map[string]bool{}
+	for id := uint64(1); id <= 32; id++ {
+		fr := sampleAnimation(a.art.sheets.mite, id, a.animTime)
+		seen[fr.Name] = true
+	}
+	if len(seen) < 2 {
+		t.Fatalf("32 enemy IDs sampled only %d distinct frame(s), want phase-offset variety", len(seen))
+	}
+}
+
+// TestSpriteFacingFlipsAndBoltRotation checks horizontal flip rules (including keeper.png facing left by default), enemy flips, bolt rotation, and image smoothing toggles.
+func TestSpriteFacingFlipsAndBoltRotation(t *testing.T) {
+	a := newArenaRenderer(newArt())
+	a.startRun(7)
+	arena := Vec2{X: 1920, Y: 1280}
+	keeperPos := Vec2{X: 960, Y: 640}
+	mitePos := Vec2{X: 1000, Y: 640}
+	boltPos := Vec2{X: 980, Y: 640}
+
+	// Step 1: place actors.
+	a.sync(Snapshot{
+		Phase:   PhasePlaying,
+		Arena:   arena,
+		Keeper:  keeperPos,
+		Enemies: []EnemyView{{ID: 10, Kind: "Ash Mite", Pos: mitePos, Radius: 7}},
+		Shots:   []ShotView{{ID: 20, Pos: boltPos, Radius: 4}},
+	}, nil, stepSeconds)
+
+	// Step 2: keeper moves right (+X -> FlipX=true since keeper.png defaults left),
+	// mite moves left (-X -> FlipX=true since mite.png defaults right),
+	// bolt flies straight down (+Y -> Rotation = pi/2).
+	keeperPos.X += 3
+	mitePos.X -= 2
+	boltPos.Y += 5
+	a.sync(Snapshot{
+		Phase:   PhasePlaying,
+		Arena:   arena,
+		Keeper:  keeperPos,
+		Enemies: []EnemyView{{ID: 10, Kind: "Ash Mite", Pos: mitePos, Radius: 7}},
+		Shots:   []ShotView{{ID: 20, Pos: boltPos, Radius: 4}},
+	}, nil, stepSeconds)
+
+	d := &core.Drawing{}
+	a.draw(d, 1)
+
+	var keeperFlip, miteFlip bool
+	var boltRot float32
+	foundKeeper, foundMite, foundBolt := false, false, false
+	for _, s := range a.sheetSprites {
+		switch s.Z {
+		case 4:
+			keeperFlip, foundKeeper = s.FlipX, true
+		case 2:
+			miteFlip, foundMite = s.FlipX, true
+		case 3:
+			boltRot, foundBolt = s.Rotation, true
+		}
+	}
+	if !foundKeeper || !foundMite || !foundBolt {
+		t.Fatalf("missing sheet sprites: keeper=%v mite=%v bolt=%v", foundKeeper, foundMite, foundBolt)
+	}
+	if !keeperFlip {
+		t.Fatal("keeper moving right had FlipX=false, want FlipX=true because keeper.png defaults left")
+	}
+	if !miteFlip {
+		t.Fatal("mite moving left had FlipX=false, want FlipX=true because mite.png defaults right")
+	}
+	if math.Abs(float64(boltRot)-math.Pi/2) > 1e-4 {
+		t.Fatalf("bolt flying down had Rotation=%v, want pi/2", boltRot)
+	}
+
+	// Step 3: reverse horizontal directions -> keeper moves left (FlipX=false), mite moves right (FlipX=false).
+	keeperPos.X -= 3
+	mitePos.X += 2
+	a.sync(Snapshot{
+		Phase:   PhasePlaying,
+		Arena:   arena,
+		Keeper:  keeperPos,
+		Enemies: []EnemyView{{ID: 10, Kind: "Ash Mite", Pos: mitePos, Radius: 7}},
+	}, nil, stepSeconds)
+	d.Ops = d.Ops[:0]
+	a.draw(d, 1)
+	for _, s := range a.sheetSprites {
+		if s.Z == 4 && s.FlipX {
+			t.Fatal("keeper moving left had FlipX=true, want FlipX=false")
+		}
+		if s.Z == 2 && s.FlipX {
+			t.Fatal("mite moving right had FlipX=true, want FlipX=false")
+		}
+	}
+
+	// Confirm the stylized sheet batch rendered with smooth image sampling.
+	smoothed := false
+	for _, op := range d.Ops {
+		if (op.Kind == core.DrawAtlas || op.Kind == core.DrawImage) && op.Image != nil && !isGround(op.Image) && op.Sampling == core.ImageSamplingSmooth {
+			smoothed = true
+			break
+		}
+	}
+	if !smoothed {
+		t.Fatal("draw did not use smooth image sampling for stylized sprite sheets")
+	}
+}
+
+// TestMissingSpritesAndIconsFallBackCleanly checks that missing or corrupt sprite sheets and icons fall back to the procedural atlas and glyph badges without panicking.
+func TestMissingSpritesAndIconsFallBackCleanly(t *testing.T) {
+	empty := fstest.MapFS{}
+	fallbackArt := newArtFromFS(empty, empty)
+	if fallbackArt.sheetAtlas != nil {
+		t.Fatal("empty FS produced a non-nil sheetAtlas")
+	}
+	if fallbackArt.sheets.keeper.loaded || fallbackArt.sheets.mite.loaded {
+		t.Fatal("empty FS marked sprite sheets as loaded")
+	}
+	if _, ok := fallbackArt.cardIcon("ember-bolt"); ok {
+		t.Fatal("empty FS returned a card icon")
+	}
+
+	// Render a full frame using only the procedural fallback atlas.
+	r := quietRun(t)
+	r.addEnemy(0, r.keeper.pos.Add(Vec2{X: 30}), 1, 1)
+	r.addEnemy(1, r.keeper.pos.Add(Vec2{X: -30}), 1, 1)
+	a := newArenaRenderer(fallbackArt)
+	a.startRun(5)
+	stepOnce(r, Controls{})
+	a.sync(r.Snapshot(), r.Events(), stepSeconds)
+	d := &core.Drawing{}
+	a.draw(d, 1)
+	if got := countSprites(d.Ops); got < 3 {
+		t.Fatalf("fallback frame drew %d sprites, want at least keeper and two enemies", got)
+	}
+	if len(a.sheetSprites) != 0 {
+		t.Fatalf("fallback frame populated %d sheetSprites, want 0", len(a.sheetSprites))
+	}
+
+	// Corrupt PNG bytes for one sheet must be ignored without panicking while valid sheets still load.
+	keeperBytes, err := embeddedSprites.ReadFile("assets/sprites/keeper.png")
+	if err != nil {
+		t.Fatalf("reading embedded keeper.png: %v", err)
+	}
+	partial := fstest.MapFS{
+		"assets/sprites/keeper.png": &fstest.MapFile{Data: keeperBytes},
+		"assets/sprites/mite.png":   &fstest.MapFile{Data: []byte("not a png")},
+	}
+	partArt := newArtFromFS(partial, empty)
+	if !partArt.sheets.keeper.loaded {
+		t.Fatal("valid keeper.png failed to load alongside corrupt mite.png")
+	}
+	if partArt.sheets.mite.loaded {
+		t.Fatal("corrupt mite.png was marked loaded")
+	}
+}
+
+// TestUpgradeCardIconsLoadAndFallback checks that all 12 embedded card icons load as 64x64 images and the heal fallback card returns false.
+func TestUpgradeCardIconsLoadAndFallback(t *testing.T) {
+	a := newArt()
+	expected := []string{
+		"ember-bolt", "lantern-halo", "cinder-trail", "bell-toll",
+		"wick", "oil", "reach", "step", "warmth", "mending", "gathering", "glow",
+	}
+	for _, id := range expected {
+		src, ok := a.cardIcon(id)
+		if !ok {
+			t.Fatalf("missing embedded card icon for %q", id)
+		}
+		if src.Pixels == nil {
+			t.Fatalf("card icon %q has nil Pixels", id)
+		}
+		b := src.Pixels.Bounds()
+		if b.Dx() != 64 || b.Dy() != 64 {
+			t.Fatalf("card icon %q size = %dx%d, want 64x64", id, b.Dx(), b.Dy())
+		}
+	}
+	if _, ok := a.cardIcon("ember-heal"); ok {
+		t.Fatal("ember-heal unexpectedly matched an embedded icon")
+	}
+	if _, ok := a.cardIcon("unknown-card"); ok {
+		t.Fatal("unknown-card unexpectedly matched an embedded icon")
 	}
 }
 
