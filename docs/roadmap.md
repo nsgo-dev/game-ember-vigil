@@ -24,10 +24,12 @@ The first version ships in three milestones. The developer closes one issue befo
 | Issue | Delivers | Depends on |
 | --- | --- | --- |
 | [#7](https://github.com/oneo-me/test-game-2/issues/7) | Audio, game feel and quality presets | #3, #4, #5 |
-| [#8](https://github.com/oneo-me/test-game-2/issues/8) | Touch layout, web build and release packaging | #5, #6, #7, #9, #14, #15 |
+| [#8](https://github.com/oneo-me/test-game-2/issues/8) | Touch layout, web build and release packaging | #5, #6, #7, #9, #14, #15, #24, #25 |
 | [#9](https://github.com/oneo-me/test-game-2/issues/9) | App icon and title key art | — |
 | [#13](https://github.com/oneo-me/test-game-2/issues/13) | Core actor sprite sheets and upgrade card icons | #9 |
 | [#14](https://github.com/oneo-me/test-game-2/issues/14) | Late-wave enemies, elite and Hollow King sprite sheets | #13 |
+| [#24](https://github.com/oneo-me/test-game-2/issues/24) | Arena environment ground tiles and forest props | #9 |
+| [#25](https://github.com/oneo-me/test-game-2/issues/25) | Arena environment art and late-wave sprite wiring | #14, #15, #24 |
 
 ## Later
 

@@ -12,7 +12,7 @@ Animations advance on fixed steps only while `Phase == PhasePlaying`, freezing c
 
 Positions come from the shell's copy of the last two steps: the sprite batch places an actor between where it was and where it is by the loop's alpha, so movement stays smooth on displays faster than the fixed step. A frame with no step behind it, such as a paused run's, holds the last step's places instead of blending toward nothing.
 
-The ground is the exception: 1920×1280 pixels painted once when a run starts, drawn each frame as the camera's crop of it. It comes from a cosmetic stream on the run's seed, so a seed always paints the same forest floor, and painting it never touches the run.
+The ground is the exception: 1920×1280 pixels painted once when a run starts, drawn each frame as the camera's crop of it. It comes from a cosmetic stream on the run's seed, so a seed always paints the same forest floor, and painting it never touches the run. Today it paints procedural soil and decor; once `assets/environment/` lands, `art.go` will tile the hand-painted forest ground and scatter its props and edge canopy onto the same seeded canvas, keeping procedural ground as fallback.
 
 ## Camera
 
