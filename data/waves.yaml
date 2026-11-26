@@ -5,28 +5,28 @@ ring:
   max: 360
 spans:
   - from: 0
-    every: 0.48
-    maxAlive: 80
+    every: 0.62
+    maxAlive: 55
     health: 1
-    damage: 1
+    damage: 1.15
     enemies:
       - name: Ash Mite
         weight: 1
   - from: 60
-    every: 0.392
-    maxAlive: 120
+    every: 0.48
+    maxAlive: 95
     health: 1.1
-    damage: 1.05
+    damage: 1.25
     enemies:
       - name: Ash Mite
         weight: 3
       - name: Moth
         weight: 2
   - from: 120
-    every: 0.328
-    maxAlive: 165
+    every: 0.36
+    maxAlive: 140
     health: 1.25
-    damage: 1.1
+    damage: 1.3
     enemies:
       - name: Ash Mite
         weight: 3
@@ -35,10 +35,10 @@ spans:
       - name: Husk
         weight: 2
   - from: 180
-    every: 0.288
-    maxAlive: 220
+    every: 0.31
+    maxAlive: 200
     health: 1.45
-    damage: 1.15
+    damage: 1.38
     enemies:
       - name: Ash Mite
         weight: 3
@@ -49,10 +49,10 @@ spans:
       - name: Thornling
         weight: 2
   - from: 270
-    every: 0.248
-    maxAlive: 280
-    health: 1.65
-    damage: 1.22
+    every: 0.25
+    maxAlive: 270
+    health: 1.75
+    damage: 1.5
     enemies:
       - name: Ash Mite
         weight: 2
@@ -65,10 +65,10 @@ spans:
       - name: Wisp
         weight: 2
   - from: 360
-    every: 0.216
+    every: 0.21
     maxAlive: 345
-    health: 1.9
-    damage: 1.3
+    health: 2.1
+    damage: 1.65
     enemies:
       - name: Ash Mite
         weight: 2
@@ -83,10 +83,10 @@ spans:
       - name: Shade
         weight: 2
   - from: 450
-    every: 0.184
+    every: 0.18
     maxAlive: 413
-    health: 2.2
-    damage: 1.38
+    health: 2.4
+    damage: 1.7
     enemies:
       - name: Moth
         weight: 2
@@ -99,10 +99,10 @@ spans:
       - name: Shade
         weight: 3
   - from: 540
-    every: 0.16
-    maxAlive: 480
-    health: 2.5
-    damage: 1.46
+    every: 0.145
+    maxAlive: 490
+    health: 2.7
+    damage: 1.76
     enemies:
       - name: Husk
         weight: 3
@@ -113,10 +113,10 @@ spans:
       - name: Shade
         weight: 4
   - from: 630
-    every: 0.136
-    maxAlive: 550
-    health: 2.85
-    damage: 1.55
+    every: 0.118
+    maxAlive: 570
+    health: 3.2
+    damage: 1.88
     enemies:
       - name: Husk
         weight: 3
@@ -129,72 +129,72 @@ spans:
 surges:
   - at: 75
     enemy: Ash Mite
-    count: 60
+    count: 40
     health: 1
-    damage: 1
+    damage: 1.15
     surround: true
   - at: 170
     enemy: Moth
-    count: 70
+    count: 55
     health: 1.15
-    damage: 1.05
+    damage: 1.25
     surround: true
   - at: 285
     enemy: Ash Mite
-    count: 90
-    health: 1.45
-    damage: 1.12
+    count: 80
+    health: 1.6
+    damage: 1.4
     surround: true
   - at: 405
     enemy: Thornling
     count: 35
-    health: 1.75
-    damage: 1.2
+    health: 2
+    damage: 1.6
     surround: true
   - at: 510
     enemy: Shade
-    count: 55
-    health: 2.1
-    damage: 1.3
+    count: 65
+    health: 2.4
+    damage: 1.7
     surround: true
   - at: 615
     enemy: Moth
-    count: 110
-    health: 2.45
-    damage: 1.4
+    count: 90
+    health: 3
+    damage: 1.82
     surround: true
 elites:
   - at: 110
     enemy: Gloomwarden
-    health: 0.85
-    damage: 0.95
+    health: 0.7
+    damage: 1.1
   - at: 230
     enemy: Gloomwarden
-    health: 1.15
-    damage: 1.05
+    health: 1.1
+    damage: 1.25
   - at: 350
     enemy: Gloomwarden
-    health: 1.5
-    damage: 1.15
+    health: 1.6
+    damage: 1.45
   - at: 465
     enemy: Gloomwarden
-    health: 1.85
-    damage: 1.28
+    health: 2.2
+    damage: 1.65
   - at: 575
     enemy: Gloomwarden
-    health: 2.25
-    damage: 1.38
+    health: 2.6
+    damage: 1.7
   - at: 660
     enemy: Gloomwarden
-    health: 2.65
-    damage: 1.48
+    health: 3
+    damage: 1.82
 boss:
   at: 720
   name: Hollow King
-  health: 8667
+  health: 20000
   speed: 44
   radius: 20
-  damage: 26
+  damage: 38
   knockbackResist: 0.95
   clearRadius: 160
   phases:
@@ -209,7 +209,7 @@ boss:
       boneSpeed: 120
       boneRadius: 5
       boneLife: 3
-      boneDamage: 14
+      boneDamage: 24
       summonWindup: 0.5
       summonEnemy: Ash Mite
       summonCount: 15
@@ -224,7 +224,7 @@ boss:
       boneSpeed: 135
       boneRadius: 5
       boneLife: 3.2
-      boneDamage: 17
+      boneDamage: 30
       summonWindup: 0.45
       summonEnemy: Moth
       summonCount: 18
@@ -239,7 +239,7 @@ boss:
       boneSpeed: 150
       boneRadius: 5
       boneLife: 3.4
-      boneDamage: 20
+      boneDamage: 36
       summonWindup: 0.4
       summonEnemy: Shade
       summonCount: 15

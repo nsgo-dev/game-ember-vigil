@@ -19,15 +19,16 @@ type botResult struct {
 	seenEnemies  map[string]bool
 }
 
-// playBot runs a deterministic kiting and upgrade-picking bot until Victory, Defeat, or maxMinutes.
-func playBot(seed uint64, maxMinutes int) (*Run, botResult) {
+// playBot runs a deterministic kiting and upgrade-picking bot until Victory, Defeat, or maxMinutes. It steers afresh every react steps and holds its last heading in between, so a larger react plays a slower player.
+func playBot(seed uint64, maxMinutes, react int) (*Run, botResult) {
 	r := NewRun(seed)
 	res := botResult{
 		minHealthPct: 1,
 		seenEnemies:  map[string]bool{},
 	}
 	maxSteps := maxMinutes * 60 * 60
-	for range maxSteps {
+	var controls Controls
+	for step := range maxSteps {
 		snap := r.Snapshot()
 		if snap.MaxHealth > 0 {
 			if pct := snap.Health / snap.MaxHealth; pct < res.minHealthPct {
@@ -48,7 +49,10 @@ func playBot(seed uint64, maxMinutes int) (*Run, botResult) {
 			r.Choose(botChoose(snap))
 			continue
 		}
-		r.Step(stepTime, botControls(snap))
+		if step%react == 0 {
+			controls = botControls(snap)
+		}
+		r.Step(stepTime, controls)
 		for _, ev := range r.Events() {
 			res.eventCount++
 			switch ev.Kind {
@@ -232,31 +236,35 @@ func botChoose(s Snapshot) int {
 	return best
 }
 
-// TestTwelveMinuteBotBalanceAndDeterminism verifies that a bot can complete the 12-minute run and defeat the Hollow King across multiple fixed seeds, sees all enemies and phases, is not trivial when AFK, and replays deterministically.
+// TestTwelveMinuteBotBalanceAndDeterminism verifies that sharp movement wins most runs and sees every enemy and boss phase, that slow movement loses most of the same runs, that standing still loses, and that a run replays deterministically.
 func TestTwelveMinuteBotBalanceAndDeterminism(t *testing.T) {
-	seeds := []uint64{7, 42, 101}
-	wins := 0
-	for _, seed := range seeds {
-		_, res := playBot(seed, 16)
+	const seeds = 10
+	wins, slowWins := 0, 0
+	for seed := uint64(1); seed <= seeds; seed++ {
+		_, res := playBot(seed, 16, 1)
 		t.Logf("seed=%d phase=%v time=%.1fs kills=%d level=%d minHP=%.0f%% boss=%v phases=%d events=%d enemies=%d",
 			seed, res.phase, res.time, res.kills, res.level, res.minHealthPct*100, res.bossSpawned, res.bossPhases, res.eventCount, len(res.seenEnemies))
-		if !res.bossSpawned {
-			t.Fatalf("seed %d never reached the Hollow King at 12:00 (ended at %.1fs, phase=%v)", seed, res.time, res.phase)
-		}
 		if res.phase == PhaseVictory {
 			wins++
 			if res.bossPhases != 2 {
 				t.Fatalf("seed %d recorded %d boss phase transitions, want 2 (phases 2 and 3)", seed, res.bossPhases)
 			}
-		}
-		for _, name := range []string{"Ash Mite", "Moth", "Husk", "Thornling", "Wisp", "Shade", "Gloomwarden", "Hollow King"} {
-			if !res.seenEnemies[name] {
-				t.Fatalf("seed %d never saw %q during the run", seed, name)
+			for _, name := range []string{"Ash Mite", "Moth", "Husk", "Thornling", "Wisp", "Shade", "Gloomwarden", "Hollow King"} {
+				if !res.seenEnemies[name] {
+					t.Fatalf("seed %d never saw %q during the run", seed, name)
+				}
 			}
 		}
+		// The same bot steering only three times a second stands in for a player who does not dodge well.
+		if _, slow := playBot(seed, 16, 20); slow.phase == PhaseVictory {
+			slowWins++
+		}
 	}
-	if wins < len(seeds) {
-		t.Fatalf("bot won %d/%d seeds, want all %d winnable", wins, len(seeds), len(seeds))
+	if wins < 8 {
+		t.Fatalf("sharp bot won %d/%d seeds, want at least 8: good movement should win", wins, seeds)
+	}
+	if slowWins > 3 {
+		t.Fatalf("slow bot won %d/%d seeds, want at most 3: the run should demand movement", slowWins, seeds)
 	}
 
 	// Confirm the run is not trivial: standing still with no movement loses well before 12:00.
@@ -275,8 +283,8 @@ func TestTwelveMinuteBotBalanceAndDeterminism(t *testing.T) {
 	}
 
 	// Confirm full 12-minute determinism on a fixed seed.
-	r1, res1 := playBot(42, 16)
-	r2, res2 := playBot(42, 16)
+	r1, res1 := playBot(42, 16, 1)
+	r2, res2 := playBot(42, 16, 1)
 	if res1.eventCount != res2.eventCount || !reflect.DeepEqual(r1.Snapshot(), r2.Snapshot()) {
 		t.Fatalf("fixed seed 42 did not replay identically: events %d vs %d", res1.eventCount, res2.eventCount)
 	}

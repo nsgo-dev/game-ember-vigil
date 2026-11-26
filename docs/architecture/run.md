@@ -50,6 +50,8 @@ The director reads a timeline of spans keyed by seconds: each span names the ene
 
 Spawns appear on a ring a little outside the view, clamped inside the arena (often in the fog), and never inside the view. A global cap protects frame time; when it is reached, spawns wait instead of dropping the timeline.
 
+The timeline is tuned so pressure holds the whole run and movement decides it: early waves hit harder instead of crowding the keeper in, later spans scale faster than a full build, and `bot_test.go` checks that a bot dodging every step wins most seeds while the same bot steering three times a second loses most.
+
 At 12:00 the director stops normal spawns, clears space and spawns the Hollow King. Its three phases and attacks are data, timed by the run clock and its own action queue.
 
 ## Upgrades
