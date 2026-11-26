@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Tapered vigil lantern glass chamber -->
+  <path d="M352 384
+           L672 384
+           Q694 384 692 408
+           L662 720
+           Q658 746 632 746
+           L392 746
+           Q366 746 362 720
+           L332 408
+           Q330 384 352 384 Z"
+        fill="#ff7a1a"/>
+  <!-- Warm inner amber aura inside the glass -->
+  <path d="M512 418
+           C564 468 624 528 620 612
+           C616 680 572 722 512 722
+           C452 722 408 680 404 612
+           C400 528 460 468 512 418 Z"
+        fill="#ffb347"/>
+</svg>
