@@ -372,8 +372,8 @@ func TestLevelUpCardChosenWithNumberKeyAndConfirm(t *testing.T) {
 	}
 }
 
-// TestDefeatShowsTheOverlay checks that a dead keeper shows the minimal defeat overlay, whose Retry starts a fresh run and whose Title returns to the title screen.
-func TestDefeatShowsTheOverlay(t *testing.T) {
+// TestResultsScreenForDefeatAndVictory checks the results screen on defeat and victory, boss HUD bar, Play Again and Title actions.
+func TestResultsScreenForDefeatAndVictory(t *testing.T) {
 	app, g := startEmberVigil(t)
 	press(t, app, "role:button Start")
 
@@ -383,35 +383,49 @@ func TestDefeatShowsTheOverlay(t *testing.T) {
 	if p := g.run.Snapshot().Phase; p != PhaseDefeat {
 		t.Fatalf("the run's phase with no health is %v, want PhaseDefeat", p)
 	}
-	app.Find("id:defeat")
-	var texts []string
-	texts = app.Texts()
-	for _, want := range []string{"Time ", "Kills ", "Level "} {
-		found := false
-		for _, got := range texts {
-			if len(got) >= len(want) && got[:len(want)] == want {
-				found = true
-			}
-		}
-		if !found {
-			t.Fatalf("the defeat overlay shows no %q line: %v", want, texts)
-		}
+	app.Find("id:results")
+	if got := app.Find("id:results-outcome").Text; got != "DEFEAT" {
+		t.Fatalf("defeat outcome = %q, want DEFEAT", got)
 	}
+	app.Find("id:results-time")
+	app.Find("id:results-kills")
+	app.Find("id:results-level")
+	app.Find("id:results-record")
 
-	press(t, app, "role:button Retry")
+	press(t, app, "role:button Play Again")
 	if g.run == first {
-		t.Fatal("Retry kept the defeated run")
+		t.Fatal("Play Again kept the finished run")
 	}
 	if p := g.run.Snapshot().Phase; p != PhasePlaying {
 		t.Fatalf("the retried run's phase is %v, want PhasePlaying", p)
 	}
-	if app.Exists("id:defeat") {
-		t.Fatal("the defeat overlay stayed after a retry")
+	if app.Exists("id:results") {
+		t.Fatal("the results screen stayed after Play Again")
 	}
 	app.Find("id:hud-timer")
 
-	g.run.keeper.health = 0
+	// Spawn Hollow King and confirm boss health bar appears in the HUD.
+	g.run.spawnBoss()
 	app.Advance(8 * frame)
+	app.Find("id:hud-boss")
+	if got := app.Find("id:hud-boss-name").Text; got != "Hollow King" {
+		t.Fatalf("boss HUD name = %q, want Hollow King", got)
+	}
+	app.Find("id:hud-boss-health")
+
+	// Defeat the Hollow King and confirm Victory results screen and Title action.
+	if be := g.run.bossEnemy(); be != nil {
+		be.hp = 0
+	}
+	app.Advance(8 * frame)
+	if p := g.run.Snapshot().Phase; p != PhaseVictory {
+		t.Fatalf("phase after killing boss = %v, want PhaseVictory", p)
+	}
+	app.Find("id:results")
+	if got := app.Find("id:results-outcome").Text; got != "VICTORY" {
+		t.Fatalf("victory outcome = %q, want VICTORY", got)
+	}
+
 	press(t, app, "role:button Title")
 	if g.phase.Get() != phaseTitle {
 		t.Fatalf("the phase after Title is %v, want phaseTitle", g.phase.Get())

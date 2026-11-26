@@ -60,6 +60,7 @@ func TestDirectorAppliesTheSpanItSpawnsFrom(t *testing.T) {
 	r := quietRun(t)
 	span := &r.data.waves.Spans[2]
 	r.time = span.From
+	r.director.bossSpawned = false
 	r.director.nextSpawn = span.From
 	r.director.step(r)
 	if len(r.enemies) != 1 {
@@ -83,6 +84,7 @@ func TestDirectorWaitsAtTheAliveCap(t *testing.T) {
 	r := quietRun(t)
 	span := &r.data.waves.Spans[0]
 	r.time = 10
+	r.director.bossSpawned = false
 	r.director.nextSpawn = 0
 	for len(r.enemies) < span.MaxAlive {
 		r.addEnemy(0, r.keeper.pos.Add(Vec2{X: 100, Y: 100}), 1, 1)
@@ -102,5 +104,55 @@ func TestDirectorWaitsAtTheAliveCap(t *testing.T) {
 	}
 	if r.director.nextSpawn <= 0 {
 		t.Fatalf("the caught-up spawn did not move the next one past %v", r.director.nextSpawn)
+	}
+}
+
+// TestDirectorTriggersSurgesElitesAndPausesForBoss checks scheduled surges, Gloomwarden elites, and that normal spawns pause once the Hollow King arrives at 12:00.
+func TestDirectorTriggersSurgesElitesAndPausesForBoss(t *testing.T) {
+	r := NewRun(19)
+	r.director.nextSpawn = math.Inf(1)
+
+	// Trigger the first surge.
+	firstSurge := r.data.waves.Surges[0]
+	r.time = firstSurge.At
+	r.director.step(r)
+	if len(r.enemies) == 0 {
+		t.Fatalf("surge at %vs spawned no enemies", firstSurge.At)
+	}
+
+	// Trigger the first elite (Gloomwarden).
+	firstElite := r.data.waves.Elites[0]
+	r.time = firstElite.At
+	r.director.step(r)
+	foundElite := false
+	for _, e := range r.enemies {
+		if e.elite && r.data.enemies.Enemies[e.kind].Name == firstElite.Enemy {
+			foundElite = true
+			break
+		}
+	}
+	if !foundElite {
+		t.Fatalf("elite %q did not spawn at %vs", firstElite.Enemy, firstElite.At)
+	}
+
+	// Reach 12:00: Hollow King spawns, clears wave enemies, and pauses normal spawns.
+	r.director.nextSpawn = r.data.waves.Boss.At
+	r.time = r.data.waves.Boss.At
+	r.director.step(r)
+	if !r.boss.active {
+		t.Fatal("Hollow King did not spawn at 12:00")
+	}
+	if len(r.enemies) != 1 || !r.enemies[0].isBoss {
+		t.Fatalf("expected only the Hollow King on spawn, got %d enemies", len(r.enemies))
+	}
+	if !hasEvent(r.Events(), EventBossSpawn) {
+		t.Fatal("boss arrival emitted no EventBossSpawn")
+	}
+
+	// Further director steps during the boss fight must not spawn regular wave enemies.
+	r.time += 10
+	r.director.step(r)
+	if len(r.enemies) != 1 {
+		t.Fatalf("normal spawns did not pause during boss fight: %d enemies alive", len(r.enemies))
 	}
 }

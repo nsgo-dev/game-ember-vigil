@@ -2,7 +2,7 @@
 
 `run.go` simulates one run without NSGo: no views, devices, sound, storage or wall clock. The shell steps it at 60 Hz with one `Controls` value and reads back the step's events and a snapshot. Tests step it the same way, so every rule is testable headlessly and a seed plus a list of controls replays a run.
 
-Today the model runs the keeper, all four weapons (Ember Bolt, Lantern Halo, Cinder Trail, Bell Toll), all eight passives with four weapon and four passive slots, three enemies, embers, contact, ground patches and pulses on a three-minute timeline. The rest of this document — further enemies, the Hollow King and the twelve-minute timeline — is the target the later milestones complete.
+Today the model runs the complete twelve-minute run: the keeper, all four weapons (Ember Bolt, Lantern Halo, Cinder Trail, Bell Toll), all eight passives with four weapon and four passive slots, all six regular enemies (Ash Mite, Moth, Husk, Thornling, Wisp, Shade), the Gloomwarden elite with healing caches, surges, and the three-phase Hollow King boss at 12:00.
 
 ## Time
 

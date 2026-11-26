@@ -27,3 +27,58 @@ enemies:
     damage: 16
     knockbackResist: 0.65
     embers: 3
+  - name: Thornling
+    motion: ranged
+    health: 20
+    speed: 25
+    radius: 8
+    damage: 9
+    knockbackResist: 0.25
+    embers: 2
+    ranged:
+      keepDistance: 125
+    shot:
+      range: 200
+      cooldown: 2.8
+      speed: 105
+      radius: 4
+      life: 2.2
+      damage: 7
+  - name: Wisp
+    motion: orbit
+    health: 14
+    speed: 48
+    radius: 7
+    damage: 7
+    knockbackResist: 0.2
+    embers: 2
+    orbit:
+      radius: 100
+    shot:
+      range: 185
+      cooldown: 3
+      speed: 100
+      radius: 4
+      life: 2
+      damage: 6
+  - name: Shade
+    motion: chase
+    health: 24
+    speed: 36
+    radius: 9
+    damage: 11
+    knockbackResist: 0.3
+    embers: 3
+    split:
+      enemy: Ash Mite
+      count: 2
+  - name: Gloomwarden
+    motion: chase
+    elite: true
+    health: 190
+    speed: 26
+    radius: 15
+    damage: 18
+    knockbackResist: 0.85
+    embers: 12
+    healDrop: 0.3

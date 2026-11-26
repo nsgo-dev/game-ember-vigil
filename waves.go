@@ -11,11 +11,13 @@ const (
 // spawnTries is how many ring points the director draws in one step before it waits for the next, so a keeper in a corner does not stall a spawn on an impossible point.
 const spawnTries = 8
 
-// director is the wave director: it reads data/waves.yaml at the run clock, picks enemies from the span's mix and spawns them on a ring around the keeper.
+// director is the wave director: it reads data/waves.yaml at the run clock, picks enemies from the span's mix, triggers surges and elites, and hands off to the Hollow King at 12:00.
 type director struct {
-	waves *waveFile
-	// nextSpawn is when the next spawn is due, in seconds on the run clock.
-	nextSpawn float64
+	waves       *waveFile
+	nextSpawn   float64
+	nextSurge   int
+	nextElite   int
+	bossSpawned bool
 }
 
 // newDirector starts the director at the timeline's beginning.
@@ -31,8 +33,48 @@ func (d *director) spanAt(seconds float64) *spanDef {
 	return nil
 }
 
-// step spawns what the timeline owes by now. When the span's cap is full the due spawn waits instead of being skipped, and once room frees the director catches up without passing the cap.
+// step spawns what the timeline owes by now. Normal spawns pause once the Hollow King arrives; before then, scheduled elites, surges and regular span spawns run in order.
 func (d *director) step(r *Run) {
+	if d.bossSpawned || r.boss.active {
+		return
+	}
+	if d.waves.Boss.At > 0 && r.time >= d.waves.Boss.At {
+		d.bossSpawned = true
+		r.spawnBoss()
+		return
+	}
+
+	// Scheduled elites always appear on time (up to maxEnemies), independent of the span's soft alive cap.
+	for d.nextElite < len(d.waves.Elites) && r.time >= d.waves.Elites[d.nextElite].At {
+		el := &d.waves.Elites[d.nextElite]
+		d.nextElite++
+		if kind, ok := r.data.enemyIndex(el.Enemy); ok {
+			def := &r.data.enemies.Enemies[kind]
+			pos, ok := r.spawnPos(def.Radius)
+			if !ok {
+				pos = r.fallbackRingPos(def.Radius)
+			}
+			r.addEnemy(kind, pos, el.Health, el.Damage)
+		}
+	}
+
+	// Scheduled surges spawn a burst around the ring, respecting the global alive cap.
+	for d.nextSurge < len(d.waves.Surges) && r.time >= d.waves.Surges[d.nextSurge].At {
+		s := &d.waves.Surges[d.nextSurge]
+		d.nextSurge++
+		if kind, ok := r.data.enemyIndex(s.Enemy); ok {
+			def := &r.data.enemies.Enemies[kind]
+			for range s.Count {
+				if len(r.enemies) >= d.waves.MaxAlive {
+					break
+				}
+				if pos, ok := r.spawnPos(def.Radius); ok {
+					r.addEnemy(kind, pos, s.Health, s.Damage)
+				}
+			}
+		}
+	}
+
 	span := d.spanAt(r.time)
 	if span == nil {
 		return
@@ -74,6 +116,16 @@ func (r *Run) spawnPos(radius float64) (Vec2, bool) {
 	return Vec2{}, false
 }
 
+// fallbackRingPos places a guaranteed spawn (elite or boss) toward the arena center when random ring attempts fall inside the view.
+func (r *Run) fallbackRingPos(radius float64) Vec2 {
+	center := Vec2{X: r.data.run.Arena.Width / 2, Y: r.data.run.Arena.Height / 2}
+	dir := center.Sub(r.keeper.pos).Normalized()
+	if dir == (Vec2{}) {
+		dir = Vec2{X: 1}
+	}
+	return r.clamp(r.keeper.pos.Add(dir.Scale(r.data.waves.Ring.Min)), radius)
+}
+
 // offscreen reports whether p lies outside the view the arena shows around center.
 func offscreen(center, p Vec2) bool {
 	d := p.Sub(center)
@@ -87,12 +139,25 @@ func (r *Run) addEnemy(kind int, pos Vec2, healthMul, damageMul float64) {
 	}
 	def := &r.data.enemies.Enemies[kind]
 	health := def.Health * healthMul
+	orbitDir := 1.0
+	if def.Motion == motionOrbit && r.spawns.Range(-1, 1) < 0 {
+		orbitDir = -1.0
+	}
+	splitKind := -1
+	if def.Split.Count > 0 && def.Split.Enemy != "" {
+		if idx, ok := r.data.enemyIndex(def.Split.Enemy); ok {
+			splitKind = idx
+		}
+	}
 	r.enemies = append(r.enemies, enemy{
 		id:              r.takeID(),
 		kind:            kind,
+		elite:           def.Elite,
 		pos:             pos,
 		hp:              health,
 		maxHP:           health,
+		healthMul:       healthMul,
+		damageMul:       damageMul,
 		damage:          def.Damage * damageMul,
 		radius:          def.Radius,
 		speed:           def.Speed,
@@ -100,6 +165,19 @@ func (r *Run) addEnemy(kind int, pos Vec2, healthMul, damageMul float64) {
 		driftAmplitude:  def.Drift.Amplitude,
 		driftPeriod:     def.Drift.Period,
 		driftPhase:      r.spawns.Range(0, 2*math.Pi),
+		keepDistance:    def.Ranged.KeepDistance,
+		orbitRadius:     def.Orbit.Radius,
+		orbitDir:        orbitDir,
+		shotRange:       def.Shot.Range,
+		shotPeriod:      def.Shot.Cooldown,
+		shotCooldown:    def.Shot.Cooldown * 0.5,
+		shotSpeed:       def.Shot.Speed,
+		shotRadius:      def.Shot.Radius,
+		shotLife:        def.Shot.Life,
+		shotDamage:      def.Shot.Damage * damageMul,
+		splitKind:       splitKind,
+		splitCount:      def.Split.Count,
+		healDrop:        def.HealDrop,
 		knockbackResist: def.KnockbackResist,
 		embers:          def.Embers,
 	})

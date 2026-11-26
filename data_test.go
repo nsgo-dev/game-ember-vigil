@@ -86,8 +86,14 @@ func TestEmbeddedDataLoads(t *testing.T) {
 	if d.weapons.Weapons[d.starterWeapon].Name != d.weapons.Starter {
 		t.Fatalf("starter weapon index %d points to %q, want %q", d.starterWeapon, d.weapons.Weapons[d.starterWeapon].Name, d.weapons.Starter)
 	}
-	if len(d.enemies.Enemies) == 0 || len(d.waves.Spans) == 0 {
-		t.Fatalf("the embedded data is empty: %+v", d)
+	if len(d.enemies.Enemies) != 7 {
+		t.Fatalf("embedded enemies = %d, want 7 (6 regular + Gloomwarden elite)", len(d.enemies.Enemies))
+	}
+	if len(d.waves.Spans) == 0 || len(d.waves.Surges) == 0 || len(d.waves.Elites) == 0 {
+		t.Fatalf("the embedded waves are incomplete: %+v", d.waves)
+	}
+	if d.waves.Boss.At != 720 || len(d.waves.Boss.Phases) != 3 {
+		t.Fatalf("boss = at %v with %d phases, want at 720 with 3 phases", d.waves.Boss.At, len(d.waves.Boss.Phases))
 	}
 	for i := range d.waves.Spans {
 		span := &d.waves.Spans[i]
@@ -193,7 +199,26 @@ func TestDataLoadersRefuseBrokenFiles(t *testing.T) {
 			return err
 		}},
 		{"waves out of order", func() error {
-			_, err := parseWaveFile(fileWaves, replace(waveYAML, "from: 75", "from: 20"))
+			_, err := parseWaveFile(fileWaves, replace(waveYAML, "from: 120", "from: 20"))
+			return err
+		}},
+		{"waves with invalid boss phase threshold", func() error {
+			_, err := parseWaveFile(fileWaves, replace(waveYAML, "threshold: 0.66", "threshold: 1.2"))
+			return err
+		}},
+		{"waves naming a missing surge enemy", func() error {
+			waves, err := parseWaveFile(fileWaves, replace(waveYAML, "enemy: Moth", "enemy: Ghost"))
+			if err != nil {
+				return err
+			}
+			enemies, err := parseEnemyFile(fileEnemies, enemyYAML)
+			if err != nil {
+				return err
+			}
+			return (&gameData{enemies: *enemies, waves: *waves}).check()
+		}},
+		{"enemies with unknown motion", func() error {
+			_, err := parseEnemyFile(fileEnemies, replace(enemyYAML, "motion: ranged", "motion: teleport"))
 			return err
 		}},
 		{"waves naming a missing enemy", func() error {

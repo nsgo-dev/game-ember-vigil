@@ -18,6 +18,9 @@ func quietRun(t *testing.T) *Run {
 	t.Helper()
 	r := NewRun(7)
 	r.director.nextSpawn = math.Inf(1)
+	r.director.nextSurge = len(r.data.waves.Surges)
+	r.director.nextElite = len(r.data.waves.Elites)
+	r.director.bossSpawned = true
 	return r
 }
 
@@ -79,18 +82,18 @@ func TestSameSeedAndControlsReplayIdentically(t *testing.T) {
 	}
 }
 
-// TestThreeMinutesWithFixedControlsLevelsUpTakesACardAndDies is the acceptance test for the headless model: a bot plays three minutes of the test timeline, takes a card and loses the run.
+// TestThreeMinutesWithFixedControlsLevelsUpTakesACardAndDies checks that a stationary keeper levels up, takes a card, and eventually falls in defeat.
 func TestThreeMinutesWithFixedControlsLevelsUpTakesACardAndDies(t *testing.T) {
 	r := NewRun(2024)
-	leveled, chose, died := playSteps(t, r, 3*60*60, circleControls)
+	leveled, chose, died := playSteps(t, r, 6*60*60, func(int) Controls { return Controls{} })
 	if !leveled {
-		t.Fatal("the keeper never reached level 2 in three minutes")
+		t.Fatal("the keeper never reached level 2")
 	}
 	if !chose {
 		t.Fatal("the run never offered a card")
 	}
 	if !died {
-		t.Fatalf("the keeper survived three minutes with %v health", r.Snapshot().Health)
+		t.Fatalf("the stationary keeper survived with %v health", r.Snapshot().Health)
 	}
 }
 
@@ -459,6 +462,151 @@ func TestPassiveEffectsInRun(t *testing.T) {
 	}
 	if math.Abs(r.xp-r.stats.xpMul) > 1e-9 {
 		t.Fatalf("collected ember gave %v XP, want %v with Glow", r.xp, r.stats.xpMul)
+	}
+}
+
+// enemyByName returns the index of enemy name in r's data.
+func enemyByName(t *testing.T, r *Run, name string) int {
+	t.Helper()
+	idx, ok := r.data.enemyIndex(name)
+	if !ok {
+		t.Fatalf("enemy %q not found", name)
+	}
+	return idx
+}
+
+// TestThornlingAndWispFireEnemyShots checks that Thornling keeps distance and shoots, Wisp orbits and shoots, and enemy projectiles hurt the keeper.
+func TestThornlingAndWispFireEnemyShots(t *testing.T) {
+	r := quietRun(t)
+	r.weaponLevels[r.data.starterWeapon] = 0
+	thorn := enemyByName(t, r, "Thornling")
+	wisp := enemyByName(t, r, "Wisp")
+	putEnemy(t, r, thorn, Vec2{X: 120})
+	putEnemy(t, r, wisp, Vec2{Y: 100})
+
+	startHP := r.keeper.health
+	sawShot := false
+	for range 240 {
+		stepOnce(r, Controls{})
+		if len(r.enemyShots) > 0 {
+			sawShot = true
+		}
+		if r.keeper.health < startHP {
+			break
+		}
+	}
+	if !sawShot {
+		t.Fatal("Thornling and Wisp fired no enemy shots")
+	}
+	if r.keeper.health >= startHP {
+		t.Fatalf("enemy shots did not damage stationary keeper: health %v", r.keeper.health)
+	}
+}
+
+// TestShadeSplitsIntoAshMitesOnDeath checks that killing a Shade spawns Ash Mites at its death site.
+func TestShadeSplitsIntoAshMitesOnDeath(t *testing.T) {
+	r := quietRun(t)
+	r.weaponLevels[r.data.starterWeapon] = 0
+	shade := enemyByName(t, r, "Shade")
+	putEnemy(t, r, shade, Vec2{X: 80})
+	r.enemies[0].hp = 0
+	stepOnce(r, Controls{})
+	if len(r.enemies) != 2 {
+		t.Fatalf("killing a Shade left %d enemies, want 2 split Ash Mites", len(r.enemies))
+	}
+	for _, e := range r.enemies {
+		if name := r.data.enemies.Enemies[e.kind].Name; name != "Ash Mite" {
+			t.Fatalf("Shade split into %q, want Ash Mite", name)
+		}
+	}
+}
+
+// TestGloomwardenDropsHealCachePickup checks that killing a Gloomwarden drops a heal cache that restores keeper health.
+func TestGloomwardenDropsHealCachePickup(t *testing.T) {
+	r := quietRun(t)
+	r.weaponLevels[r.data.starterWeapon] = 0
+	warden := enemyByName(t, r, "Gloomwarden")
+	putEnemy(t, r, warden, Vec2{X: 20})
+	r.keeper.health = 40
+	r.enemies[0].hp = 0
+	stepOnce(r, Controls{})
+	if len(r.pickups) != 1 {
+		t.Fatalf("Gloomwarden left %d heal caches, want 1", len(r.pickups))
+	}
+	for range 60 {
+		stepOnce(r, Controls{})
+		if len(r.pickups) == 0 {
+			break
+		}
+	}
+	if len(r.pickups) != 0 {
+		t.Fatal("keeper did not collect the heal cache")
+	}
+	if r.keeper.health <= 40 {
+		t.Fatalf("heal cache did not restore health: got %v, want > 40", r.keeper.health)
+	}
+}
+
+// TestHollowKingPhasesAttacksAndVictory checks all three Hollow King phases, its charge/bone-ring/summon cycle, and victory on boss death.
+func TestHollowKingPhasesAttacksAndVictory(t *testing.T) {
+	r := quietRun(t)
+	r.weaponLevels[r.data.starterWeapon] = 0
+	r.spawnBoss()
+	if !r.boss.active || !hasEvent(r.Events(), EventBossSpawn) {
+		t.Fatal("spawnBoss did not activate the Hollow King or emit EventBossSpawn")
+	}
+
+	// Step through one full attack cycle (charge -> bone ring -> summon).
+	sawCharge, sawRing, sawSummon := false, false, false
+	for range 12 * 60 {
+		r.keeper.health = r.stats.maxHealth
+		stepOnce(r, Controls{})
+		snap := r.Snapshot()
+		switch snap.Boss.Telegraph {
+		case "charge":
+			sawCharge = true
+		case "ring":
+			sawRing = true
+		case "summon":
+			sawSummon = true
+		}
+		if sawCharge && sawRing && sawSummon {
+			break
+		}
+	}
+	if !sawCharge || !sawRing || !sawSummon {
+		t.Fatalf("missing boss telegraphs: charge=%v ring=%v summon=%v", sawCharge, sawRing, sawSummon)
+	}
+
+	// Drive HP across Phase 2 and Phase 3 thresholds.
+	be := r.bossEnemy()
+	be.hp = be.maxHP * 0.60
+	stepOnce(r, Controls{})
+	if r.Snapshot().Boss.Phase != 2 || !hasEvent(r.Events(), EventBossPhase) {
+		t.Fatalf("phase 2 transition failed: phase=%d events=%+v", r.Snapshot().Boss.Phase, r.Events())
+	}
+
+	be = r.bossEnemy()
+	be.hp = be.maxHP * 0.25
+	stepOnce(r, Controls{})
+	if r.Snapshot().Boss.Phase != 3 || !hasEvent(r.Events(), EventBossPhase) {
+		t.Fatalf("phase 3 transition failed: phase=%d events=%+v", r.Snapshot().Boss.Phase, r.Events())
+	}
+
+	// Kill the Hollow King and confirm victory ends the run.
+	be = r.bossEnemy()
+	be.hp = 0
+	stepOnce(r, Controls{})
+	if r.Snapshot().Phase != PhaseVictory {
+		t.Fatalf("phase after boss death = %v, want PhaseVictory", r.Snapshot().Phase)
+	}
+	if !hasEvent(r.Events(), EventVictory) {
+		t.Fatal("boss death emitted no EventVictory")
+	}
+	wonAt := r.Snapshot().Time
+	stepOnce(r, Controls{})
+	if r.Snapshot().Time != wonAt || len(r.Events()) != 0 {
+		t.Fatal("won run kept stepping after victory")
 	}
 }
 

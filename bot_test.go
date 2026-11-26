@@ -1,0 +1,283 @@
+package main
+
+import (
+	"math"
+	"reflect"
+	"testing"
+)
+
+// botResult summarizes one full automated run played by the balance bot.
+type botResult struct {
+	phase        Phase
+	time         float64
+	kills        int
+	level        int
+	minHealthPct float64
+	bossSpawned  bool
+	bossPhases   int
+	eventCount   int
+	seenEnemies  map[string]bool
+}
+
+// playBot runs a deterministic kiting and upgrade-picking bot until Victory, Defeat, or maxMinutes.
+func playBot(seed uint64, maxMinutes int) (*Run, botResult) {
+	r := NewRun(seed)
+	res := botResult{
+		minHealthPct: 1,
+		seenEnemies:  map[string]bool{},
+	}
+	maxSteps := maxMinutes * 60 * 60
+	for range maxSteps {
+		snap := r.Snapshot()
+		if snap.MaxHealth > 0 {
+			if pct := snap.Health / snap.MaxHealth; pct < res.minHealthPct {
+				res.minHealthPct = pct
+			}
+		}
+		for _, e := range snap.Enemies {
+			res.seenEnemies[e.Kind] = true
+		}
+		switch snap.Phase {
+		case PhaseVictory, PhaseDefeat:
+			res.phase = snap.Phase
+			res.time = snap.Time
+			res.kills = snap.Kills
+			res.level = snap.Level
+			return r, res
+		case PhaseLevelUp:
+			r.Choose(botChoose(snap))
+			continue
+		}
+		r.Step(stepTime, botControls(snap))
+		for _, ev := range r.Events() {
+			res.eventCount++
+			switch ev.Kind {
+			case EventBossSpawn:
+				res.bossSpawned = true
+			case EventBossPhase:
+				res.bossPhases++
+			}
+		}
+	}
+	snap := r.Snapshot()
+	res.phase = snap.Phase
+	res.time = snap.Time
+	res.kills = snap.Kills
+	res.level = snap.Level
+	return r, res
+}
+
+// botControls computes a deterministic movement vector: dodge threats and charge lanes, kite crowds, and gather caches/embers.
+func botControls(s Snapshot) Controls {
+	var steer Vec2
+	pos := s.Keeper
+
+	// Repel from nearby enemies.
+	for _, e := range s.Enemies {
+		d := pos.Sub(e.Pos)
+		dist := d.Len()
+		avoid := e.Radius + 90
+		if e.Boss {
+			avoid = e.Radius + 130
+		} else if e.Elite {
+			avoid = e.Radius + 105
+		}
+		if dist < avoid && dist > 1e-6 {
+			w := (avoid - dist) / avoid
+			weight := 2.8 * w * w
+			if e.Boss {
+				weight *= 2.4
+			}
+			steer = steer.Add(d.Scale(weight / dist))
+		}
+	}
+
+	// Dodge incoming enemy shots.
+	for _, sh := range s.EnemyShots {
+		d := pos.Sub(sh.Pos)
+		dist := d.Len()
+		if dist < 95 && dist > 1e-6 {
+			w := (95 - dist) / 95
+			perp := Vec2{X: -d.Y, Y: d.X}.Scale(0.6 / dist)
+			steer = steer.Add(d.Scale(3.6 * w * w / dist)).Add(perp.Scale(w))
+		}
+	}
+
+	// Sidestep the Hollow King's charge telegraph lane.
+	if s.Boss.Active && s.Boss.Telegraph == "charge" {
+		rel := pos.Sub(s.Boss.Pos)
+		dir := s.Boss.TelegraphDir
+		along := rel.X*dir.X + rel.Y*dir.Y
+		if along > -20 && along < s.Boss.TelegraphLength+40 {
+			perp := Vec2{X: -dir.Y, Y: dir.X}
+			side := rel.X*perp.X + rel.Y*perp.Y
+			if side < 0 {
+				perp = perp.Scale(-1)
+			}
+			steer = steer.Add(perp.Scale(5.0))
+		}
+	}
+
+	// Seek elite healing caches when injured.
+	if s.MaxHealth > 0 && s.Health/s.MaxHealth < 0.85 && len(s.Pickups) > 0 {
+		bestIdx := -1
+		bestDist := math.Inf(1)
+		for i, p := range s.Pickups {
+			if dist := p.Pos.Sub(pos).Len(); dist < bestDist {
+				bestDist = dist
+				bestIdx = i
+			}
+		}
+		if bestIdx >= 0 && bestDist > 1 {
+			steer = steer.Add(s.Pickups[bestIdx].Pos.Sub(pos).Normalized().Scale(1.6))
+		}
+	}
+
+	// Seek the nearest safe ember to keep leveling up.
+	if len(s.Embers) > 0 {
+		bestIdx := -1
+		bestDist := 220.0
+		for i, em := range s.Embers {
+			if dist := em.Pos.Sub(pos).Len(); dist < bestDist {
+				bestDist = dist
+				bestIdx = i
+			}
+		}
+		if bestIdx >= 0 && bestDist > 1 {
+			steer = steer.Add(s.Embers[bestIdx].Pos.Sub(pos).Normalized().Scale(0.65))
+		}
+	}
+
+	// Stay away from arena corners/walls.
+	margin := 180.0
+	if pos.X < margin {
+		steer.X += (margin - pos.X) / margin * 1.4
+	} else if pos.X > s.Arena.X-margin {
+		steer.X -= (pos.X - (s.Arena.X - margin)) / margin * 1.4
+	}
+	if pos.Y < margin {
+		steer.Y += (margin - pos.Y) / margin * 1.4
+	} else if pos.Y > s.Arena.Y-margin {
+		steer.Y -= (pos.Y - (s.Arena.Y - margin)) / margin * 1.4
+	}
+
+	// Gentle orbit around the center when nothing is pressing.
+	if steer.LenSq() < 0.04 {
+		center := Vec2{X: s.Arena.X / 2, Y: s.Arena.Y / 2}
+		toCenter := center.Sub(pos)
+		if toCenter.Len() > 260 {
+			steer = toCenter.Normalized()
+		} else {
+			steer = Vec2{X: math.Cos(s.Time * 0.5), Y: math.Sin(s.Time * 0.5)}
+		}
+	}
+
+	return Controls{Move: steer.Normalized()}
+}
+
+// botChoose scores each offered card deterministically and returns the highest-priority index.
+func botChoose(s Snapshot) int {
+	best := 0
+	bestScore := -1e9
+	hpFrac := 1.0
+	if s.MaxHealth > 0 {
+		hpFrac = s.Health / s.MaxHealth
+	}
+	for i, o := range s.Offers {
+		score := 0.0
+		switch {
+		case o.Heal:
+			score = 10
+			if hpFrac < 0.5 {
+				score = 95
+			}
+		case o.Kind == offerWeapon:
+			score = 70
+			switch o.ID {
+			case "ember-bolt":
+				score += 18
+			case "lantern-halo":
+				score += 14
+			case "bell-toll":
+				score += 12
+			case "cinder-trail":
+				score += 8
+			}
+		case o.Kind == offerPassive:
+			score = 45
+			switch o.Stat {
+			case statDamage:
+				score += 20
+			case statCooldown:
+				score += 18
+			case statArea:
+				score += 14
+			case statRegen:
+				score += 16
+			case statMaxHealth:
+				score += 15
+			case statMoveSpeed:
+				score += 12
+			case statXPGain:
+				score += 10
+			case statPickup:
+				score += 8
+			}
+		}
+		if score > bestScore {
+			bestScore = score
+			best = i
+		}
+	}
+	return best
+}
+
+// TestTwelveMinuteBotBalanceAndDeterminism verifies that a bot can complete the 12-minute run and defeat the Hollow King across multiple fixed seeds, sees all enemies and phases, is not trivial when AFK, and replays deterministically.
+func TestTwelveMinuteBotBalanceAndDeterminism(t *testing.T) {
+	seeds := []uint64{7, 42, 101}
+	wins := 0
+	for _, seed := range seeds {
+		_, res := playBot(seed, 16)
+		t.Logf("seed=%d phase=%v time=%.1fs kills=%d level=%d minHP=%.0f%% boss=%v phases=%d events=%d enemies=%d",
+			seed, res.phase, res.time, res.kills, res.level, res.minHealthPct*100, res.bossSpawned, res.bossPhases, res.eventCount, len(res.seenEnemies))
+		if !res.bossSpawned {
+			t.Fatalf("seed %d never reached the Hollow King at 12:00 (ended at %.1fs, phase=%v)", seed, res.time, res.phase)
+		}
+		if res.phase == PhaseVictory {
+			wins++
+			if res.bossPhases != 2 {
+				t.Fatalf("seed %d recorded %d boss phase transitions, want 2 (phases 2 and 3)", seed, res.bossPhases)
+			}
+		}
+		for _, name := range []string{"Ash Mite", "Moth", "Husk", "Thornling", "Wisp", "Shade", "Gloomwarden", "Hollow King"} {
+			if !res.seenEnemies[name] {
+				t.Fatalf("seed %d never saw %q during the run", seed, name)
+			}
+		}
+	}
+	if wins < len(seeds) {
+		t.Fatalf("bot won %d/%d seeds, want all %d winnable", wins, len(seeds), len(seeds))
+	}
+
+	// Confirm the run is not trivial: standing still with no movement loses well before 12:00.
+	afk := NewRun(7)
+	for range 12 * 60 * 60 {
+		if afk.Snapshot().Phase == PhaseLevelUp {
+			afk.Choose(0)
+		}
+		afk.Step(stepTime, Controls{})
+		if afk.Snapshot().Phase == PhaseDefeat {
+			break
+		}
+	}
+	if afk.Snapshot().Phase != PhaseDefeat {
+		t.Fatalf("standing still survived 12 minutes with %v health; the run is too trivial", afk.Snapshot().Health)
+	}
+
+	// Confirm full 12-minute determinism on a fixed seed.
+	r1, res1 := playBot(42, 16)
+	r2, res2 := playBot(42, 16)
+	if res1.eventCount != res2.eventCount || !reflect.DeepEqual(r1.Snapshot(), r2.Snapshot()) {
+		t.Fatalf("fixed seed 42 did not replay identically: events %d vs %d", res1.eventCount, res2.eventCount)
+	}
+}

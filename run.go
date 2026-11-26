@@ -9,15 +9,17 @@ import (
 
 // A run's structural limits: one fixed step, the grid its queries use, and caps no wave or weapon may pass.
 const (
-	stepSeconds = 1.0 / 60.0
-	gridCell    = 32.0
-	maxEnemies  = 400
-	maxShots    = 256
-	maxEmbers   = 512
-	maxPatches  = 64
-	maxPulses   = 16
-	maxEvents   = 256
-	maxShotHits = 8
+	stepSeconds   = 1.0 / 60.0
+	gridCell      = 32.0
+	maxEnemies    = 400
+	maxShots      = 256
+	maxEnemyShots = 192
+	maxEmbers     = 512
+	maxPickups    = 32
+	maxPatches    = 64
+	maxPulses     = 16
+	maxEvents     = 256
+	maxShotHits   = 8
 )
 
 // Vec2 is a position, a direction or a velocity in world units, whose X grows right and Y grows down.
@@ -69,7 +71,9 @@ const (
 	PhasePlaying Phase = iota
 	// PhaseLevelUp holds the run still until Choose takes a card.
 	PhaseLevelUp
-	// PhaseDefeat is a finished run the shell shows a result for.
+	// PhaseVictory is a finished run where the Hollow King fell.
+	PhaseVictory
+	// PhaseDefeat is a finished run where the keeper ran out of health.
 	PhaseDefeat
 )
 
@@ -83,10 +87,16 @@ const (
 	EventHit
 	// EventKill is an enemy dying.
 	EventKill
-	// EventEmber is an ember reaching the keeper and giving XP.
+	// EventEmber is an ember or heal cache reaching the keeper.
 	EventEmber
 	// EventLevelUp is the run stopping for a card.
 	EventLevelUp
+	// EventBossSpawn is the Hollow King arriving at 12:00.
+	EventBossSpawn
+	// EventBossPhase is the Hollow King entering its next phase.
+	EventBossPhase
+	// EventVictory is the Hollow King dying and the run ending in victory.
+	EventVictory
 	// EventDefeat is the keeper running out of health.
 	EventDefeat
 )
@@ -107,13 +117,17 @@ type keeper struct {
 	invuln float64
 }
 
-// enemy is one living creature chasing the keeper.
+// enemy is one living creature chasing or attacking the keeper.
 type enemy struct {
 	id              uint64
 	kind            int
+	elite           bool
+	isBoss          bool
 	pos             Vec2
 	hp              float64
 	maxHP           float64
+	healthMul       float64
+	damageMul       float64
 	damage          float64
 	radius          float64
 	speed           float64
@@ -121,12 +135,74 @@ type enemy struct {
 	driftAmplitude  float64
 	driftPeriod     float64
 	driftPhase      float64
+	keepDistance    float64
+	orbitRadius     float64
+	orbitDir        float64
+	shotRange       float64
+	shotPeriod      float64
+	shotCooldown    float64
+	shotSpeed       float64
+	shotRadius      float64
+	shotLife        float64
+	shotDamage      float64
+	splitKind       int
+	splitCount      int
+	healDrop        float64
 	knockbackResist float64
 	knockback       Vec2
 	embers          int
 	// Per-target weapon cooldowns so lingering weapons do not tick every step.
 	haloHit  float64
 	trailHit float64
+}
+
+// Enemy projectile kinds, which art.go draws distinctly.
+const (
+	enemyShotThorn uint8 = iota
+	enemyShotBone
+)
+
+// enemyShot is a projectile fired by Thornling, Wisp or the Hollow King.
+type enemyShot struct {
+	id     uint64
+	pos    Vec2
+	vel    Vec2
+	damage float64
+	radius float64
+	life   float64
+	kind   uint8
+}
+
+// pickup is a healing cache dropped by an elite enemy.
+type pickup struct {
+	id           uint64
+	pos          Vec2
+	healFraction float64
+	attracted    bool
+}
+
+// bossAction is the Hollow King's current state in its attack cycle.
+type bossAction uint8
+
+const (
+	bossChase bossAction = iota
+	bossChargeWindup
+	bossCharging
+	bossRingWindup
+	bossSummonWindup
+)
+
+// bossState tracks the Hollow King's phase and deterministic attack queue while it is alive.
+type bossState struct {
+	active     bool
+	id         uint64
+	phase      int
+	state      bossAction
+	nextAttack int
+	timer      float64
+	timerMax   float64
+	chargeDir  Vec2
+	ringOffset float64
 }
 
 // shot is one Ember Bolt in flight.
@@ -203,12 +279,15 @@ type Run struct {
 	weaponCooldowns []float64
 	haloAngle       float64
 
-	enemies []enemy
-	shots   []shot
-	embers  []ember
-	patches []patch
-	pulses  []pulse
+	enemies    []enemy
+	shots      []shot
+	enemyShots []enemyShot
+	embers     []ember
+	pickups    []pickup
+	patches    []patch
+	pulses     []pulse
 
+	boss     bossState
 	director director
 	grid     grid
 
@@ -249,7 +328,9 @@ func newRunWith(d *gameData, seed uint64) *Run {
 		events:          make([]Event, 0, maxEvents),
 		enemies:         make([]enemy, 0, maxEnemies),
 		shots:           make([]shot, 0, maxShots),
+		enemyShots:      make([]enemyShot, 0, maxEnemyShots),
 		embers:          make([]ember, 0, maxEmbers),
+		pickups:         make([]pickup, 0, maxPickups),
 		patches:         make([]patch, 0, maxPatches),
 		pulses:          make([]pulse, 0, maxPulses),
 	}
@@ -264,6 +345,7 @@ func newRunWith(d *gameData, seed uint64) *Run {
 	for i := range d.enemies.Enemies {
 		r.maxRadius = math.Max(r.maxRadius, d.enemies.Enemies[i].Radius)
 	}
+	r.maxRadius = math.Max(r.maxRadius, d.waves.Boss.Radius)
 	return r
 }
 
@@ -297,8 +379,9 @@ func (r *Run) Step(dt time.Duration, controls Controls) {
 	}
 	r.tickPulses()
 
-	// Spawn from the timeline, then move the world.
+	// Spawn from the timeline, step the boss, then move the world.
 	r.director.step(r)
+	r.stepBoss()
 	r.grid.build(r.enemies)
 	for i := range r.enemies {
 		r.moveEnemy(&r.enemies[i])
@@ -307,13 +390,18 @@ func (r *Run) Step(dt time.Duration, controls Controls) {
 	r.separate()
 	r.grid.build(r.enemies)
 	r.moveShots()
+	r.moveEnemyShots()
 
 	// Hit, fire weapons, bury the dead and gather what they left.
 	r.contact()
 	r.stepWeapons()
 	r.stepPatches()
 	r.reap()
+	if r.phase == PhaseVictory {
+		return
+	}
 	r.gatherEmbers()
+	r.gatherPickups()
 
 	if r.keeper.health <= 0 {
 		r.defeat()
@@ -356,19 +444,239 @@ func (r *Run) emit(e Event) {
 	}
 }
 
-// moveEnemy walks e toward the keeper, swaying across its course when it drifts, and lets its knockback fade.
+// moveEnemy walks e according to its motion kind, fires ranged or orbiting shots when ready, and lets its knockback fade.
 func (r *Run) moveEnemy(e *enemy) {
+	if e.isBoss {
+		return
+	}
 	to := r.keeper.pos.Sub(e.pos)
+	dist := to.Len()
 	dir := to.Normalized()
-	vel := dir.Scale(e.speed)
-	if e.motion == motionDrift && e.driftPeriod > 0 {
-		sway := math.Sin(2*math.Pi*(r.time/e.driftPeriod)+e.driftPhase) * e.driftAmplitude * e.speed
-		vel = vel.Add(Vec2{-dir.Y, dir.X}.Scale(sway))
+	var vel Vec2
+	switch e.motion {
+	case motionDrift:
+		vel = dir.Scale(e.speed)
+		if e.driftPeriod > 0 {
+			sway := math.Sin(2*math.Pi*(r.time/e.driftPeriod)+e.driftPhase) * e.driftAmplitude * e.speed
+			vel = vel.Add(Vec2{-dir.Y, dir.X}.Scale(sway))
+		}
+	case motionRanged:
+		switch {
+		case dist > e.keepDistance:
+			vel = dir.Scale(e.speed)
+		case dist < e.keepDistance*0.65:
+			vel = dir.Scale(-e.speed * 0.45)
+		}
+		r.tickEnemyShot(e, dir, dist)
+	case motionOrbit:
+		tangent := Vec2{-dir.Y * e.orbitDir, dir.X * e.orbitDir}
+		switch {
+		case dist > e.orbitRadius+14:
+			vel = dir.Scale(0.75).Add(tangent.Scale(0.65)).Normalized().Scale(e.speed)
+		case dist < e.orbitRadius-14:
+			vel = tangent.Scale(0.85).Add(dir.Scale(-0.45)).Normalized().Scale(e.speed)
+		default:
+			radial := (dist - e.orbitRadius) / 14
+			vel = tangent.Add(dir.Scale(radial * 0.35)).Normalized().Scale(e.speed)
+		}
+		r.tickEnemyShot(e, dir, dist)
+	default:
+		vel = dir.Scale(e.speed)
 	}
 	vel = vel.Add(e.knockback)
 	e.pos = r.clamp(e.pos.Add(vel.Scale(stepSeconds)), e.radius)
 	drag := math.Exp(-r.data.weapons.KnockbackDrag * stepSeconds)
 	e.knockback = e.knockback.Scale(drag)
+}
+
+// tickEnemyShot ticks e's ranged attack timer and fires a thorn/wisp bolt when the keeper is in range.
+func (r *Run) tickEnemyShot(e *enemy, dir Vec2, dist float64) {
+	if e.shotPeriod <= 0 {
+		return
+	}
+	e.shotCooldown = math.Max(0, e.shotCooldown-stepSeconds)
+	if e.shotCooldown > 0 || dist > e.shotRange || dir == (Vec2{}) {
+		return
+	}
+	r.addEnemyShot(e.pos, dir.Scale(e.shotSpeed), e.shotDamage, e.shotRadius, e.shotLife, enemyShotThorn)
+	e.shotCooldown = e.shotPeriod
+}
+
+// addEnemyShot appends one enemy projectile up to maxEnemyShots.
+func (r *Run) addEnemyShot(pos, vel Vec2, damage, radius, life float64, kind uint8) {
+	if len(r.enemyShots) >= maxEnemyShots {
+		return
+	}
+	r.enemyShots = append(r.enemyShots, enemyShot{
+		id:     r.takeID(),
+		pos:    pos,
+		vel:    vel,
+		damage: damage,
+		radius: radius,
+		life:   life,
+		kind:   kind,
+	})
+}
+
+// spawnBoss clears space around the keeper and brings the Hollow King into the arena.
+func (r *Run) spawnBoss() {
+	b := &r.data.waves.Boss
+	// Clear regular wave enemies and stray enemy projectiles so the duel begins cleanly.
+	r.enemies = r.enemies[:0]
+	r.enemyShots = r.enemyShots[:0]
+
+	pos, ok := r.spawnPos(b.Radius)
+	if !ok {
+		pos = r.fallbackRingPos(b.Radius)
+	}
+	// Guarantee the boss does not spawn right on top of the keeper.
+	if b.ClearRadius > 0 && pos.Sub(r.keeper.pos).Len() < b.ClearRadius {
+		pos = r.fallbackRingPos(b.Radius)
+	}
+	id := r.takeID()
+	r.enemies = append(r.enemies, enemy{
+		id:              id,
+		kind:            -1,
+		isBoss:          true,
+		pos:             pos,
+		hp:              b.Health,
+		maxHP:           b.Health,
+		healthMul:       1,
+		damageMul:       1,
+		damage:          b.Damage,
+		radius:          b.Radius,
+		speed:           b.Speed,
+		motion:          motionChase,
+		knockbackResist: b.KnockbackResist,
+	})
+	firstCooldown := b.Phases[0].Cooldown * 0.65
+	r.boss = bossState{
+		active:   true,
+		id:       id,
+		phase:    0,
+		state:    bossChase,
+		timer:    firstCooldown,
+		timerMax: firstCooldown,
+	}
+	r.emit(Event{Kind: EventBossSpawn, ID: id, Pos: pos, Value: 1})
+}
+
+// bossEnemy returns a pointer to the living Hollow King in r.enemies, or nil if absent.
+func (r *Run) bossEnemy() *enemy {
+	for i := range r.enemies {
+		if r.enemies[i].isBoss {
+			return &r.enemies[i]
+		}
+	}
+	return nil
+}
+
+// stepBoss advances the Hollow King's phase transitions, movement and three-attack cycle.
+func (r *Run) stepBoss() {
+	if !r.boss.active {
+		return
+	}
+	e := r.bossEnemy()
+	if e == nil {
+		r.boss.active = false
+		return
+	}
+	b := &r.data.waves.Boss
+	hpFrac := e.hp / math.Max(e.maxHP, 1)
+	for r.boss.phase+1 < len(b.Phases) && hpFrac <= b.Phases[r.boss.phase+1].Threshold {
+		r.boss.phase++
+		r.emit(Event{Kind: EventBossPhase, ID: e.id, Pos: e.pos, Value: float64(r.boss.phase + 1)})
+	}
+	ph := &b.Phases[r.boss.phase]
+	r.boss.timer -= stepSeconds
+
+	var vel Vec2
+	switch r.boss.state {
+	case bossChase:
+		dir := r.keeper.pos.Sub(e.pos).Normalized()
+		vel = dir.Scale(b.Speed * ph.SpeedMul)
+		if r.boss.timer <= 0 {
+			atk := r.boss.nextAttack
+			r.boss.nextAttack = (r.boss.nextAttack + 1) % 3
+			switch atk {
+			case 0:
+				r.boss.state = bossChargeWindup
+				r.boss.timer = ph.ChargeWindup
+				r.boss.timerMax = ph.ChargeWindup
+				aim := r.keeper.pos.Sub(e.pos).Normalized()
+				if aim == (Vec2{}) {
+					aim = Vec2{X: 1}
+				}
+				r.boss.chargeDir = aim
+			case 1:
+				r.boss.state = bossRingWindup
+				r.boss.timer = ph.RingWindup
+				r.boss.timerMax = ph.RingWindup
+			default:
+				r.boss.state = bossSummonWindup
+				r.boss.timer = ph.SummonWindup
+				r.boss.timerMax = ph.SummonWindup
+			}
+		}
+	case bossChargeWindup:
+		if r.boss.timer <= 0 {
+			r.boss.state = bossCharging
+			r.boss.timer = ph.ChargeDuration
+			r.boss.timerMax = ph.ChargeDuration
+		}
+	case bossCharging:
+		vel = r.boss.chargeDir.Scale(ph.ChargeSpeed)
+		if r.boss.timer <= 0 {
+			r.boss.state = bossChase
+			r.boss.timer = ph.Cooldown
+			r.boss.timerMax = ph.Cooldown
+		}
+	case bossRingWindup:
+		if r.boss.timer <= 0 {
+			step := 2 * math.Pi / float64(ph.BoneCount)
+			for k := range ph.BoneCount {
+				ang := r.boss.ringOffset + float64(k)*step
+				dir := Vec2{X: math.Cos(ang), Y: math.Sin(ang)}
+				r.addEnemyShot(e.pos, dir.Scale(ph.BoneSpeed), ph.BoneDamage, ph.BoneRadius, ph.BoneLife, enemyShotBone)
+			}
+			r.boss.ringOffset += step * 0.5
+			r.boss.state = bossChase
+			r.boss.timer = ph.Cooldown
+			r.boss.timerMax = ph.Cooldown
+		}
+	case bossSummonWindup:
+		if r.boss.timer <= 0 {
+			if kind, ok := r.data.enemyIndex(ph.SummonEnemy); ok {
+				def := &r.data.enemies.Enemies[kind]
+				healthMul, damageMul := 1.0, 1.0
+				if len(r.data.waves.Spans) > 0 {
+					last := &r.data.waves.Spans[len(r.data.waves.Spans)-1]
+					healthMul, damageMul = last.Health*0.75, last.Damage*0.85
+				}
+				step := 2 * math.Pi / float64(ph.SummonCount)
+				ringDist := e.radius + def.Radius + 24
+				for k := range ph.SummonCount {
+					if len(r.enemies) >= r.data.waves.MaxAlive {
+						break
+					}
+					ang := r.boss.ringOffset + float64(k)*step
+					pos := r.clamp(e.pos.Add(Vec2{X: math.Cos(ang) * ringDist, Y: math.Sin(ang) * ringDist}), def.Radius)
+					r.addEnemy(kind, pos, healthMul, damageMul)
+				}
+			}
+			// Re-fetch e after appending to r.enemies in case the backing array grew.
+			e = r.bossEnemy()
+			r.boss.state = bossChase
+			r.boss.timer = ph.Cooldown
+			r.boss.timerMax = ph.Cooldown
+		}
+	}
+	if e != nil {
+		vel = vel.Add(e.knockback)
+		e.pos = r.clamp(e.pos.Add(vel.Scale(stepSeconds)), e.radius)
+		drag := math.Exp(-r.data.weapons.KnockbackDrag * stepSeconds)
+		e.knockback = e.knockback.Scale(drag)
+	}
 }
 
 // separate pushes enemies that overlap each other apart, so a crowd spreads around the keeper instead of stacking on one point.
@@ -392,8 +700,15 @@ func (r *Run) separate() {
 			} else {
 				push = Vec2{X: reach}
 			}
-			a.pos = a.pos.Sub(push.Scale(0.5))
-			b.pos = b.pos.Add(push.Scale(0.5))
+			switch {
+			case a.isBoss:
+				b.pos = b.pos.Add(push)
+			case b.isBoss:
+				a.pos = a.pos.Sub(push)
+			default:
+				a.pos = a.pos.Sub(push.Scale(0.5))
+				b.pos = b.pos.Add(push.Scale(0.5))
+			}
 			return true
 		})
 		a.pos = r.clamp(a.pos, a.radius)
@@ -432,6 +747,32 @@ func (r *Run) moveShots() {
 		last := len(r.shots) - 1
 		r.shots[i] = r.shots[last]
 		r.shots = r.shots[:last]
+	}
+}
+
+// moveEnemyShots flies enemy projectiles, hurts the keeper on contact when not invulnerable, and removes spent shots.
+func (r *Run) moveEnemyShots() {
+	for i := 0; i < len(r.enemyShots); {
+		s := &r.enemyShots[i]
+		s.pos = s.pos.Add(s.vel.Scale(stepSeconds))
+		s.life -= stepSeconds
+		hit := false
+		reach := s.radius + r.data.run.Keeper.Radius
+		if s.pos.Sub(r.keeper.pos).LenSq() <= reach*reach {
+			hit = true
+			if r.keeper.invuln <= 0 {
+				r.keeper.health -= s.damage
+				r.keeper.invuln = r.data.run.Keeper.Invulnerable
+				r.emit(Event{Kind: EventHit, ID: s.id, Pos: s.pos, Value: s.damage})
+			}
+		}
+		if !hit && s.life > 0 && r.inside(s.pos, s.radius) {
+			i++
+			continue
+		}
+		last := len(r.enemyShots) - 1
+		r.enemyShots[i] = r.enemyShots[last]
+		r.enemyShots = r.enemyShots[:last]
 	}
 }
 
@@ -673,7 +1014,7 @@ func (r *Run) nearestEnemy(center Vec2, radius float64) (Vec2, bool) {
 	return r.enemies[best].pos, true
 }
 
-// reap removes the enemies whose health is gone, counts them and leaves their embers where they fell.
+// reap removes the enemies whose health is gone, counts them, splits Shades, drops embers and elite caches, and wins when the Hollow King falls.
 func (r *Run) reap() {
 	for i := 0; i < len(r.enemies); {
 		e := &r.enemies[i]
@@ -681,12 +1022,44 @@ func (r *Run) reap() {
 			i++
 			continue
 		}
+		dead := *e
 		r.kills++
-		r.emit(Event{Kind: EventKill, ID: e.id, Pos: e.pos})
-		r.dropEmbers(e)
+		r.emit(Event{Kind: EventKill, ID: dead.id, Pos: dead.pos})
+		if dead.isBoss {
+			r.boss.active = false
+			last := len(r.enemies) - 1
+			r.enemies[i] = r.enemies[last]
+			r.enemies = r.enemies[:last]
+			r.victory(dead.pos)
+			return
+		}
+		r.dropEmbers(&dead)
+		if dead.healDrop > 0 && len(r.pickups) < maxPickups {
+			r.pickups = append(r.pickups, pickup{
+				id:           r.takeID(),
+				pos:          dead.pos,
+				healFraction: dead.healDrop,
+			})
+		}
 		last := len(r.enemies) - 1
 		r.enemies[i] = r.enemies[last]
 		r.enemies = r.enemies[:last]
+		if dead.splitCount > 0 && dead.splitKind >= 0 {
+			r.spawnSplit(dead)
+		}
+	}
+}
+
+// spawnSplit creates the smaller creatures a dying Shade breaks into, placed around where it fell.
+func (r *Run) spawnSplit(parent enemy) {
+	def := &r.data.enemies.Enemies[parent.splitKind]
+	for k := range parent.splitCount {
+		if len(r.enemies) >= maxEnemies {
+			return
+		}
+		ang := float64(k)*2*math.Pi/float64(parent.splitCount) + r.drops.Range(0, 0.5)
+		offset := Vec2{X: math.Cos(ang), Y: math.Sin(ang)}.Scale(def.Radius * 1.8)
+		r.addEnemy(parent.splitKind, r.clamp(parent.pos.Add(offset), def.Radius), parent.healthMul, parent.damageMul)
 	}
 }
 
@@ -729,6 +1102,33 @@ func (r *Run) gatherEmbers() {
 	}
 }
 
+// gatherPickups pulls healing caches near the keeper in and restores health when collected.
+func (r *Run) gatherPickups() {
+	em := r.data.run.Embers
+	magnet := r.stats.pickupRadius
+	for i := 0; i < len(r.pickups); {
+		p := &r.pickups[i]
+		to := r.keeper.pos.Sub(p.pos)
+		dist := to.Len()
+		if dist <= magnet {
+			p.attracted = true
+		}
+		if p.attracted {
+			if dist <= r.data.run.Keeper.Radius+6 {
+				heal := r.stats.maxHealth * p.healFraction
+				r.keeper.health = math.Min(r.stats.maxHealth, r.keeper.health+heal)
+				r.emit(Event{Kind: EventEmber, ID: p.id, Pos: p.pos, Value: heal})
+				last := len(r.pickups) - 1
+				r.pickups[i] = r.pickups[last]
+				r.pickups = r.pickups[:last]
+				continue
+			}
+			p.pos = p.pos.Add(to.Scale(math.Min(dist, em.MagnetSpeed*stepSeconds) / dist))
+		}
+		i++
+	}
+}
+
 // fillLevel spends the XP bar on a new level and stops the run for three cards.
 func (r *Run) fillLevel() {
 	need := r.xpNeeded()
@@ -742,9 +1142,19 @@ func (r *Run) fillLevel() {
 	r.emit(Event{Kind: EventLevelUp, Value: float64(r.level)})
 }
 
+// victory ends the run when the Hollow King falls.
+func (r *Run) victory(pos Vec2) {
+	if r.phase == PhaseVictory || r.phase == PhaseDefeat {
+		return
+	}
+	r.phase = PhaseVictory
+	r.offersNow = r.offersNow[:0]
+	r.emit(Event{Kind: EventVictory, Pos: pos})
+}
+
 // defeat ends the run when the keeper's health is gone.
 func (r *Run) defeat() {
-	if r.phase == PhaseDefeat {
+	if r.phase == PhaseDefeat || r.phase == PhaseVictory {
 		return
 	}
 	r.phase = PhaseDefeat
@@ -779,33 +1189,38 @@ func (r *Run) inside(p Vec2, radius float64) bool {
 
 // Snapshot is a read-only view of the run for the shell to draw, which the next Step invalidates: its slices reuse the run's buffers.
 type Snapshot struct {
-	Phase        Phase         `json:"phase"`
-	Time         float64       `json:"time"`
-	Arena        Vec2          `json:"arena"`
-	Keeper       Vec2          `json:"keeper"`
-	KeeperRadius float64       `json:"keeperRadius"`
-	Health       float64       `json:"health"`
-	MaxHealth    float64       `json:"maxHealth"`
-	Invulnerable float64       `json:"invulnerable"`
-	Level        int           `json:"level"`
-	XP           float64       `json:"xp"`
-	XPNeeded     float64       `json:"xpNeeded"`
-	Kills        int           `json:"kills"`
-	Enemies      []EnemyView   `json:"enemies"`
-	Shots        []ShotView    `json:"shots"`
-	Embers       []EmberView   `json:"embers"`
-	Halo         []HaloOrbView `json:"halo"`
-	Patches      []PatchView   `json:"patches"`
-	Pulses       []PulseView   `json:"pulses"`
-	Weapons      []SlotView    `json:"weapons"`
-	Passives     []SlotView    `json:"passives"`
-	Offers       []OfferView   `json:"offers"`
+	Phase        Phase           `json:"phase"`
+	Time         float64         `json:"time"`
+	Arena        Vec2            `json:"arena"`
+	Keeper       Vec2            `json:"keeper"`
+	KeeperRadius float64         `json:"keeperRadius"`
+	Health       float64         `json:"health"`
+	MaxHealth    float64         `json:"maxHealth"`
+	Invulnerable float64         `json:"invulnerable"`
+	Level        int             `json:"level"`
+	XP           float64         `json:"xp"`
+	XPNeeded     float64         `json:"xpNeeded"`
+	Kills        int             `json:"kills"`
+	Enemies      []EnemyView     `json:"enemies"`
+	Shots        []ShotView      `json:"shots"`
+	EnemyShots   []EnemyShotView `json:"enemyShots"`
+	Embers       []EmberView     `json:"embers"`
+	Pickups      []PickupView    `json:"pickups"`
+	Halo         []HaloOrbView   `json:"halo"`
+	Patches      []PatchView     `json:"patches"`
+	Pulses       []PulseView     `json:"pulses"`
+	Boss         BossView        `json:"boss"`
+	Weapons      []SlotView      `json:"weapons"`
+	Passives     []SlotView      `json:"passives"`
+	Offers       []OfferView     `json:"offers"`
 }
 
 // EnemyView is one enemy as a snapshot shows it.
 type EnemyView struct {
 	ID        uint64  `json:"id"`
 	Kind      string  `json:"kind"`
+	Elite     bool    `json:"elite,omitempty"`
+	Boss      bool    `json:"boss,omitempty"`
 	Pos       Vec2    `json:"pos"`
 	Radius    float64 `json:"radius"`
 	Health    float64 `json:"health"`
@@ -819,10 +1234,40 @@ type ShotView struct {
 	Radius float64 `json:"radius"`
 }
 
+// EnemyShotView is one enemy projectile as a snapshot shows it.
+type EnemyShotView struct {
+	ID     uint64  `json:"id"`
+	Pos    Vec2    `json:"pos"`
+	Radius float64 `json:"radius"`
+	Kind   uint8   `json:"kind"`
+}
+
 // EmberView is one ember as a snapshot shows it.
 type EmberView struct {
 	Pos   Vec2 `json:"pos"`
 	Value int  `json:"value"`
+}
+
+// PickupView is one healing cache dropped by an elite enemy.
+type PickupView struct {
+	ID  uint64 `json:"id"`
+	Pos Vec2   `json:"pos"`
+}
+
+// BossView is the Hollow King's status and active attack telegraph for the HUD and arena renderer.
+type BossView struct {
+	Active            bool    `json:"active,omitempty"`
+	ID                uint64  `json:"id,omitempty"`
+	Name              string  `json:"name,omitempty"`
+	Pos               Vec2    `json:"pos,omitempty"`
+	Radius            float64 `json:"radius,omitempty"`
+	Health            float64 `json:"health,omitempty"`
+	MaxHealth         float64 `json:"maxHealth,omitempty"`
+	Phase             int     `json:"phase,omitempty"`
+	Telegraph         string  `json:"telegraph,omitempty"`
+	TelegraphDir      Vec2    `json:"telegraphDir,omitempty"`
+	TelegraphProgress float64 `json:"telegraphProgress,omitempty"`
+	TelegraphLength   float64 `json:"telegraphLength,omitempty"`
 }
 
 // HaloOrbView is one Lantern Halo ember orbiting the keeper.
@@ -888,9 +1333,15 @@ func (r *Run) Snapshot() Snapshot {
 	s.Enemies = s.Enemies[:0]
 	for i := range r.enemies {
 		e := &r.enemies[i]
+		name := r.data.waves.Boss.Name
+		if !e.isBoss {
+			name = r.data.enemies.Enemies[e.kind].Name
+		}
 		s.Enemies = append(s.Enemies, EnemyView{
 			ID:        e.id,
-			Kind:      r.data.enemies.Enemies[e.kind].Name,
+			Kind:      name,
+			Elite:     e.elite,
+			Boss:      e.isBoss,
 			Pos:       e.pos,
 			Radius:    e.radius,
 			Health:    e.hp,
@@ -902,9 +1353,51 @@ func (r *Run) Snapshot() Snapshot {
 		sh := &r.shots[i]
 		s.Shots = append(s.Shots, ShotView{ID: sh.id, Pos: sh.pos, Radius: sh.radius})
 	}
+	s.EnemyShots = s.EnemyShots[:0]
+	for i := range r.enemyShots {
+		sh := &r.enemyShots[i]
+		s.EnemyShots = append(s.EnemyShots, EnemyShotView{ID: sh.id, Pos: sh.pos, Radius: sh.radius, Kind: sh.kind})
+	}
 	s.Embers = s.Embers[:0]
 	for i := range r.embers {
 		s.Embers = append(s.Embers, EmberView{Pos: r.embers[i].pos, Value: r.embers[i].value})
+	}
+	s.Pickups = s.Pickups[:0]
+	for i := range r.pickups {
+		s.Pickups = append(s.Pickups, PickupView{ID: r.pickups[i].id, Pos: r.pickups[i].pos})
+	}
+	s.Boss = BossView{}
+	if r.boss.active {
+		if be := r.bossEnemy(); be != nil {
+			ph := &r.data.waves.Boss.Phases[r.boss.phase]
+			bv := BossView{
+				Active:    true,
+				ID:        be.id,
+				Name:      r.data.waves.Boss.Name,
+				Pos:       be.pos,
+				Radius:    be.radius,
+				Health:    math.Max(0, be.hp),
+				MaxHealth: be.maxHP,
+				Phase:     r.boss.phase + 1,
+			}
+			prog := 1 - math.Max(0, r.boss.timer)/math.Max(r.boss.timerMax, 0.001)
+			switch r.boss.state {
+			case bossChargeWindup:
+				bv.Telegraph = "charge"
+				bv.TelegraphDir = r.boss.chargeDir
+				bv.TelegraphProgress = prog
+				bv.TelegraphLength = ph.ChargeSpeed * ph.ChargeDuration
+			case bossRingWindup:
+				bv.Telegraph = "ring"
+				bv.TelegraphProgress = prog
+				bv.TelegraphLength = be.radius + 46
+			case bossSummonWindup:
+				bv.Telegraph = "summon"
+				bv.TelegraphProgress = prog
+				bv.TelegraphLength = be.radius + 36
+			}
+			s.Boss = bv
+		}
 	}
 	s.Halo = s.Halo[:0]
 	for i := range r.data.weapons.Weapons {

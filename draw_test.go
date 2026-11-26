@@ -319,6 +319,47 @@ func TestFrameDrawsNewWeapons(t *testing.T) {
 	}
 }
 
+// TestFrameDrawsNewEnemiesPickupsAndBossTelegraph checks that late enemies, enemy shots, heal caches and boss telegraphs render cleanly.
+func TestFrameDrawsNewEnemiesPickupsAndBossTelegraph(t *testing.T) {
+	r := quietRun(t)
+	r.weaponLevels[r.data.starterWeapon] = 0
+	for i := range r.data.enemies.Enemies {
+		r.addEnemy(i, r.keeper.pos.Add(Vec2{X: float64(30 + i*14), Y: 20}), 1, 1)
+	}
+	r.addEnemyShot(r.keeper.pos.Add(Vec2{X: -40}), Vec2{X: 10}, 5, 4, 2, enemyShotThorn)
+	r.addEnemyShot(r.keeper.pos.Add(Vec2{Y: -40}), Vec2{Y: 10}, 5, 5, 2, enemyShotBone)
+	r.pickups = append(r.pickups, pickup{id: r.takeID(), pos: r.keeper.pos.Add(Vec2{X: -24, Y: 24}), healFraction: 0.3})
+	a := newTestArena(t, r, 13)
+
+	stepOnce(r, Controls{})
+	a.sync(r.Snapshot(), r.Events(), stepSeconds)
+	d := &core.Drawing{}
+	a.draw(d, 0.5)
+	if got := countSprites(d.Ops); got < 11 {
+		t.Fatalf("frame drew %d sprites, want keeper + 7 enemies + 2 enemy shots + 1 heal cache", got)
+	}
+
+	// Render a Hollow King charge telegraph.
+	r.spawnBoss()
+	r.boss.state = bossChargeWindup
+	r.boss.timer = 0.4
+	r.boss.timerMax = 0.8
+	r.boss.chargeDir = Vec2{X: 1}
+	a.sync(r.Snapshot(), r.Events(), stepSeconds)
+	d.Ops = d.Ops[:0]
+	a.draw(d, 0.5)
+	hasLine := false
+	for _, op := range d.Ops {
+		if op.Kind == core.DrawLineTo {
+			hasLine = true
+			break
+		}
+	}
+	if !hasLine {
+		t.Fatal("boss charge telegraph drew no line")
+	}
+}
+
 // BenchmarkArenaFrame measures a whole frame of a crowded arena: step two hundred enemies that surround the keeper, copy them for drawing, and draw them with their effects.
 func BenchmarkArenaFrame(b *testing.B) {
 	r := NewRun(11)
