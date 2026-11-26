@@ -26,6 +26,8 @@
 - 保存最佳记录和设置。
 - 可构建到 macOS、Windows、Linux 和 Web。
 
+首版正在开发中，[路线图](docs/roadmap.md)列出每个里程碑的内容。
+
 ## 安装
 
 需要 Go 1.27 和 `go.mod` 里锁定的工具链版本。
@@ -59,6 +61,8 @@ go tool nsgo check -target macos,windows,linux,web
 ```
 
 改代码前先读 [ARCHITECTURE.md](ARCHITECTURE.md)，首版范围见 [docs/requirements.md](docs/requirements.md)，里程碑见 [docs/roadmap.md](docs/roadmap.md)。Agent 还要读 [AGENTS.md](AGENTS.md)。
+
+发布说明见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 许可证
 

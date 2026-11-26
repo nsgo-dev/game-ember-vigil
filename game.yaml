@@ -1,0 +1,90 @@
+version: 1
+name: Ember Vigil
+id: me.oneo.embervigil
+appVersion: 0.1.0
+window:
+  width: 960
+  height: 540
+  minWidth: 480
+  minHeight: 270
+  appearance: dark
+display:
+  width: 480
+  height: 270
+  mode: fit
+  pixelSnap: true
+  barColor: '#0b0d17'
+input:
+  actions:
+    - name: left
+      bindings:
+        - kind: keyCode
+          code: KeyA
+        - kind: key
+          key: left
+        - kind: gamepadButton
+          button: dpadLeft
+    - name: right
+      bindings:
+        - kind: keyCode
+          code: KeyD
+        - kind: key
+          key: right
+        - kind: gamepadButton
+          button: dpadRight
+    - name: up
+      bindings:
+        - kind: keyCode
+          code: KeyW
+        - kind: key
+          key: up
+        - kind: gamepadButton
+          button: dpadUp
+    - name: down
+      bindings:
+        - kind: keyCode
+          code: KeyS
+        - kind: key
+          key: down
+        - kind: gamepadButton
+          button: dpadDown
+    - name: stick
+      bindings:
+        - kind: touchRegion
+          region: {x: 8, "y": 134, width: 128, height: 128}
+    - name: pause
+      bindings:
+        - kind: key
+          key: escape
+        - kind: gamepadButton
+          button: start
+        - kind: touchRegion
+          region: {x: 400, "y": 8, width: 72, height: 56}
+    - name: confirm
+      bindings:
+        - kind: key
+          key: enter
+        - kind: gamepadButton
+          button: south
+  axes:
+    - name: move_x
+      negative: left
+      positive: right
+    - name: move_y
+      negative: up
+      positive: down
+  gamepadAxes:
+    - name: move_x
+      axis: leftX
+    - name: move_y
+      axis: leftY
+export:
+  output: dist
+  presets:
+    - platform: macos
+      targets: [macos_arm64]
+    - platform: windows
+      targets: [windows_x64]
+    - platform: linux
+      targets: [linux_x64]
+    - platform: web
