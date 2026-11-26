@@ -52,19 +52,19 @@ func TestTitleArenaPauseAndQuitFlow(t *testing.T) {
 		t.Fatal("Start began no run")
 	}
 
-	before := g.run.elapsed
+	before := g.run.Snapshot().Time
 	app.Advance(10 * frame)
-	if g.run.elapsed <= before {
-		t.Fatalf("the run lasted %v after ten frames, want more than %v", g.run.elapsed, before)
+	if g.run.Snapshot().Time <= before {
+		t.Fatalf("the run lasted %v seconds after ten frames, want more than %v", g.run.Snapshot().Time, before)
 	}
 
 	press(t, app, "role:button Pause")
 	app.Find("id:pause")
 	app.Find("text:Paused")
-	paused := g.run.elapsed
+	paused := g.run.Snapshot().Time
 	app.Advance(20 * frame)
-	if g.run.elapsed != paused {
-		t.Fatalf("the run lasted %v while paused, want %v", g.run.elapsed, paused)
+	if g.run.Snapshot().Time != paused {
+		t.Fatalf("the run lasted %v seconds while paused, want %v", g.run.Snapshot().Time, paused)
 	}
 
 	press(t, app, "role:button Resume")
@@ -72,8 +72,8 @@ func TestTitleArenaPauseAndQuitFlow(t *testing.T) {
 		t.Fatalf("phase after Resume = %v, want phaseArena", g.phase.Get())
 	}
 	app.Advance(10 * frame)
-	if g.run.elapsed <= paused {
-		t.Fatalf("the run lasted %v after resuming, want more than %v", g.run.elapsed, paused)
+	if g.run.Snapshot().Time <= paused {
+		t.Fatalf("the run lasted %v seconds after resuming, want more than %v", g.run.Snapshot().Time, paused)
 	}
 
 	press(t, app, "role:button Pause")
@@ -118,6 +118,33 @@ func TestConfirmStartsARun(t *testing.T) {
 	app.Advance(frame)
 	if g.phase.Get() != phaseArena {
 		t.Fatalf("phase after Enter = %v, want phaseArena", g.phase.Get())
+	}
+}
+
+// TestTheArenaAxesMoveTheKeeper checks that the bound move_x and move_y actions reach the run's controls while the arena is on screen.
+func TestTheArenaAxesMoveTheKeeper(t *testing.T) {
+	app, g := startEmberVigil(t)
+	press(t, app, "role:button Start")
+	before := g.run.Snapshot().Keeper
+
+	app.KeyCodeDown("KeyD")
+	app.Advance(30 * frame)
+	app.KeyCodeUp("KeyD")
+	app.Advance(frame)
+
+	after := g.run.Snapshot().Keeper
+	if after.X <= before.X {
+		t.Fatalf("the keeper stayed at x %v while D was held, want it to move right from %v", after.X, before.X)
+	}
+	if after.Y != before.Y {
+		t.Fatalf("the keeper moved to y %v while D was held, want %v", after.Y, before.Y)
+	}
+}
+
+// TestTheRunViewMatchesTheVirtualCanvas checks that the spawn ring and the camera count the same view, from the run and from game.yaml.
+func TestTheRunViewMatchesTheVirtualCanvas(t *testing.T) {
+	if viewWidth != virtualWidth || viewHeight != virtualHeight {
+		t.Fatalf("the run assumes a %vx%v view, but game.yaml declares %vx%v", viewWidth, viewHeight, virtualWidth, virtualHeight)
 	}
 }
 

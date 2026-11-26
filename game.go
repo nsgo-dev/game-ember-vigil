@@ -16,6 +16,8 @@ const rate = 60
 const (
 	actionPause   = "pause"
 	actionConfirm = "confirm"
+	axisMoveX     = "move_x"
+	axisMoveY     = "move_y"
 )
 
 // phase is which screen the shell shows.
@@ -33,7 +35,7 @@ type emberVigil struct {
 	cx      *core.Scope
 	loop    *game.Loop
 	actions *input.Actions
-	run     *run
+	run     *Run
 
 	// phase is the screen that shows; frame changes on every draw so the canvas draws again.
 	phase *core.Signal[phase]
@@ -86,8 +88,8 @@ func (g *emberVigil) update(dt time.Duration) {
 	if g.actions.JustPressed(actionConfirm) {
 		g.confirm()
 	}
-	if g.phase.GetUntracked() == phaseArena {
-		g.run.step(dt)
+	if g.phase.GetUntracked() == phaseArena && g.run != nil {
+		g.run.Step(dt, Controls{Move: Vec2{X: g.actions.Axis(axisMoveX), Y: g.actions.Axis(axisMoveY)}})
 	}
 }
 
@@ -97,9 +99,9 @@ func (g *emberVigil) setPhase(p phase) {
 	g.actions.Reset()
 }
 
-// start begins a run in an empty arena.
+// start begins a run from the wall clock's seed, which the run itself never reads.
 func (g *emberVigil) start() {
-	g.run = newRun()
+	g.run = NewRun(uint64(time.Now().UnixNano()))
 	g.setPhase(phaseArena)
 }
 
