@@ -110,7 +110,10 @@ func (c *camera) clamp(arena Vec2) {
 type actor struct {
 	id          uint64
 	kind        int
+	elite       bool
 	radius      float64
+	hp          float64
+	maxHP       float64
 	pos         Vec2
 	was         Vec2
 	facingRight bool
@@ -378,7 +381,11 @@ func (r *arenaRenderer) trackEnemies(s Snapshot) {
 	r.enemies = growActors(r.enemies, len(s.Enemies))
 	for i, e := range s.Enemies {
 		defaultFacingRight := s.Keeper.X >= e.Pos.X
-		r.enemies[i] = r.tracked(r.enemies[i], e.ID, enemyKind(e.Kind), e.Radius, e.Pos, defaultFacingRight)
+		a := r.tracked(r.enemies[i], e.ID, enemyKind(e.Kind), e.Radius, e.Pos, defaultFacingRight)
+		a.elite = e.Elite
+		a.hp = e.Health
+		a.maxHP = e.MaxHealth
+		r.enemies[i] = a
 	}
 }
 
@@ -648,6 +655,7 @@ func (r *arenaRenderer) draw(d *core.Drawing, alpha float64) {
 	r.pulseSprites = r.pulseSprites[:0]
 	r.drawPatches(d, ox, oy)
 	d.SetImageSmoothing(false)
+	r.drawEliteAuras(d, ox, oy)
 	r.drawBossTelegraph(d, ox, oy)
 
 	r.sheetSprites = r.sheetSprites[:0]
@@ -674,6 +682,7 @@ func (r *arenaRenderer) draw(d *core.Drawing, alpha float64) {
 	}
 	r.drawPulses(d, ox, oy)
 	d.SetImageSmoothing(false)
+	r.drawEliteBars(d, ox, oy)
 	r.drawLevelFlourish(d, ox, oy)
 
 	r.drawLight(d, w, h)
@@ -865,6 +874,54 @@ func (r *arenaRenderer) addEnemyShots(ox, oy float32) {
 		}
 		if s != nil {
 			s.Rotation = r.enemyShots[i].angle
+		}
+	}
+}
+
+// drawEliteAuras paints a pulsing crimson ground ring under each living mini-boss/elite so it stands out in a crowd.
+func (r *arenaRenderer) drawEliteAuras(d *core.Drawing, ox, oy float32) {
+	pulse := float32(0.75 + 0.25*math.Sin(r.fx.time*5))
+	for i := range r.enemies {
+		e := &r.enemies[i]
+		if !e.elite {
+			continue
+		}
+		p := Vec2{e.was.X + (e.pos.X-e.was.X)*r.alpha, e.was.Y + (e.pos.Y-e.was.Y)*r.alpha}
+		x, y := toScreen(p, ox, oy)
+		if !inView(x, y) {
+			continue
+		}
+		rad := float32(e.radius + 4)
+		d.SetFillColor(core.RGBA(0xa3341a, 0.14*pulse)).
+			BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Fill()
+		d.SetStrokeColor(core.RGBA(0xe65239, 0.55*pulse)).
+			SetLineWidth(1.5).
+			BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Stroke()
+	}
+}
+
+// drawEliteBars paints a compact floating health bar above each living mini-boss/elite on the canvas.
+func (r *arenaRenderer) drawEliteBars(d *core.Drawing, ox, oy float32) {
+	const (
+		barW = float32(30)
+		barH = float32(3)
+	)
+	for i := range r.enemies {
+		e := &r.enemies[i]
+		if !e.elite || e.maxHP <= 0 {
+			continue
+		}
+		p := Vec2{e.was.X + (e.pos.X-e.was.X)*r.alpha, e.was.Y + (e.pos.Y-e.was.Y)*r.alpha}
+		x, y := toScreen(p, ox, oy)
+		if !inView(x, y) {
+			continue
+		}
+		frac := float32(min(max(e.hp/e.maxHP, 0), 1))
+		bx := x - barW/2
+		by := y - float32(e.radius) - 9
+		d.SetFillColor(core.RGBA(0x0b0a0e, 0.85)).FillRect(bx-1, by-1, barW+2, barH+2)
+		if frac > 0 {
+			d.SetFillColor(core.RGB(0xd93829)).FillRect(bx, by, barW*frac, barH)
 		}
 	}
 }

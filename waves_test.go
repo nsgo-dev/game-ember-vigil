@@ -156,3 +156,46 @@ func TestDirectorTriggersSurgesElitesAndPausesForBoss(t *testing.T) {
 		t.Fatalf("normal spawns did not pause during boss fight: %d enemies alive", len(r.enemies))
 	}
 }
+
+// TestDirectorSpawnsSurroundWaveAroundKeeper checks that a surround surge places enemies across all four quadrants around the keeper.
+func TestDirectorSpawnsSurroundWaveAroundKeeper(t *testing.T) {
+	r := NewRun(23)
+	r.director.nextSpawn = math.Inf(1)
+	r.director.nextElite = len(r.data.waves.Elites)
+
+	var surround *surgeDef
+	for i := range r.data.waves.Surges {
+		if r.data.waves.Surges[i].Surround {
+			surround = &r.data.waves.Surges[i]
+			r.director.nextSurge = i
+			break
+		}
+	}
+	if surround == nil {
+		t.Fatal("data/waves.yaml defines no surround surge")
+	}
+	r.time = surround.At
+	r.director.step(r)
+	if len(r.enemies) != surround.Count {
+		t.Fatalf("surround surge spawned %d enemies, want %d", len(r.enemies), surround.Count)
+	}
+	var q [4]bool
+	for _, e := range r.enemies {
+		d := e.pos.Sub(r.keeper.pos)
+		switch {
+		case d.X >= 0 && d.Y >= 0:
+			q[0] = true
+		case d.X < 0 && d.Y >= 0:
+			q[1] = true
+		case d.X < 0 && d.Y < 0:
+			q[2] = true
+		default:
+			q[3] = true
+		}
+	}
+	for i, seen := range q {
+		if !seen {
+			t.Fatalf("surround surge left quadrant %d empty around keeper", i)
+		}
+	}
+}

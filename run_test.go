@@ -155,7 +155,7 @@ func TestContactDamageWaitsForTheInvulnerabilityWindow(t *testing.T) {
 // TestAKillDropsAnEmberTheKeeperCollectsForXP follows one shot from the keeper to an enemy, its ember and the XP bar.
 func TestAKillDropsAnEmberTheKeeperCollectsForXP(t *testing.T) {
 	r := quietRun(t)
-	putEnemy(t, r, 1, Vec2{X: 30})
+	putEnemy(t, r, 1, Vec2{X: 60})
 	for range 120 {
 		stepOnce(r, Controls{})
 		if len(r.enemies) == 0 {
@@ -405,14 +405,14 @@ func TestBellTollPulsesDamageAndKnockback(t *testing.T) {
 	r.weaponLevels[bolt] = 0
 	r.weaponLevels[bell] = 1
 
-	putEnemy(t, r, 0, Vec2{X: 40})
+	putEnemy(t, r, 1, Vec2{X: 40})
 	startDist := r.enemies[0].pos.Sub(r.keeper.pos).Len()
 	stepOnce(r, Controls{})
 	if len(r.pulses) != 1 {
 		t.Fatalf("Bell Toll created %d pulses, want 1", len(r.pulses))
 	}
 	if r.Snapshot().Kills != 1 {
-		// Ash Mite has 10 HP, Bell Toll lv1 deals 12 damage -> killed immediately.
+		// Moth has 9 HP, Bell Toll lv1 deals 12 damage -> killed immediately.
 		t.Fatalf("level 1 Bell Toll kills = %d, want 1", r.Snapshot().Kills)
 	}
 	// Test knockback on a tougher Husk that survives the level 5 hit.
@@ -517,6 +517,33 @@ func TestShadeSplitsIntoAshMitesOnDeath(t *testing.T) {
 	for _, e := range r.enemies {
 		if name := r.data.enemies.Enemies[e.kind].Name; name != "Ash Mite" {
 			t.Fatalf("Shade split into %q, want Ash Mite", name)
+		}
+	}
+}
+
+// TestGloomwardenFiresRadialBurst checks that the Gloomwarden mini-boss unleashes a radial bone-shot burst while chasing the keeper.
+func TestGloomwardenFiresRadialBurst(t *testing.T) {
+	r := quietRun(t)
+	r.weaponLevels[r.data.starterWeapon] = 0
+	warden := enemyByName(t, r, "Gloomwarden")
+	wantBurst := r.data.enemies.Enemies[warden].Shot.Burst
+	if wantBurst < 2 {
+		t.Fatalf("Gloomwarden burst = %d, want at least 2", wantBurst)
+	}
+	putEnemy(t, r, warden, Vec2{X: 150})
+	for range 240 {
+		r.keeper.health = r.stats.maxHealth
+		stepOnce(r, Controls{})
+		if len(r.enemyShots) >= wantBurst {
+			break
+		}
+	}
+	if len(r.enemyShots) != wantBurst {
+		t.Fatalf("Gloomwarden fired %d projectiles, want %d", len(r.enemyShots), wantBurst)
+	}
+	for _, sh := range r.enemyShots {
+		if sh.kind != enemyShotBone {
+			t.Fatalf("Gloomwarden shot kind = %d, want enemyShotBone (%d)", sh.kind, enemyShotBone)
 		}
 	}
 }

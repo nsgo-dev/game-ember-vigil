@@ -2,72 +2,72 @@ version: 1
 enemies:
   - name: Ash Mite
     motion: chase
-    health: 10
-    speed: 30
+    health: 14
+    speed: 35
     radius: 7
-    damage: 8
+    damage: 10
     knockbackResist: 0
     embers: 1
   - name: Moth
     motion: drift
-    health: 6
-    speed: 62
+    health: 9
+    speed: 68
     radius: 6
-    damage: 6
+    damage: 8
     knockbackResist: 0.2
     embers: 1
     drift:
       amplitude: 0.5
-      period: 1.6
+      period: 1.5
   - name: Husk
     motion: chase
-    health: 34
-    speed: 18
+    health: 48
+    speed: 22
     radius: 11
-    damage: 16
-    knockbackResist: 0.65
+    damage: 20
+    knockbackResist: 0.7
     embers: 3
   - name: Thornling
     motion: ranged
-    health: 20
-    speed: 25
+    health: 28
+    speed: 30
     radius: 8
-    damage: 9
+    damage: 12
     knockbackResist: 0.25
     embers: 2
     ranged:
       keepDistance: 125
     shot:
-      range: 200
-      cooldown: 2.8
-      speed: 105
+      range: 210
+      cooldown: 2.4
+      speed: 122
       radius: 4
       life: 2.2
-      damage: 7
+      damage: 10
   - name: Wisp
     motion: orbit
-    health: 14
-    speed: 48
+    health: 20
+    speed: 54
     radius: 7
-    damage: 7
-    knockbackResist: 0.2
+    damage: 10
+    knockbackResist: 0.22
     embers: 2
     orbit:
       radius: 100
     shot:
-      range: 185
-      cooldown: 3
-      speed: 100
+      range: 195
+      cooldown: 2.5
+      speed: 118
       radius: 4
       life: 2
-      damage: 6
+      damage: 9
   - name: Shade
     motion: chase
-    health: 24
-    speed: 36
+    health: 36
+    speed: 42
     radius: 9
-    damage: 11
-    knockbackResist: 0.3
+    damage: 14
+    knockbackResist: 0.35
     embers: 3
     split:
       enemy: Ash Mite
@@ -75,10 +75,18 @@ enemies:
   - name: Gloomwarden
     motion: chase
     elite: true
-    health: 190
-    speed: 26
-    radius: 15
-    damage: 18
-    knockbackResist: 0.85
-    embers: 12
-    healDrop: 0.3
+    health: 420
+    speed: 32
+    radius: 16
+    damage: 22
+    knockbackResist: 0.88
+    embers: 16
+    healDrop: 0.35
+    shot:
+      range: 230
+      cooldown: 4
+      speed: 110
+      radius: 4.5
+      life: 2.3
+      damage: 10
+      burst: 6

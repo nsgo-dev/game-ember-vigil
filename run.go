@@ -145,6 +145,7 @@ type enemy struct {
 	shotRadius      float64
 	shotLife        float64
 	shotDamage      float64
+	shotBurst       int
 	splitKind       int
 	splitCount      int
 	healDrop        float64
@@ -482,6 +483,7 @@ func (r *Run) moveEnemy(e *enemy) {
 		r.tickEnemyShot(e, dir, dist)
 	default:
 		vel = dir.Scale(e.speed)
+		r.tickEnemyShot(e, dir, dist)
 	}
 	vel = vel.Add(e.knockback)
 	e.pos = r.clamp(e.pos.Add(vel.Scale(stepSeconds)), e.radius)
@@ -489,7 +491,7 @@ func (r *Run) moveEnemy(e *enemy) {
 	e.knockback = e.knockback.Scale(drag)
 }
 
-// tickEnemyShot ticks e's ranged attack timer and fires a thorn/wisp bolt when the keeper is in range.
+// tickEnemyShot ticks e's ranged attack timer and fires a single bolt or radial burst when the keeper is in range.
 func (r *Run) tickEnemyShot(e *enemy, dir Vec2, dist float64) {
 	if e.shotPeriod <= 0 {
 		return
@@ -498,7 +500,19 @@ func (r *Run) tickEnemyShot(e *enemy, dir Vec2, dist float64) {
 	if e.shotCooldown > 0 || dist > e.shotRange || dir == (Vec2{}) {
 		return
 	}
-	r.addEnemyShot(e.pos, dir.Scale(e.shotSpeed), e.shotDamage, e.shotRadius, e.shotLife, enemyShotThorn)
+	shotKind := enemyShotThorn
+	if e.elite {
+		shotKind = enemyShotBone
+	}
+	if e.shotBurst > 1 {
+		step := 2 * math.Pi / float64(e.shotBurst)
+		for k := range e.shotBurst {
+			shotDir := dir.Rotated(float64(k) * step)
+			r.addEnemyShot(e.pos, shotDir.Scale(e.shotSpeed), e.shotDamage, e.shotRadius, e.shotLife, shotKind)
+		}
+	} else {
+		r.addEnemyShot(e.pos, dir.Scale(e.shotSpeed), e.shotDamage, e.shotRadius, e.shotLife, shotKind)
+	}
 	e.shotCooldown = e.shotPeriod
 }
 
