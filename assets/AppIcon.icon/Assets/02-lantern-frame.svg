@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Top hanging ring -->
+  <path d="M512 106
+           C460 106 420 144 420 194
+           C420 218 430 238 446 254
+           L478 254
+           C464 240 456 218 456 196
+           C456 164 480 140 512 140
+           C544 140 568 164 568 196
+           C568 218 560 240 546 254
+           L578 254
+           C594 238 604 218 604 194
+           C604 144 564 106 512 106 Z"
+        fill="#55637f"/>
+
+  <!-- Small cap finial & tiered gothic lantern roof with flared eaves -->
+  <path d="M472 240
+           Q512 224 552 240
+           L584 282
+           L692 340
+           Q722 356 724 378
+           Q726 402 698 402
+           L326 402
+           Q298 402 300 378
+           Q302 356 332 340
+           L440 282 Z"
+        fill="#27314a"/>
+  <!-- Upper roof ridge accent -->
+  <path d="M478 252 Q512 238 546 252 L572 288 L644 334 L380 334 L452 288 Z" fill="#3b4a66"/>
+
+  <!-- Left & right tapered wrought-iron side pillars -->
+  <path d="M316 392
+           L364 392
+           L392 736
+           L342 736 Z"
+        fill="#27314a"/>
+  <path d="M708 392
+           L660 392
+           L632 736
+           L682 736 Z"
+        fill="#27314a"/>
+
+  <!-- Gothic pointed arch corner brackets at top of glass window -->
+  <path d="M352 394
+           L446 394
+           Q396 414 372 478
+           L356 478 Z"
+        fill="#27314a"/>
+  <path d="M672 394
+           L578 394
+           Q628 414 652 478
+           L668 478 Z"
+        fill="#27314a"/>
+
+  <!-- Subtle slate bevel highlights on pillars -->
+  <path d="M338 398 L352 398 L378 730 L364 730 Z" fill="#3b4a66"/>
+  <path d="M686 398 L672 398 L646 730 L660 730 Z" fill="#3b4a66"/>
+
+  <!-- Sturdy lantern base collar & flared pedestal with subtle bottom finial -->
+  <path d="M318 726
+           L706 726
+           Q726 726 726 748
+           L726 764
+           Q726 782 706 788
+           L656 814
+           L656 832
+           Q656 854 632 854
+           L562 854
+           L528 898
+           Q512 914 496 898
+           L462 854
+           L392 854
+           Q368 854 368 832
+           L368 814
+           L318 788
+           Q298 782 298 764
+           L298 748
+           Q298 726 318 726 Z"
+        fill="#27314a"/>
+  <!-- Base top rim highlight -->
+  <rect x="330" y="736" width="364" height="24" rx="12" fill="#55637f"/>
+</svg>

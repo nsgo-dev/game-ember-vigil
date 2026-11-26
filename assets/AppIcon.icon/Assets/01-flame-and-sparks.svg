@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Organic flickering golden flame -->
+  <path d="M518 446
+           C536 494 590 546 588 614
+           C586 664 554 700 512 700
+           C468 700 436 664 436 614
+           C436 558 474 522 486 490
+           C494 468 506 456 518 446 Z"
+        fill="#ffd166"/>
+  <!-- Luminous pale-gold flame heart -->
+  <path d="M514 520
+           C532 552 552 582 552 620
+           C552 650 534 672 512 672
+           C490 672 472 650 472 620
+           C472 584 494 552 514 520 Z"
+        fill="#fff5d1"/>
+  <!-- Three crisp floating ember sparks framing the lantern -->
+  <path d="M222 362 Q240 398 276 416 Q240 434 222 470 Q204 434 168 416 Q204 398 222 362 Z" fill="#ffb347"/>
+  <path d="M804 274 Q818 302 846 316 Q818 330 804 358 Q790 330 762 316 Q790 302 804 274 Z" fill="#ffd166"/>
+  <circle cx="792" cy="648" r="24" fill="#ff7a1a"/>
+  <circle cx="238" cy="672" r="18" fill="#ffb347"/>
+</svg>

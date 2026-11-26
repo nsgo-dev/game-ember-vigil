@@ -1,0 +1,26 @@
+{
+  "fill": {
+    "automatic-gradient": "srgb:0.082,0.106,0.169,1"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "01-flame-and-sparks.svg",
+          "name": "01-flame-and-sparks"
+        },
+        {
+          "image-name": "02-lantern-frame.svg",
+          "name": "02-lantern-frame"
+        },
+        {
+          "image-name": "03-ember-chamber.svg",
+          "name": "03-ember-chamber"
+        }
+      ]
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}
