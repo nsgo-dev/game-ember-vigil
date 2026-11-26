@@ -26,6 +26,8 @@
 - Best records and settings kept between sessions.
 - Builds for macOS, Windows, Linux and the web.
 
+The first version is in progress; the [roadmap](docs/roadmap.md) lists what each milestone adds.
+
 ## Install
 
 The game needs Go 1.27 and the toolchain versions pinned in `go.mod`.
@@ -59,6 +61,8 @@ go tool nsgo check -target macos,windows,linux,web
 ```
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md) before changing code, [docs/requirements.md](docs/requirements.md) for the first version's scope, and [docs/roadmap.md](docs/roadmap.md) for the milestones. Agents also read [AGENTS.md](AGENTS.md).
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ## License
 

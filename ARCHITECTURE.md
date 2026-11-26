@@ -13,9 +13,9 @@ Ember Vigil is an NSGo app with one fixed-step game loop. A run is simulated hea
 | `waves.go` | The wave director and boss timeline, driven by the run clock |
 | `data/` | Versioned tuning YAML: run, enemies, weapons, upgrades, waves and boss |
 | `art.go`, `draw.go` | Palette and procedural pixel atlas; world, lighting and effects |
-| `hud.go`, `screens.go` | Native HUD, title, pause, level-up, results and settings views |
+| `screens.go` | Native HUD, title, pause, level-up, results and settings views |
 | `audio.go`, `save.go`, `strings/` | Mixer and cues; records and settings; English and Chinese strings |
-| `*_test.go` | Headless rules, data, screens and playthrough tests |
+| `*_test.go` | Headless shell, run and project tests |
 
 ## Boundaries
 
@@ -41,7 +41,7 @@ Ember Vigil is an NSGo app with one fixed-step game loop. A run is simulated hea
 
 ## Verification
 
-`run.go` tests step the simulation directly and cover movement, damage, XP, upgrades, every wave and the boss, including a bot that plays a full run. `nsgotest` tests start the app and play from the title through a pause, an offer and a result. Data tests load every file and check it canonical and consistent. `go tool nsgo check -target macos,windows,linux,web` covers builds. Frame pacing, gamepad feel, sound and the read of darkness need a manual run.
+`nsgotest` tests play the shell from the title into the arena, through a pause and back. `go tool nsgo check -target macos,windows,linux,web` covers builds. Frame pacing, gamepad feel, sound and the read of darkness need a manual run.
 
 ## Subjects
 
