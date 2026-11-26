@@ -97,6 +97,8 @@ type keeperDef struct {
 	Speed        float64 `yaml:"speed"`
 	Health       float64 `yaml:"health"`
 	Invulnerable float64 `yaml:"invulnerable"`
+	// LowHealth is the fraction of maximum health at or under which the HUD warns that the keeper is in danger.
+	LowHealth float64 `yaml:"lowHealth"`
 }
 
 // emberDef is what an enemy leaves behind and how it reaches the keeper.
@@ -556,6 +558,8 @@ func (r *runFile) validate() error {
 		return fmt.Errorf("keeper health %v is not above 0", r.Keeper.Health)
 	case !finite(r.Keeper.Invulnerable) || r.Keeper.Invulnerable < 0:
 		return fmt.Errorf("keeper invulnerable %v is negative", r.Keeper.Invulnerable)
+	case !finite(r.Keeper.LowHealth) || r.Keeper.LowHealth <= 0 || r.Keeper.LowHealth >= 1:
+		return fmt.Errorf("keeper lowHealth %v is not between 0 and 1", r.Keeper.LowHealth)
 	}
 	e := r.Embers
 	switch {

@@ -47,13 +47,15 @@ type Table struct {
 	WinsFmt       string
 
 	// HUD
-	LevelPrefix string
-	KillsPrefix string
-	Pause       string
-	BossName    string
-	BossPhase1  string
-	BossPhase2  string
-	BossPhase3  string
+	LevelPrefix  string
+	KillsPrefix  string
+	HealthPrefix string
+	Pause        string
+	BossName     string
+	EliteName    string
+	BossPhase1   string
+	BossPhase2   string
+	BossPhase3   string
 
 	// Level-up
 	KindWeapon  string
@@ -117,6 +119,11 @@ func (t Table) Level(n int) string { return t.LevelPrefix + strconv.Itoa(n) }
 // Kills formats a kill count readout such as "Kills 12" or "击杀 12".
 func (t Table) Kills(n int) string { return t.KillsPrefix + strconv.Itoa(n) }
 
+// Health writes the keeper's health out of its maximum.
+func (t Table) Health(n, maxHealth int) string {
+	return t.HealthPrefix + strconv.Itoa(n) + "/" + strconv.Itoa(maxHealth)
+}
+
 // Time formats a duration readout such as "Time 04:12" or "时间 04:12".
 func (t Table) Time(clock string) string { return t.TimePrefix + clock }
 
@@ -148,6 +155,14 @@ func (t Table) BossPhaseLabel(phase int) string {
 func (t Table) BossDisplayName(fallback string) string {
 	if t.BossName != "" {
 		return t.BossName
+	}
+	return fallback
+}
+
+// EliteDisplayName returns the localized Gloomwarden name, falling back to fallback if unknown.
+func (t Table) EliteDisplayName(fallback string) string {
+	if t.EliteName != "" {
+		return t.EliteName
 	}
 	return fallback
 }

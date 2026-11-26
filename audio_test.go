@@ -149,7 +149,7 @@ func TestAudioMixerSyncsWithSettingsAndDegradesGracefully(t *testing.T) {
 	}
 	g.audio.playRunEvents([]Event{{Kind: EventShot}, {Kind: EventKill}, {Kind: EventEmber}}, true)
 
-	press(t, app, "role:button Pause")
+	pressPause(t, app, g)
 	if !g.audio.mixer.Paused() {
 		t.Fatal("mixer should pause gameplay audio when paused")
 	}

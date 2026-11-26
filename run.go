@@ -1209,31 +1209,33 @@ func (r *Run) inside(p Vec2, radius float64) bool {
 
 // Snapshot is a read-only view of the run for the shell to draw, which the next Step invalidates: its slices reuse the run's buffers.
 type Snapshot struct {
-	Phase        Phase           `json:"phase"`
-	Time         float64         `json:"time"`
-	Arena        Vec2            `json:"arena"`
-	Fog          float64         `json:"fog"`
-	Keeper       Vec2            `json:"keeper"`
-	KeeperRadius float64         `json:"keeperRadius"`
-	Health       float64         `json:"health"`
-	MaxHealth    float64         `json:"maxHealth"`
-	Invulnerable float64         `json:"invulnerable"`
-	Level        int             `json:"level"`
-	XP           float64         `json:"xp"`
-	XPNeeded     float64         `json:"xpNeeded"`
-	Kills        int             `json:"kills"`
-	Enemies      []EnemyView     `json:"enemies"`
-	Shots        []ShotView      `json:"shots"`
-	EnemyShots   []EnemyShotView `json:"enemyShots"`
-	Embers       []EmberView     `json:"embers"`
-	Pickups      []PickupView    `json:"pickups"`
-	Halo         []HaloOrbView   `json:"halo"`
-	Patches      []PatchView     `json:"patches"`
-	Pulses       []PulseView     `json:"pulses"`
-	Boss         BossView        `json:"boss"`
-	Weapons      []SlotView      `json:"weapons"`
-	Passives     []SlotView      `json:"passives"`
-	Offers       []OfferView     `json:"offers"`
+	Phase        Phase   `json:"phase"`
+	Time         float64 `json:"time"`
+	Arena        Vec2    `json:"arena"`
+	Fog          float64 `json:"fog"`
+	Keeper       Vec2    `json:"keeper"`
+	KeeperRadius float64 `json:"keeperRadius"`
+	Health       float64 `json:"health"`
+	MaxHealth    float64 `json:"maxHealth"`
+	Invulnerable float64 `json:"invulnerable"`
+	// LowHealth is the health fraction at or under which the keeper is in danger.
+	LowHealth  float64         `json:"lowHealth"`
+	Level      int             `json:"level"`
+	XP         float64         `json:"xp"`
+	XPNeeded   float64         `json:"xpNeeded"`
+	Kills      int             `json:"kills"`
+	Enemies    []EnemyView     `json:"enemies"`
+	Shots      []ShotView      `json:"shots"`
+	EnemyShots []EnemyShotView `json:"enemyShots"`
+	Embers     []EmberView     `json:"embers"`
+	Pickups    []PickupView    `json:"pickups"`
+	Halo       []HaloOrbView   `json:"halo"`
+	Patches    []PatchView     `json:"patches"`
+	Pulses     []PulseView     `json:"pulses"`
+	Boss       BossView        `json:"boss"`
+	Weapons    []SlotView      `json:"weapons"`
+	Passives   []SlotView      `json:"passives"`
+	Offers     []OfferView     `json:"offers"`
 }
 
 // EnemyView is one enemy as a snapshot shows it.
@@ -1347,6 +1349,7 @@ func (r *Run) Snapshot() Snapshot {
 	s.Health = r.keeper.health
 	s.MaxHealth = r.stats.maxHealth
 	s.Invulnerable = r.keeper.invuln
+	s.LowHealth = r.data.run.Keeper.LowHealth
 	s.Level = r.level
 	s.XP = r.xp
 	s.XPNeeded = r.xpNeeded()

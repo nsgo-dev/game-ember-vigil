@@ -13,7 +13,7 @@ import (
 	evstrings "me.oneo/embervigil/strings"
 )
 
-// rate is how many times a second the game steps its run, whatever the display's refresh rate, and hudRate how often the native HUD reads the run.
+// rate is how many times a second the game steps its run, whatever the display's refresh rate, and hudRate how often the HUD reads the run.
 const (
 	rate       = 60
 	hudRate    = 100 * time.Millisecond
@@ -72,6 +72,7 @@ type emberVigil struct {
 	pad     *input.VirtualPad
 	stick   *input.VirtualStick
 	art     *art
+	hudArt  *hudArt
 	scene   *arenaRenderer
 	audio   *audioController
 	quality *quality.Selector
@@ -85,10 +86,13 @@ type emberVigil struct {
 	// phase is the screen that shows; frame changes on every draw so the canvas draws again.
 	phase *core.Signal[phase]
 	frame *core.Signal[uint64]
-	// hud is what the native views show, published at hudRate rather than every step; hudClock is how long since the last time.
+	// hud is what the HUD and the native views show, published at hudRate rather than every step; hudClock is how long since the last time.
 	hud       *core.Signal[hudState]
 	hudClock  time.Duration
 	cardFocus int
+	// hudMotion eases the canvas HUD toward hud between publications; pausePushed is whether a press or touch holds the canvas pause button.
+	hudMotion   hudMotion
+	pausePushed bool
 
 	// Persisted settings and lifetime records, plus reactive menu state.
 	settings       *core.Signal[Settings]
@@ -128,6 +132,7 @@ func newEmberVigil(cx *core.Scope) *emberVigil {
 		storage:        storage,
 		actions:        input.NewActions(),
 		art:            newArt(),
+		hudArt:         newHUDArt(embeddedHUD),
 		phase:          core.NewSignal(cx, phaseTitle),
 		frame:          core.NewSignal(cx, uint64(0)),
 		hud:            core.NewSignal(cx, hudState{}),
@@ -208,6 +213,9 @@ func (g *emberVigil) tr() evstrings.Table {
 // update samples input once and steps the run while the arena shows.
 func (g *emberVigil) update(dt time.Duration) {
 	g.actions.Step()
+	if g.phase.GetUntracked() == phaseArena {
+		g.hudMotion.step(g.hud.GetUntracked(), dt.Seconds())
+	}
 	if g.actions.JustPressed(actionPause) {
 		g.togglePause()
 		return
@@ -357,33 +365,50 @@ func (g *emberVigil) adjustFocusedSetting(delta int) {
 	}
 }
 
-// publishHUD tells the native HUD what the run shows now: its clock, health, XP, level, kills, build and cards, or nothing when no run is on.
+// publishHUD tells the HUD what the run shows now: its clock, health, XP, level, kills, build and cards, or nothing when no run is on.
 func (g *emberVigil) publishHUD() {
 	if g.run == nil {
 		g.hud.Set(hudState{})
 		return
 	}
-	s := g.run.Snapshot()
+	g.hud.Set(hudStateOf(g.run.Snapshot(), g.cardFocus, g.lastNewRecord))
+}
+
+// hudStateOf is what the HUD shows of a snapshot, with the shell's focused card and whether the run set a record.
+func hudStateOf(s Snapshot, cardFocus int, newRecord bool) hudState {
 	st := hudState{
 		phase:         s.Phase,
 		time:          clockText(s.Time),
 		health:        max(0, int(math.Ceil(s.Health))),
 		maxHealth:     int(math.Round(s.MaxHealth)),
+		lowHealthAt:   s.LowHealth,
 		xp:            int(math.Round(s.XP)),
 		xpNeeded:      int(math.Ceil(s.XPNeeded)),
 		level:         s.Level,
 		kills:         s.Kills,
-		cardFocus:     g.cardFocus,
+		cardFocus:     cardFocus,
 		bossActive:    s.Boss.Active,
 		bossName:      s.Boss.Name,
 		bossHealth:    max(0, int(math.Ceil(s.Boss.Health))),
 		bossMaxHealth: int(math.Round(s.Boss.MaxHealth)),
 		bossPhase:     s.Boss.Phase,
-		newRecord:     g.lastNewRecord,
+		newRecord:     newRecord,
 	}
 	for i := range st.weapons {
 		if i < len(s.Weapons) {
-			st.weapons[i] = hudSlot{id: s.Weapons[i].ID, name: s.Weapons[i].Name, level: s.Weapons[i].Level}
+			w := s.Weapons[i]
+			st.weapons[i] = hudSlot{id: w.ID, name: w.Name, level: w.Level, maxLevel: w.MaxLevel}
+		}
+	}
+	// Between the Hollow King's appearances the bar follows the first Gloomwarden on the field.
+	if !st.bossActive {
+		for _, e := range s.Enemies {
+			if e.Elite && e.Health > 0 {
+				st.bossActive, st.bossElite, st.bossName = true, true, e.Kind
+				st.bossHealth = int(math.Ceil(e.Health))
+				st.bossMaxHealth = int(math.Round(e.MaxHealth))
+				break
+			}
 		}
 	}
 	for i := range st.offers {
@@ -400,7 +425,7 @@ func (g *emberVigil) publishHUD() {
 			}
 		}
 	}
-	g.hud.Set(st)
+	return st
 }
 
 // clockText writes a run's time as the minutes and seconds it has lasted.
@@ -435,6 +460,8 @@ func (g *emberVigil) start() {
 	g.scene.startRun(g.seed)
 	g.applyLiveSettings(g.settings.GetUntracked())
 	g.hudClock = 0
+	g.hudMotion = hudMotion{}
+	g.pausePushed = false
 	g.cardFocus = 0
 	g.runRecorded = false
 	g.lastNewRecord = false
@@ -687,12 +714,66 @@ func (g *emberVigil) onArenaTouch(ev core.TouchEvent) {
 	if g.phase.GetUntracked() != phaseArena || g.run == nil || g.run.Snapshot().Phase != PhasePlaying {
 		return
 	}
-	size := g.size
-	if size.Width <= 0 || size.Height <= 0 {
-		size = g.cx.Env().Window()
+	size := g.canvasSize()
+	if g.touchPause(ev, size) {
+		return
 	}
 	g.updateStickLayout(size, g.cx.Env().SafeArea())
 	g.pad.OnTouch(ev)
+}
+
+// canvasSize is the arena canvas's size when it last drew, or the window's before it has.
+func (g *emberVigil) canvasSize() core.Size {
+	if g.size.Width > 0 && g.size.Height > 0 {
+		return g.size
+	}
+	return g.cx.Env().Window()
+}
+
+// pauseHit reports whether p, in the canvas's points, lands on the HUD's pause button while a run is being played.
+func (g *emberVigil) pauseHit(p core.Point) bool {
+	if g.phase.GetUntracked() != phaseArena || g.run == nil || g.run.Snapshot().Phase != PhasePlaying {
+		return false
+	}
+	return layoutHUD(g.canvasSize(), g.cx.Env().SafeArea()).pauseHit.contains(p)
+}
+
+// touchPause presses the canvas pause button with a finger, and reports whether the touch was the button's rather than the stick's.
+func (g *emberVigil) touchPause(ev core.TouchEvent, size core.Size) bool {
+	hit := layoutHUD(size, g.cx.Env().SafeArea()).pauseHit
+	for _, t := range ev.Touches {
+		if !t.Changed {
+			continue
+		}
+		switch ev.Phase {
+		case core.TouchStart:
+			if hit.contains(t.Position) {
+				g.pausePushed = true
+				return true
+			}
+		case core.TouchEnd:
+			if g.pausePushed && hit.contains(t.Position) {
+				g.pausePushed = false
+				g.pause()
+				return true
+			}
+		case core.TouchCancel:
+			g.pausePushed = false
+		}
+	}
+	return false
+}
+
+// onArenaPressDown and onArenaPressUp press the canvas pause button with the mouse: down holds it, up inside it pauses.
+func (g *emberVigil) onArenaPressDown(ev core.PressEvent) {
+	g.pausePushed = g.pauseHit(ev.Position)
+}
+
+func (g *emberVigil) onArenaPressUp(ev core.PressEvent) {
+	if g.pausePushed && g.pauseHit(ev.Position) {
+		g.pause()
+	}
+	g.pausePushed = false
 }
 
 // updateStickLayout keeps the virtual stick's resting center and activation zone inside the bottom-left safe area.
@@ -718,7 +799,8 @@ func (g *emberVigil) updateStickLayout(size core.Size, safe core.Edges) {
 	if zoneHeight < radius*2+stickMargin {
 		zoneHeight = min(size.Height-safe.Bottom, radius*2+stickMargin)
 	}
-	zoneTop := max(safe.Top+buttonSide+12, size.Height-safe.Bottom-zoneHeight)
+	// The stick's zone starts below the HUD, so a thumb on it never lands on a HUD piece.
+	zoneTop := max(core.Points(layoutHUD(size, safe).bottom)+stickMargin, size.Height-safe.Bottom-zoneHeight)
 	if zoneTop >= size.Height-safe.Bottom {
 		zoneTop = max(safe.Top, size.Height-safe.Bottom-radius*2)
 	}
@@ -759,14 +841,19 @@ func emberStickStyle() input.VirtualStyle {
 	}
 }
 
-// draw draws the arena through the viewport, which keeps the virtual canvas's shape in any window.
+// draw draws the arena through the viewport, which keeps the virtual canvas's shape in any window, then the HUD over the lit arena at the canvas's real size.
 func (g *emberVigil) draw(d *core.Drawing, size core.Size) {
 	_ = g.frame.Get()
 	g.size = size
 	alpha := g.alpha
+	safe := g.cx.Env().SafeArea()
 	viewport.Draw(d, size, func(d *core.Drawing, _ core.Size) { g.scene.draw(d, alpha) })
-	g.updateStickLayout(size, g.cx.Env().SafeArea())
+	g.updateStickLayout(size, safe)
 	if g.showTouchStick() {
 		g.pad.Draw(d, emberStickStyle())
+	}
+	if g.phase.GetUntracked() == phaseArena && g.run != nil {
+		lang := g.settings.GetUntracked().Language
+		drawHUD(d, layoutHUD(size, safe), g.hud.GetUntracked(), &g.hudMotion, g.hudArt, g.art, evstrings.For(lang), string(lang), g.pausePushed)
 	}
 }

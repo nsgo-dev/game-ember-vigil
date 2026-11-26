@@ -8,6 +8,7 @@ keeper:
   speed: 70
   health: 100
   invulnerable: 0.8
+  lowHealth: 0.3
 embers:
   radius: 4
   magnetRadius: 46
