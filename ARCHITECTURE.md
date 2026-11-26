@@ -29,7 +29,7 @@ Ember Vigil is an NSGo app with one fixed-step game loop. A run is simulated hea
 
 ## Core flows
 
-**Frame.** A display frame runs zero or more fixed updates, then one `Draw` with the interpolation alpha. Each update steps the run unless a screen pauses it. The arena canvas draws the ground, one sprite batch and the keeper's light; [the arena](docs/architecture/arena.md) owns that order. HUD signals update at a lower rate so the view tree does not re-commit every frame.
+**Frame.** A display frame runs zero or more fixed updates, then one `Draw` with the interpolation alpha. Each update steps the run unless a screen pauses it. The arena canvas draws the ground, one sprite batch, the glows and the fog of war; [the arena](docs/architecture/arena.md) owns that order. HUD signals update at a lower rate so the view tree does not re-commit every frame.
 
 **Run.** Move the keeper, spawn off-screen, chase, fire automatically, kill, drop embers, pull them in, fill the XP bar, pause on three cards, apply one, resume. At 12:00 the Hollow King arrives; defeat or death ends the run and opens the results.
 
@@ -41,11 +41,11 @@ Ember Vigil is an NSGo app with one fixed-step game loop. A run is simulated hea
 
 ## Verification
 
-Headless tests play a run from its own API: replays, movement, contact, kills, embers, level cards, defeat and three minutes of waves. `nsgotest` tests play the shell from the title into the arena, through a pause and back, take a level-up card and read the HUD and the defeat overlay. Canvas tests check a frame's ground and sprites, the camera's clamp and a seed's ground, and a benchmark keeps two hundred enemies inside the frame budget. `go tool nsgo check -target macos,windows,linux,web` covers builds. Frame pacing, gamepad feel, sound and the read of darkness need a manual run.
+Headless tests play a run from its own API: replays, movement, contact, kills, embers, level cards, defeat and three minutes of waves. `nsgotest` tests play the shell from the title into the arena, through a pause and back, take a level-up card and read the HUD and the defeat overlay. Canvas tests check a frame's ground and sprites, the camera's clamp and a seed's ground, and a benchmark keeps two hundred enemies inside the frame budget. `go tool nsgo check -target macos,windows,linux,web` covers builds. Frame pacing, gamepad feel, sound and the read of the fog need a manual run.
 
 ## Subjects
 
 | Document | When to read |
 | --- | --- |
 | [The run model](docs/architecture/run.md) | Changing simulation, spawning, collision or upgrades |
-| [The arena](docs/architecture/arena.md) | Changing the canvas, the camera, the light, the effects or the HUD |
+| [The arena](docs/architecture/arena.md) | Changing the canvas, the camera, the light, the fog, the effects or the HUD |

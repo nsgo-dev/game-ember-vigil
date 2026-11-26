@@ -25,7 +25,7 @@ A generic ECS would fit, but the game has a fixed set of shapes and a hot loop. 
 
 ## Update order
 
-1. Read controls, move the keeper, clamp it to the arena.
+1. Read controls, move the keeper, clamp it to the field inside the fog.
 2. Tick cooldowns, invulnerability and status timers.
 3. Let the wave director spawn; update the boss phase and spawns.
 4. Move enemies and shots; resolve enemy separation, contact and hits.
@@ -41,14 +41,14 @@ The run stops between steps while cards are open. `Choose` applies one card, rec
 - A uniform grid of 32-unit cells, rebuilt each step, answers circle queries for shots, the halo, pulses and pickup. Enemy separation uses the same grid.
 - Enemy contact has a short invulnerability window. Each weapon keeps its own per-target cooldown so a lingering patch or halo cannot tick every step.
 - Knockback moves enemies along the hit direction; the boss resists it.
-- The arena has no blocking obstacles in the first version. Clamping to the world bounds is the only wall.
+- The arena has no blocking obstacles in the first version. Clamping to the world bounds is the only wall; the keeper, embers and heal caches clamp to the field inside the fog band, while enemies and shots roam the whole arena.
 - Damage, health, speeds and caps come from `data/*.yaml`; the code holds no balance numbers beyond defaults for a missing file.
 
 ## Waves and the boss
 
 The director reads a timeline of spans keyed by seconds: each span names the enemy mix, spawn interval, maximum alive, health and damage multipliers. Surges and elite spawns are entries on the same timeline, so the whole run is one data file.
 
-Spawns appear on a ring a little outside the view, clamped inside the arena, and never inside the keeper's light. A global cap protects frame time; when it is reached, spawns wait instead of dropping the timeline.
+Spawns appear on a ring a little outside the view, clamped inside the arena (often in the fog), and never inside the view. A global cap protects frame time; when it is reached, spawns wait instead of dropping the timeline.
 
 At 12:00 the director stops normal spawns, clears space and spawns the Hollow King. Its three phases and attacks are data, timed by the run clock and its own action queue.
 

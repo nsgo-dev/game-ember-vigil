@@ -1,7 +1,8 @@
 version: 1
 arena:
-  width: 1920
-  height: 1280
+  width: 2400
+  height: 1760
+  fog: 240
 keeper:
   radius: 6
   speed: 70

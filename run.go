@@ -11,7 +11,7 @@ import (
 const (
 	stepSeconds   = 1.0 / 60.0
 	gridCell      = 32.0
-	maxEnemies    = 400
+	maxEnemies    = 1500
 	maxShots      = 256
 	maxEnemyShots = 192
 	maxEmbers     = 512
@@ -365,7 +365,7 @@ func (r *Run) Step(dt time.Duration, controls Controls) {
 	if l2 := move.LenSq(); l2 > 1 {
 		move = move.Scale(1 / math.Sqrt(l2))
 	}
-	r.keeper.pos = r.clamp(r.keeper.pos.Add(move.Scale(r.stats.moveSpeed*stepSeconds)), r.data.run.Keeper.Radius)
+	r.keeper.pos = r.clampField(r.keeper.pos.Add(move.Scale(r.stats.moveSpeed*stepSeconds)), r.data.run.Keeper.Radius)
 	r.keeper.invuln = math.Max(0, r.keeper.invuln-stepSeconds)
 	if r.stats.regen > 0 && r.keeper.health > 0 && r.keeper.health < r.stats.maxHealth {
 		r.keeper.health = math.Min(r.stats.maxHealth, r.keeper.health+r.stats.regen*stepSeconds)
@@ -1051,7 +1051,7 @@ func (r *Run) reap() {
 		if dead.healDrop > 0 && len(r.pickups) < maxPickups {
 			r.pickups = append(r.pickups, pickup{
 				id:           r.takeID(),
-				pos:          dead.pos,
+				pos:          r.clampField(dead.pos, 0),
 				healFraction: dead.healDrop,
 			})
 		}
@@ -1085,7 +1085,7 @@ func (r *Run) dropEmbers(e *enemy) {
 			return
 		}
 		offset := Vec2{r.drops.Range(-1, 1), r.drops.Range(-1, 1)}.Scale(em.Radius * 2)
-		r.embers = append(r.embers, ember{pos: e.pos.Add(offset), value: em.Value})
+		r.embers = append(r.embers, ember{pos: r.clampField(e.pos.Add(offset), em.Radius), value: em.Value})
 	}
 }
 
@@ -1196,6 +1196,12 @@ func (r *Run) clamp(p Vec2, radius float64) Vec2 {
 	}
 }
 
+// clampField keeps a position at least radius inside the field the fog of war leaves open, so the keeper never
+// walks into the fog and nothing it must collect lies there.
+func (r *Run) clampField(p Vec2, radius float64) Vec2 {
+	return r.clamp(p, radius+r.data.run.Arena.Fog)
+}
+
 // inside reports whether a circle at p fits inside the arena.
 func (r *Run) inside(p Vec2, radius float64) bool {
 	return p.X >= radius && p.Y >= radius && p.X <= r.data.run.Arena.Width-radius && p.Y <= r.data.run.Arena.Height-radius
@@ -1206,6 +1212,7 @@ type Snapshot struct {
 	Phase        Phase           `json:"phase"`
 	Time         float64         `json:"time"`
 	Arena        Vec2            `json:"arena"`
+	Fog          float64         `json:"fog"`
 	Keeper       Vec2            `json:"keeper"`
 	KeeperRadius float64         `json:"keeperRadius"`
 	Health       float64         `json:"health"`
@@ -1334,6 +1341,7 @@ func (r *Run) Snapshot() Snapshot {
 	s.Phase = r.phase
 	s.Time = r.time
 	s.Arena = Vec2{r.data.run.Arena.Width, r.data.run.Arena.Height}
+	s.Fog = r.data.run.Arena.Fog
 	s.Keeper = r.keeper.pos
 	s.KeeperRadius = r.data.run.Keeper.Radius
 	s.Health = r.keeper.health

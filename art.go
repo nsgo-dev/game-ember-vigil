@@ -435,8 +435,8 @@ var sheetSpecs = []sheetSpec{
 	{
 		name: "keeper", file: "assets/sprites/keeper.png",
 		rows: 2, cols: 4, idleFrameTime: 180 * time.Millisecond, moveFrameTime: 110 * time.Millisecond,
-		worldHeight: 28, defaultFacesLeft: true,
-		target: func(s *sheetFrames) *sheetActor { return &s.keeper },
+		worldHeight: 28,
+		target:      func(s *sheetFrames) *sheetActor { return &s.keeper },
 	},
 	{
 		name: "mite", file: "assets/sprites/mite.png",
@@ -1363,4 +1363,53 @@ func clampLength(v, lo, hi float64) float64 {
 		return lo
 	}
 	return math.Min(math.Max(v, lo), hi)
+}
+
+// fogScale is how many world units one pixel of the fog of war's mask spans; the mask is soft, so a coarse one scaled up smoothly reads the same.
+const fogScale = 4
+
+// fogRGB is the near-black of the fog of war, a touch of night blue so it reads as cloud rather than a hole.
+const fogRGB = 0x05070d
+
+var fogColor = core.RGB(fogRGB)
+
+// newFogMask paints the fog of war over a width×height arena: clear inside the field fog world units from every edge,
+// thickening through a ragged, cloudy rim into solid darkness at the arena's border. It derives from seed alone.
+func newFogMask(seed uint64, width, height int, fog float64) *image.RGBA {
+	mw, mh := (width+fogScale-1)/fogScale, (height+fogScale-1)/fogScale
+	img := image.NewRGBA(image.Rect(0, 0, mw, mh))
+	if mw <= 0 || mh <= 0 || fog <= 0 {
+		return img
+	}
+	edge := newNoiseGrid(seed^0x6f9c2b17, width, height, 96)
+	cloud := newNoiseGrid(seed^0x2d4e8a53, width, height, 40)
+	fr, fg, fb, _ := fogColor.Components()
+	w, h := float64(width), float64(height)
+	// The rim starts at the field's edge and turns solid well before the arena's, so the border is never seen.
+	depth := fog * 0.45
+	ragged := fog * 0.15
+	for my := range mh {
+		y := min(my*fogScale+fogScale/2, height-1)
+		for mx := range mw {
+			x := min(mx*fogScale+fogScale/2, width-1)
+			// How far the point lies past the field's edge, toward the arena's border.
+			out := fog - min(float64(x), w-float64(x), float64(y), h-float64(y))
+			if out <= -ragged {
+				continue
+			}
+			t := smoothstep(0, depth, out+(edge.sample(x, y)-0.5)*2*ragged)
+			if t <= 0 {
+				continue
+			}
+			// Wisps of thinner cloud drift through the rim; the solid fog beyond it stays solid.
+			a := t * (0.82 + 0.18*cloud.sample(x, y))
+			a = a + (1-a)*smoothstep(0.7, 1, t)
+			i := img.PixOffset(mx, my)
+			img.Pix[i+0] = uint8(fr*a*255 + 0.5)
+			img.Pix[i+1] = uint8(fg*a*255 + 0.5)
+			img.Pix[i+2] = uint8(fb*a*255 + 0.5)
+			img.Pix[i+3] = uint8(a*255 + 0.5)
+		}
+	}
+	return img
 }

@@ -1,20 +1,20 @@
 version: 1
-maxAlive: 260
+maxAlive: 650
 ring:
   min: 300
   max: 360
 spans:
   - from: 0
-    every: 1.2
-    maxAlive: 32
+    every: 0.48
+    maxAlive: 80
     health: 1
     damage: 1
     enemies:
       - name: Ash Mite
         weight: 1
   - from: 60
-    every: 0.98
-    maxAlive: 48
+    every: 0.392
+    maxAlive: 120
     health: 1.1
     damage: 1.05
     enemies:
@@ -23,8 +23,8 @@ spans:
       - name: Moth
         weight: 2
   - from: 120
-    every: 0.82
-    maxAlive: 66
+    every: 0.328
+    maxAlive: 165
     health: 1.25
     damage: 1.1
     enemies:
@@ -35,8 +35,8 @@ spans:
       - name: Husk
         weight: 2
   - from: 180
-    every: 0.72
-    maxAlive: 88
+    every: 0.288
+    maxAlive: 220
     health: 1.45
     damage: 1.15
     enemies:
@@ -49,8 +49,8 @@ spans:
       - name: Thornling
         weight: 2
   - from: 270
-    every: 0.62
-    maxAlive: 112
+    every: 0.248
+    maxAlive: 280
     health: 1.65
     damage: 1.22
     enemies:
@@ -65,8 +65,8 @@ spans:
       - name: Wisp
         weight: 2
   - from: 360
-    every: 0.54
-    maxAlive: 138
+    every: 0.216
+    maxAlive: 345
     health: 1.9
     damage: 1.3
     enemies:
@@ -83,8 +83,8 @@ spans:
       - name: Shade
         weight: 2
   - from: 450
-    every: 0.46
-    maxAlive: 165
+    every: 0.184
+    maxAlive: 413
     health: 2.2
     damage: 1.38
     enemies:
@@ -99,8 +99,8 @@ spans:
       - name: Shade
         weight: 3
   - from: 540
-    every: 0.4
-    maxAlive: 192
+    every: 0.16
+    maxAlive: 480
     health: 2.5
     damage: 1.46
     enemies:
@@ -113,8 +113,8 @@ spans:
       - name: Shade
         weight: 4
   - from: 630
-    every: 0.34
-    maxAlive: 220
+    every: 0.136
+    maxAlive: 550
     health: 2.85
     damage: 1.55
     enemies:
@@ -129,37 +129,37 @@ spans:
 surges:
   - at: 75
     enemy: Ash Mite
-    count: 24
+    count: 60
     health: 1
     damage: 1
     surround: true
   - at: 170
     enemy: Moth
-    count: 28
+    count: 70
     health: 1.15
     damage: 1.05
     surround: true
   - at: 285
     enemy: Ash Mite
-    count: 36
+    count: 90
     health: 1.45
     damage: 1.12
     surround: true
   - at: 405
     enemy: Thornling
-    count: 14
+    count: 35
     health: 1.75
     damage: 1.2
     surround: true
   - at: 510
     enemy: Shade
-    count: 22
+    count: 55
     health: 2.1
     damage: 1.3
     surround: true
   - at: 615
     enemy: Moth
-    count: 44
+    count: 110
     health: 2.45
     damage: 1.4
     surround: true
@@ -191,7 +191,7 @@ elites:
 boss:
   at: 720
   name: Hollow King
-  health: 7800
+  health: 8667
   speed: 44
   radius: 20
   damage: 26
@@ -212,7 +212,7 @@ boss:
       boneDamage: 14
       summonWindup: 0.5
       summonEnemy: Ash Mite
-      summonCount: 6
+      summonCount: 15
     - threshold: 0.66
       speedMul: 1.16
       cooldown: 2.5
@@ -227,7 +227,7 @@ boss:
       boneDamage: 17
       summonWindup: 0.45
       summonEnemy: Moth
-      summonCount: 7
+      summonCount: 18
     - threshold: 0.33
       speedMul: 1.32
       cooldown: 2.1
@@ -242,4 +242,4 @@ boss:
       boneDamage: 20
       summonWindup: 0.4
       summonEnemy: Shade
-      summonCount: 6
+      summonCount: 15

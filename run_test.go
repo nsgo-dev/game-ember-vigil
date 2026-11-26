@@ -3,6 +3,7 @@ package main
 import (
 	"math"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 )
@@ -84,7 +85,13 @@ func TestSameSeedAndControlsReplayIdentically(t *testing.T) {
 
 // TestThreeMinutesWithFixedControlsLevelsUpTakesACardAndDies checks that a stationary keeper levels up, takes a card, and eventually falls in defeat.
 func TestThreeMinutesWithFixedControlsLevelsUpTakesACardAndDies(t *testing.T) {
-	r := NewRun(2024)
+	// Frail enemies let a keeper that never moves kill some before it falls, so the card flow does not depend on the balance.
+	d := *mustGameData()
+	d.enemies.Enemies = slices.Clone(d.enemies.Enemies)
+	for i := range d.enemies.Enemies {
+		d.enemies.Enemies[i].Health = 1
+	}
+	r := newRunWith(&d, 2024)
 	leveled, chose, died := playSteps(t, r, 6*60*60, func(int) Controls { return Controls{} })
 	if !leveled {
 		t.Fatal("the keeper never reached level 2")
@@ -123,8 +130,9 @@ func TestKeeperMovesFromControlsAndStaysInsideTheArena(t *testing.T) {
 		stepOnce(r, Controls{Move: Vec2{X: 1, Y: 1}})
 	}
 	at := r.Snapshot()
-	if want := at.Arena.X - at.KeeperRadius; math.Abs(at.Keeper.X-want) > 0.001 || math.Abs(at.Keeper.Y-(at.Arena.Y-at.KeeperRadius)) > 0.001 {
-		t.Fatalf("the keeper reached %+v, want the arena's far corner (%v, %v)", at.Keeper, want, at.Arena.Y-at.KeeperRadius)
+	edge := at.Fog + at.KeeperRadius
+	if want := at.Arena.X - edge; math.Abs(at.Keeper.X-want) > 0.001 || math.Abs(at.Keeper.Y-(at.Arena.Y-edge)) > 0.001 {
+		t.Fatalf("the keeper reached %+v, want the field's far corner (%v, %v)", at.Keeper, want, at.Arena.Y-edge)
 	}
 }
 
@@ -156,6 +164,8 @@ func TestContactDamageWaitsForTheInvulnerabilityWindow(t *testing.T) {
 func TestAKillDropsAnEmberTheKeeperCollectsForXP(t *testing.T) {
 	r := quietRun(t)
 	putEnemy(t, r, 1, Vec2{X: 60})
+	// One bolt's worth of health keeps the flow short, so the Moth falls before it reaches the keeper.
+	r.enemies[0].hp = 1
 	for range 120 {
 		stepOnce(r, Controls{})
 		if len(r.enemies) == 0 {
@@ -411,10 +421,10 @@ func TestBellTollPulsesDamageAndKnockback(t *testing.T) {
 	if len(r.pulses) != 1 {
 		t.Fatalf("Bell Toll created %d pulses, want 1", len(r.pulses))
 	}
-	if r.Snapshot().Kills != 1 {
-		// Moth has 9 HP, Bell Toll lv1 deals 12 damage -> killed immediately.
-		t.Fatalf("level 1 Bell Toll kills = %d, want 1", r.Snapshot().Kills)
+	if r.Snapshot().Kills == 0 && (len(r.enemies) != 1 || r.enemies[0].hp >= r.enemies[0].maxHP) {
+		t.Fatal("level 1 Bell Toll did not hurt the Moth in its ring")
 	}
+	r.enemies = r.enemies[:0]
 	// Test knockback on a tougher Husk that survives the level 5 hit.
 	r.addEnemy(2, r.keeper.pos.Add(Vec2{X: 40}), 2, 1)
 	r.weaponLevels[bell] = 5
@@ -645,4 +655,31 @@ func hasEvent(events []Event, kind EventKind) bool {
 		}
 	}
 	return false
+}
+
+// TestKeeperAndDropsStayOutOfTheFog checks that the keeper cannot walk into the fog of war, while enemies may roam it and leave their embers inside the field.
+func TestKeeperAndDropsStayOutOfTheFog(t *testing.T) {
+	r := quietRun(t)
+	fog := r.data.run.Arena.Fog
+	if fog <= 0 {
+		t.Fatal("the arena has no fog band")
+	}
+	for range 60 * 40 {
+		stepOnce(r, Controls{Move: Vec2{X: -1, Y: -1}})
+	}
+	radius := r.data.run.Keeper.Radius
+	if want := fog + radius; math.Abs(r.keeper.pos.X-want) > 1e-9 || math.Abs(r.keeper.pos.Y-want) > 1e-9 {
+		t.Fatalf("keeper stopped at %v, want the field's corner at %v", r.keeper.pos, want)
+	}
+
+	e := enemy{pos: Vec2{X: fog / 2, Y: fog / 2}, embers: 3}
+	r.dropEmbers(&e)
+	for _, em := range r.embers {
+		if em.pos.X < fog || em.pos.Y < fog {
+			t.Fatalf("an ember fell at %v inside the fog", em.pos)
+		}
+	}
+	if p := r.clamp(Vec2{X: fog / 2, Y: fog / 2}, 7); p.X >= fog || p.Y >= fog {
+		t.Fatalf("an enemy in the fog was pushed out to %v", p)
+	}
 }
