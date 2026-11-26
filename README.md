@@ -16,6 +16,10 @@
   A twelve-minute survivors-like 2D game: keep the last ember alive in an ash-choked forest, burn the shadows that come for it, and survive until dawn. Built in Go with <a href="https://github.com/nsgo-dev/nsgo">NSGo</a> and <a href="https://github.com/nsgo-dev/game">nsgo-dev/game</a>.
 </p>
 
+<p align="center">
+  <img alt="Ember Vigil gameplay screenshot showing the lantern-lit Cinderwood Grove, animated enemies, Ember Bolt and HUD" src="docs/screenshot.png" width="760">
+</p>
+
 ## Features
 
 - One twelve-minute run against a rising tide of shadow creatures, ending with the Hollow King at dawn.
@@ -26,7 +30,7 @@
 - Best records and settings kept between sessions.
 - Builds for macOS, Windows, Linux and the web.
 
-The first version is in progress; the [roadmap](docs/roadmap.md) lists what each milestone adds.
+The first version is complete; see the [roadmap](docs/roadmap.md) for what each milestone delivered and what comes later.
 
 ## Install
 
@@ -38,10 +42,11 @@ cd test-game-2
 go tool nsgo dev
 ```
 
-The window opens at 960×540. Run it in a browser instead with:
+The window opens at 960×540. Run it in a browser or package release artifacts into `dist/` with:
 
 ```sh
 go tool nsgo dev -target web
+go tool nsgo build
 ```
 
 ## Getting started

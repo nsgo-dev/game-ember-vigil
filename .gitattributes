@@ -1,4 +1,2 @@
-# Merge NSGo scene files object by object instead of line by line.
-# Enable the driver once per clone with: go tool game merge -setup
-*.scene.yaml merge=nsgo-scene
-*.scene.yml merge=nsgo-scene
+*.yaml text eol=lf
+*.yml text eol=lf
