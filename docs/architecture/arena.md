@@ -1,8 +1,8 @@
 # The arena
 
-The arena draws one run into the 480×270 canvas, its HUD over it at the canvas's real size, and a native level-up prompt and defeat overlay above both. It reads a run only through `Snapshot`, `Events` and a copied seed, so nothing in drawing can change a run or its replay.
+The arena draws one run into the 480×270 canvas, and its HUD, level-up cards, pause and results over it at the canvas's real size. It reads a run only through `Snapshot`, `Events` and a copied seed, so nothing in drawing can change a run or its replay.
 
-The palette and the procedural fallback atlas are generated at startup from `art.go`'s rows of palette indices, so one colour list governs the ground, particles, fallback actors and native screens. Stylized 2D sprite sheets under `assets/sprites/` are embedded via `go:embed`, sliced from uniform grids into `sprite.Frame` and `sprite.Animation` clips, and packed into a single padded `sheetAtlas` (2 px transparent gaps prevent bilinear edge bleeding). Upgrade card icons under `assets/icons/` are embedded and decoded once at startup for the level-up overlay; any missing sheet or icon falls back cleanly to the procedural atlas or glyph badge without crashing.
+The palette and the procedural fallback atlas are generated at startup from `art.go`'s rows of palette indices, so one colour list governs the ground, particles, fallback actors and native screens. Stylized 2D sprite sheets under `assets/sprites/` are embedded via `go:embed`, sliced from uniform grids into `sprite.Frame` and `sprite.Animation` clips, and packed into a single padded `sheetAtlas` (2 px transparent gaps prevent bilinear edge bleeding). Upgrade card icons under `assets/icons/` are embedded and decoded once at startup for the HUD's slots and the level-up cards; any missing sheet or icon falls back cleanly to the procedural atlas or glyph badge without crashing.
 
 ## The frame
 
@@ -38,4 +38,10 @@ The shell publishes one `hudState` signal at `hudRate`, not every step, because 
 
 Pause is hit-tested on the canvas in its points, with at least `buttonSide` to press: a click (press down, then up inside), or a touch that never reaches the stick. Escape and the gamepad's start button still go through the `pause` action.
 
-The level-up prompt and the defeat overlay are keyed to the run's phase in that signal: the run itself stops while a level-up waits and stays over once the keeper dies, so the shell needs no separate screen for either. Later milestones replace both views without touching the run.
+## Overlays
+
+The level-up cards, the pause menu with its quit confirmation, and the victory and defeat results are drawn on the canvas after the HUD, from the same kit: the card frames at their own shape (their crests stretch badly), and `panel_frame` as a nine-slice for panels and buttons. The results write the time, kills and level in the painted numerals. Each piece falls back to a procedural plate, and the words are canvas text in the shell's language, wrapped and cut to fit. Settings stays native.
+
+The cards and the results are keyed to the run's phase in the HUD signal; pause is the shell's. `overlayMotion` runs on the fixed steps: cards deal in staggered with a small overshoot, the focused card lifts and glows, and a chosen card burns from its foot up. The shell hands `Run.Choose` the card only when the burn ends, so the run waits in its level-up phase and a replay never sees the burn.
+
+Over each painted button or card lies an invisible native button of at least `buttonSide`, placed from the same layout as the drawing. It takes clicks, taps and assistive technology, carries the card's name and description, and focuses its card or item when the mouse comes over it. The keyboard and gamepad move the shell's own focus instead of Tab.

@@ -20,7 +20,6 @@ var (
 	cardBorder     = core.RGBA(0x3b4a66, 0.9)
 	buttonColor    = core.RGB(0xc2410c)
 	secondaryColor = core.RGB(0x27314a)
-	dangerColor    = core.RGB(0xa3341a)
 	healthColor    = core.RGB(0xd0453a)
 	xpColor        = core.RGB(0xffb347)
 	flameColor     = core.RGB(0xff7a1a)
@@ -33,9 +32,6 @@ var (
 const (
 	buttonSide      = 44
 	menuButtonWidth = 176
-	cardWidth       = 176
-	cardMinHeight   = 186
-	cardIconSize    = 36
 	maxHUDWeapons   = 4
 )
 
@@ -102,6 +98,11 @@ func (g *emberVigil) view() core.Node {
 	arena.OnTouch = g.onArenaTouch
 	arena.OnPressDown = g.onArenaPressDown
 	arena.OnPressUp = g.onArenaPressUp
+	arena.OnLayout = func(b core.Bounds) {
+		if b.Size != g.viewSize.GetUntracked() {
+			g.viewSize.Set(b.Size)
+		}
+	}
 	g.actions.Attach(&arena)
 
 	return core.View{
@@ -140,142 +141,28 @@ func (g *emberVigil) show(when func() bool, screen func() core.Node) core.Node {
 	}
 }
 
-// levelUp is the three-card level-up modal: each card shows an icon, name, description and level pips, and can be chosen by tap, 1/2/3 or a gamepad button.
+// levelUp is the native layer over the canvas's level-up cards: one invisible button over each card, which a tap, a click or assistive technology presses and the mouse focuses.
 func (g *emberVigil) levelUp() core.Node {
 	st := g.hud.Get()
 	tr := g.tr()
+	n := 0
+	for _, c := range st.offers {
+		if c.name != "" {
+			n++
+		}
+	}
+	l := layoutCards(g.viewSize.Get(), g.cx.Env().SafeArea(), n)
 	var cards []core.Node
 	for i, c := range st.offers {
 		if c.name == "" {
 			continue
 		}
 		idx := i
-		focused := i == st.cardFocus
-		cards = append(cards, g.upgradeCard(idx, c, focused, tr))
+		copyText := tr.Card(c.id, c.name, c.description)
+		cards = append(cards, g.hitButton("level-up-card-"+strconv.Itoa(i), copyText.Name, copyText.Description, l.cards[i],
+			func() { g.choose(idx) }, func() { g.focusCard(idx) }))
 	}
-	return panel("level-up", tr.Level(st.level),
-		heading(tr.Level(st.level)),
-		core.View{
-			Style: core.Style{
-				Direction:      core.Row,
-				AlignItems:     core.AlignStretch,
-				JustifyContent: core.JustifyCenter,
-				Gap:            12,
-				Width:          core.Pct(100),
-				MaxWidth:       core.Pt(cardWidth*offerCount + 24),
-			},
-			Children: cards,
-		},
-	)
-}
-
-// upgradeCard renders one selectable level-up card button.
-func (g *emberVigil) upgradeCard(index int, c hudCard, focused bool, tr evstrings.Table) core.Node {
-	border := cardBorder
-	if focused {
-		border = xpColor
-	}
-	kindLabel := tr.KindPassive
-	switch c.kind {
-	case offerWeapon:
-		kindLabel = tr.KindWeapon
-	case offerHeal:
-		kindLabel = tr.KindHeal
-	}
-	copyText := tr.Card(c.id, c.name, c.description)
-
-	children := []core.Node{
-		core.View{
-			Style: core.Style{
-				Direction:      core.Row,
-				AlignItems:     core.AlignCenter,
-				JustifyContent: core.JustifySpaceBetween,
-				Width:          core.Pct(100),
-			},
-			Children: []core.Node{
-				core.Text{Content: kindLabel, Style: core.Style{Color: cardAccent(c.id, c.kind), FontSize: 10, FontWeight: core.FontWeightBold}},
-				core.View{
-					Style: core.Style{
-						Background:     panelColor,
-						CornerRadius:   4,
-						Padding:        core.Symmetric(2, 6),
-						AlignItems:     core.AlignCenter,
-						JustifyContent: core.JustifyCenter,
-					},
-					Children: []core.Node{
-						core.Text{Content: strconv.Itoa(index + 1), Style: core.Style{Color: dimColor, FontSize: 10, FontWeight: core.FontWeightBold}},
-					},
-				},
-			},
-		},
-		g.cardIcon(c.id, c.kind),
-		core.Text{
-			TestID:  "level-up-card-name-" + strconv.Itoa(index),
-			Content: copyText.Name,
-			Style:   core.Style{Color: textColor, FontSize: 15, FontWeight: core.FontWeightBold, TextAlign: core.TextAlignCenter},
-		},
-		core.Text{
-			TestID:  "level-up-card-desc-" + strconv.Itoa(index),
-			Content: copyText.Description,
-			Style:   core.Style{Color: dimColor, FontSize: 12, TextAlign: core.TextAlignCenter},
-		},
-	}
-	if c.maxLevel > 0 {
-		children = append(children, levelPips("level-up-card-pips-"+strconv.Itoa(index), c.level, c.maxLevel))
-	}
-
-	return base.Button{
-		TestID:  "level-up-card-" + strconv.Itoa(index),
-		Label:   copyText.Name,
-		OnPress: func(core.PressEvent) { g.choose(index) },
-		Style: core.Style{
-			FlexGrow:       1,
-			FlexShrink:     1,
-			MinWidth:       core.Pt(132),
-			MaxWidth:       core.Pt(cardWidth),
-			MinHeight:      core.Pt(156),
-			Background:     cardColor,
-			BorderWidth:    2,
-			BorderColor:    border,
-			CornerRadius:   12,
-			Padding:        core.All(12),
-			Direction:      core.Column,
-			AlignItems:     core.AlignCenter,
-			JustifyContent: core.JustifySpaceBetween,
-			Gap:            8,
-			Active:         &core.Style{Opacity: core.Alpha(0.85)},
-		},
-		Children: children,
-	}
-}
-
-// cardIcon draws the card's embedded PNG icon when available, or a procedural glyph badge as fallback.
-func (g *emberVigil) cardIcon(id, kind string) core.Node {
-	if img, ok := g.art.cardIcon(id); ok {
-		return core.Image{
-			TestID:         "card-icon-" + id,
-			Source:         img,
-			ElementsHidden: true,
-			Style:          core.Style{Width: core.Pt(cardIconSize), Height: core.Pt(cardIconSize)},
-		}
-	}
-	return core.View{
-		TestID: "card-icon-fallback-" + id,
-		Style: core.Style{
-			Width:          core.Pt(cardIconSize),
-			Height:         core.Pt(cardIconSize),
-			CornerRadius:   10,
-			Background:     cardAccent(id, kind),
-			AlignItems:     core.AlignCenter,
-			JustifyContent: core.JustifyCenter,
-		},
-		Children: []core.Node{
-			core.Text{
-				Content: cardGlyph(id),
-				Style:   core.Style{Color: textColor, FontSize: 15, FontWeight: core.FontWeightBold},
-			},
-		},
-	}
+	return overlayLayer("level-up", tr.Level(st.level), cards...)
 }
 
 // cardAccent picks a palette color for a card's kind and id.
@@ -334,91 +221,21 @@ func cardGlyph(id string) string {
 	}
 }
 
-// levelPips draws maxLevel dots showing owned levels, the incoming level and remaining levels.
-func levelPips(id string, nextLevel, maxLevel int) core.Node {
-	pips := make([]core.Node, 0, maxLevel)
-	for i := range maxLevel {
-		color := pipEmpty
-		switch {
-		case i < nextLevel-1:
-			color = flameColor
-		case i == nextLevel-1:
-			color = xpColor
-		}
-		pips = append(pips, core.View{
-			Style: core.Style{
-				Width:        core.Pt(8),
-				Height:       core.Pt(8),
-				CornerRadius: 4,
-				Background:   color,
-			},
-		})
-	}
-	return core.View{
-		TestID:   id,
-		Style:    core.Style{Direction: core.Row, Gap: 5, AlignItems: core.AlignCenter},
-		Children: pips,
-	}
-}
-
-// resultsOverlay is the end-of-run screen for victory and defeat: outcome, time, kills, level, record status and actions.
+// resultsOverlay is the native layer over the canvas's results: the outcome, the run's time, kills and level and the records for assistive technology, and the Play Again and Title buttons.
 func (g *emberVigil) resultsOverlay() core.Node {
 	st := g.hud.Get()
-	rec := g.records.Get()
 	tr := g.tr()
-	focus := g.menuFocus.Get()
-
-	badgeText, badgeColor, titleText := tr.DefeatBadge, healthColor, tr.DefeatTitle
-	if st.phase == PhaseVictory {
-		badgeText, badgeColor, titleText = tr.VictoryBadge, xpColor, tr.VictoryTitle
-	}
-	recordText, recordColor := tr.NoNewRecord, dimColor
-	if st.newRecord {
-		recordText, recordColor = tr.NewRecord, xpColor
-	}
-
-	return panel("results", titleText,
-		label("results-outcome", badgeText, 12, badgeColor),
-		heading(titleText),
-		core.View{
-			Style: core.Style{
-				Direction:    core.Column,
-				AlignItems:   core.AlignCenter,
-				Gap:          6,
-				Background:   cardColor,
-				CornerRadius: 10,
-				Padding:      core.Symmetric(12, 24),
-			},
-			Children: []core.Node{
-				label("results-time", tr.Time(st.time), 15, textColor),
-				label("results-kills", tr.Kills(st.kills), 15, textColor),
-				label("results-level", tr.Level(st.level), 15, textColor),
-				label("results-record", recordText, 13, recordColor),
-			},
-		},
-		core.View{
-			TestID: "results-best-records",
-			Style: core.Style{
-				Direction:      core.Row,
-				AlignItems:     core.AlignCenter,
-				JustifyContent: core.JustifyCenter,
-				Gap:            12,
-				Wrap:           core.Wrap,
-			},
-			Children: []core.Node{
-				label("results-best-time", tr.BestTime(clockText(rec.BestTime)), 11, dimColor),
-				label("results-best-kills", tr.BestKills(rec.BestKills), 11, dimColor),
-				label("results-best-level", tr.BestLevel(rec.BestLevel), 11, dimColor),
-				label("results-wins", tr.Wins(rec.Wins), 11, dimColor),
-			},
-		},
-		core.View{
-			Style: core.Style{Direction: core.Row, Gap: 12},
-			Children: []core.Node{
-				actionButton("results-play-again", tr.PlayAgain, menuButtonWidth, buttonColor, focus == 0, g.start),
-				actionButton("results-title", tr.TitleButton, menuButtonWidth, secondaryColor, focus == 1, g.quitRun),
-			},
-		},
+	txt := resultsTextOf(tr, st, g.records.Get())
+	l := layoutResults(g.viewSize.Get(), g.cx.Env().SafeArea())
+	return overlayLayer("results", txt.title,
+		infoView("results-outcome", txt.outcome, l.outcome),
+		infoView("results-time", txt.time, l.stats[0]),
+		infoView("results-kills", txt.kills, l.stats[1]),
+		infoView("results-level", txt.level, l.stats[2]),
+		infoView("results-record", txt.record, l.record),
+		infoView("results-best-records", txt.best, l.best),
+		g.hitButton("results-play-again", tr.PlayAgain, "", l.buttons[0], g.start, func() { g.hoverMenu(0) }),
+		g.hitButton("results-title", tr.TitleButton, "", l.buttons[1], g.quitRun, func() { g.hoverMenu(1) }),
 	)
 }
 
@@ -526,40 +343,30 @@ func (g *emberVigil) title() core.Node {
 	}
 }
 
-// paused is the overlay that stops a run: resume, open settings, or quit to the title screen with confirmation.
+// paused is the native layer over the canvas's pause panel: resume, open settings, or quit to the title screen with confirmation.
 func (g *emberVigil) paused() core.Node {
 	tr := g.tr()
-	focus := g.menuFocus.Get()
-
+	size, safe := g.viewSize.Get(), g.cx.Env().SafeArea()
 	if g.confirmQuit.Get() {
-		return panel("pause", tr.ConfirmQuitTitle,
+		l := layoutPause(size, safe, true)
+		return overlayLayer("pause", tr.Paused,
 			core.View{
 				TestID: "pause-confirm-quit",
-				Style:  core.Style{Direction: core.Column, AlignItems: core.AlignCenter, Gap: 12},
+				Label:  tr.ConfirmQuitTitle,
+				Hint:   tr.ConfirmQuitBody,
+				Style:  fill(),
 				Children: []core.Node{
-					heading(tr.ConfirmQuitTitle),
-					core.Text{
-						TestID:  "pause-confirm-quit-body",
-						Content: tr.ConfirmQuitBody,
-						Style:   core.Style{Color: dimColor, FontSize: 13, TextAlign: core.TextAlignCenter},
-					},
-					core.View{
-						Style: core.Style{Direction: core.Row, Gap: 12},
-						Children: []core.Node{
-							actionButton("pause-confirm-quit-yes", tr.ConfirmQuitYes, menuButtonWidth, dangerColor, focus == 0, g.quitRun),
-							actionButton("pause-confirm-quit-no", tr.Cancel, menuButtonWidth, secondaryColor, focus == 1, g.cancelQuitRun),
-						},
-					},
+					g.hitButton("pause-confirm-quit-yes", tr.ConfirmQuitYes, tr.ConfirmQuitBody, l.buttons[0], g.quitRun, func() { g.hoverMenu(0) }),
+					g.hitButton("pause-confirm-quit-no", tr.Cancel, "", l.buttons[1], g.cancelQuitRun, func() { g.hoverMenu(1) }),
 				},
 			},
 		)
 	}
-
-	return panel("pause", tr.Paused,
-		heading(tr.Paused),
-		actionButton("pause-resume", tr.Resume, menuButtonWidth, buttonColor, focus == 0, g.resume),
-		actionButton("pause-settings", tr.Settings, menuButtonWidth, secondaryColor, focus == 1, g.openSettings),
-		actionButton("pause-quit", tr.QuitToTitle, menuButtonWidth, dangerColor, focus == 2, g.requestQuitRun),
+	l := layoutPause(size, safe, false)
+	return overlayLayer("pause", tr.Paused,
+		g.hitButton("pause-resume", tr.Resume, "", l.buttons[0], g.resume, func() { g.hoverMenu(0) }),
+		g.hitButton("pause-settings", tr.Settings, "", l.buttons[1], g.openSettings, func() { g.hoverMenu(1) }),
+		g.hitButton("pause-quit", tr.QuitToTitle, "", l.buttons[2], g.requestQuitRun, func() { g.hoverMenu(2) }),
 	)
 }
 
@@ -729,42 +536,52 @@ func qualityLabel(tr evstrings.Table, q Quality) string {
 	}
 }
 
-// panel centers a card of children over the arena, padded clear of the safe area, and takes the presses that land on it.
-func panel(id, accessibleLabel string, children ...core.Node) core.Node {
-	return core.View{
-		TestID: id,
-		Label:  accessibleLabel,
-		Style: core.Style{
-			Position:       core.Absolute,
-			Top:            core.Pt(0),
-			Right:          core.Pt(0),
-			Bottom:         core.Pt(0),
-			Left:           core.Pt(0),
-			AlignItems:     core.AlignCenter,
-			JustifyContent: core.JustifyCenter,
-			Padding:        core.All(16),
-			PaddingEnv:     core.EnvAll(core.EnvSafeArea),
-			Background:     core.RGBA(0x020617, 0.55),
-		},
-		Children: []core.Node{
-			core.View{
-				Style: core.Style{
-					Background:   panelColor,
-					CornerRadius: 14,
-					Padding:      core.Symmetric(20, 28),
-					AlignItems:   core.AlignCenter,
-					Gap:          12,
-					MaxWidth:     core.Pct(100),
-				},
-				Children: children,
-			},
-		},
+// overlayLayer covers the arena with the native layer of a screen the canvas draws, which takes the presses that land on it.
+func overlayLayer(id, accessibleLabel string, children ...core.Node) core.Node {
+	return core.View{TestID: id, Label: accessibleLabel, Style: fill(), Children: children}
+}
+
+// at is the style of a view placed over r of the canvas.
+func at(r rect) core.Style {
+	return core.Style{
+		Position: core.Absolute,
+		Left:     core.Pt(core.Points(r.x)),
+		Top:      core.Pt(core.Points(r.y)),
+		Width:    core.Pt(core.Points(r.w)),
+		Height:   core.Pt(core.Points(r.h)),
 	}
 }
 
-// heading is a screen's title.
-func heading(text string) core.Node {
-	return core.Text{Content: text, Style: core.Style{Color: textColor, FontSize: 26, FontWeight: core.FontWeightBold}}
+// infoView tells assistive technology what the canvas draws over r.
+func infoView(id, text string, r rect) core.Node {
+	return core.View{TestID: id, Label: text, Style: at(r)}
+}
+
+// hitButton is an invisible button over a button or card the canvas draws, at least buttonSide each way: it takes presses from the mouse, touch and assistive technology, holds the painted button down while pressed, and focuses it when the mouse comes over it. The keyboard and gamepad reach it through the shell's focus instead of Tab.
+func (g *emberVigil) hitButton(id, text, hint string, r rect, onPress, onHover func()) core.Node {
+	return core.View{
+		Style:        at(r.grow(buttonSide)),
+		OnMouseEnter: func(core.MouseEvent) { onHover() },
+		Children: []core.Node{
+			base.Button{
+				TestID:      id,
+				Label:       text,
+				Hint:        hint,
+				NoFocus:     true,
+				OnPressDown: func(core.PressEvent) { g.pressed = id },
+				OnPressUp: func(core.PressEvent) {
+					if g.pressed == id {
+						g.pressed = ""
+					}
+				},
+				OnPress: func(core.PressEvent) {
+					g.pressed = ""
+					onPress()
+				},
+				Style: core.Style{Width: core.Pct(100), Height: core.Pct(100)},
+			},
+		},
+	}
 }
 
 // label is a small HUD text, which tests find by id.

@@ -93,6 +93,10 @@ type emberVigil struct {
 	// hudMotion eases the canvas HUD toward hud between publications; pausePushed is whether a press or touch holds the canvas pause button.
 	hudMotion   hudMotion
 	pausePushed bool
+	// overlay moves the canvas's cards and panels; pressed is the TestID of the overlay button a press holds down; viewSize is the arena's size, which the native layer over the overlays is placed by.
+	overlay  overlayMotion
+	pressed  string
+	viewSize *core.Signal[core.Size]
 
 	// Persisted settings and lifetime records, plus reactive menu state.
 	settings       *core.Signal[Settings]
@@ -144,6 +148,7 @@ func newEmberVigil(cx *core.Scope) *emberVigil {
 		menuFocus:      core.NewSignal(cx, 0),
 	}
 	g.scene = newArenaRenderer(g.art)
+	g.viewSize = core.NewSignal(cx, cx.Env().Window())
 	g.audio = newAudioController(cx, saved)
 	if sel, err := quality.NewSelector(emberQualityConfig(), quality.DeviceFromEnv(cx.Env())); err == nil {
 		g.quality = sel
@@ -216,12 +221,18 @@ func (g *emberVigil) update(dt time.Duration) {
 	if g.phase.GetUntracked() == phaseArena {
 		g.hudMotion.step(g.hud.GetUntracked(), dt.Seconds())
 	}
+	g.overlay.step(dt.Seconds(), g.cardFocus)
+	if index, ok := g.overlay.burnt(); ok {
+		g.commitChoice(index)
+	}
 	if g.actions.JustPressed(actionPause) {
 		g.togglePause()
 		return
 	}
 	if g.phase.GetUntracked() == phaseArena && g.run != nil && g.run.Snapshot().Phase == PhaseLevelUp {
 		switch {
+		case g.overlay.burning:
+			// A chosen card is burning away; the next card waits for it.
 		case g.actions.JustPressed(actionCard1):
 			g.choose(0)
 			return
@@ -232,13 +243,9 @@ func (g *emberVigil) update(dt time.Duration) {
 			g.choose(2)
 			return
 		case g.actions.JustPressed(actionLeft):
-			g.cardFocus = (g.cardFocus + offerCount - 1) % offerCount
-			g.audio.playCue(cueUIClick)
-			g.publishHUD()
+			g.focusCard((g.cardFocus + offerCount - 1) % offerCount)
 		case g.actions.JustPressed(actionRight):
-			g.cardFocus = (g.cardFocus + 1) % offerCount
-			g.audio.playCue(cueUIClick)
-			g.publishHUD()
+			g.focusCard((g.cardFocus + 1) % offerCount)
 		case g.actions.JustPressed(actionConfirm):
 			g.choose(g.cardFocus)
 			return
@@ -258,10 +265,12 @@ func (g *emberVigil) update(dt time.Duration) {
 		if snap.Phase != prev.Phase {
 			if snap.Phase == PhaseLevelUp {
 				g.cardFocus = 0
+				g.overlay.dealCards()
 			}
 			if snap.Phase == PhaseVictory || snap.Phase == PhaseDefeat {
 				g.recordResult(snap)
 				g.menuFocus.Set(0)
+				g.overlay.openPanel()
 			}
 			g.hudClock = 0
 			g.publishHUD()
@@ -462,6 +471,8 @@ func (g *emberVigil) start() {
 	g.hudClock = 0
 	g.hudMotion = hudMotion{}
 	g.pausePushed = false
+	g.overlay = overlayMotion{}
+	g.pressed = ""
 	g.cardFocus = 0
 	g.runRecorded = false
 	g.lastNewRecord = false
@@ -473,13 +484,42 @@ func (g *emberVigil) start() {
 	g.publishHUD()
 }
 
-// choose takes card index of a level-up and resumes the run behind it.
+// choose takes card index of a level-up: the card burns away, and then the run applies it and resumes.
 func (g *emberVigil) choose(index int) {
+	if g.run == nil || g.run.Snapshot().Phase != PhaseLevelUp || index < 0 || index >= len(g.run.Snapshot().Offers) {
+		return
+	}
+	if g.overlay.burnAway(index) {
+		g.cardFocus = index
+		g.actions.Reset()
+		g.audio.playCue(cueUISelect)
+	}
+}
+
+// commitChoice hands the run the card that has burnt away and resumes it.
+func (g *emberVigil) commitChoice(index int) {
 	if g.run != nil && g.run.Choose(index) {
 		g.cardFocus = 0
 		g.actions.Reset()
-		g.audio.playCue(cueUISelect)
 		g.publishHUD()
+	}
+}
+
+// focusCard moves the level-up's focus to card index.
+func (g *emberVigil) focusCard(index int) {
+	if g.overlay.burning || index == g.cardFocus {
+		return
+	}
+	g.cardFocus = index
+	g.audio.playCue(cueUIClick)
+	g.publishHUD()
+}
+
+// hoverMenu moves a painted menu's focus to the button the mouse came over.
+func (g *emberVigil) hoverMenu(index int) {
+	if g.menuFocus.GetUntracked() != index {
+		g.audio.playCue(cueUIClick)
+		g.menuFocus.Set(index)
 	}
 }
 
@@ -488,6 +528,7 @@ func (g *emberVigil) pause() {
 	if g.phase.GetUntracked() == phaseArena && g.run != nil && g.run.Snapshot().Phase == PhasePlaying {
 		g.confirmQuit.Set(false)
 		g.setPhase(phasePaused)
+		g.overlay.openPanel()
 		g.audio.setPaused(true)
 		g.audio.playCue(cueUIClick)
 	}
@@ -852,8 +893,23 @@ func (g *emberVigil) draw(d *core.Drawing, size core.Size) {
 	if g.showTouchStick() {
 		g.pad.Draw(d, emberStickStyle())
 	}
-	if g.phase.GetUntracked() == phaseArena && g.run != nil {
-		lang := g.settings.GetUntracked().Language
-		drawHUD(d, layoutHUD(size, safe), g.hud.GetUntracked(), &g.hudMotion, g.hudArt, g.art, evstrings.For(lang), string(lang), g.pausePushed)
+	ph := g.phase.GetUntracked()
+	if g.run == nil || ph == phaseTitle {
+		return
+	}
+	lang := g.settings.GetUntracked().Language
+	tr := evstrings.For(lang)
+	st := g.hud.GetUntracked()
+	drawHUD(d, layoutHUD(size, safe), st, &g.hudMotion, g.hudArt, g.art, tr, string(lang), ph == phaseArena, g.pausePushed)
+	p := &overlayPainter{d: d, size: size, art: g.hudArt, icons: g.art, m: &g.overlay, tr: tr, lang: string(lang), pressed: g.pressed}
+	switch {
+	case ph == phasePaused:
+		confirm := g.confirmQuit.GetUntracked()
+		drawPause(p, layoutPause(size, safe, confirm), confirm, g.menuFocus.GetUntracked())
+	case ph != phaseArena:
+	case st.phase == PhaseLevelUp:
+		drawCards(p, layoutCards(size, safe, len(g.run.Snapshot().Offers)), st, g.cardFocus)
+	case st.phase == PhaseVictory || st.phase == PhaseDefeat:
+		drawResults(p, layoutResults(size, safe), st, resultsTextOf(tr, st, g.records.GetUntracked()), g.menuFocus.GetUntracked())
 	}
 }

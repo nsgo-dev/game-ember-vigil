@@ -40,6 +40,16 @@ func press(t *testing.T, app *nsgotest.App, selector string) {
 	app.Advance(frame)
 }
 
+// burnFrames is how many frames a chosen card takes to burn away before the run applies it.
+const burnFrames = int(burnTime*rate) + 2
+
+// chooseCard presses a level-up card and runs frames until it has burnt away and the run took it.
+func chooseCard(t *testing.T, app *nsgotest.App, selector string) {
+	t.Helper()
+	app.Press(selector)
+	app.Advance(time.Duration(burnFrames) * frame)
+}
+
 // pauseCenter is the middle of the pause button the HUD draws on the arena canvas.
 func pauseCenter(g *emberVigil) core.Point {
 	x, y := layoutHUD(g.canvasSize(), g.cx.Env().SafeArea()).pauseHit.center()
@@ -92,7 +102,7 @@ func TestTitleArenaPauseAndQuitFlow(t *testing.T) {
 
 	pressPause(t, app, g)
 	app.Find("id:pause")
-	app.Find("text:Paused")
+	app.Find("label:Paused")
 	paused := g.run.Snapshot().Time
 	app.Advance(20 * frame)
 	if g.run.Snapshot().Time != paused {
@@ -159,7 +169,7 @@ func TestConfirmStartsARun(t *testing.T) {
 	app.KeyDown("enter")
 	app.Advance(2 * frame)
 	app.KeyUp("enter")
-	app.Advance(frame)
+	app.Advance(time.Duration(burnFrames) * frame)
 	if g.phase.Get() != phaseArena {
 		t.Fatalf("phase after Enter = %v, want phaseArena", g.phase.Get())
 	}
@@ -345,20 +355,19 @@ func TestALevelUpCardIsChosenFromThePrompt(t *testing.T) {
 	}
 	for i, o := range offers {
 		app.Find("role:button " + o.Name)
-		if got := app.Find("id:level-up-card-name-" + string(rune('0'+i))).Text; got != o.Name {
-			t.Fatalf("card %d name = %q, want %q", i, got, o.Name)
+		card := app.Find("id:level-up-card-" + string(rune('0'+i)))
+		if card.Props.Label != o.Name || card.Props.Hint != o.Description {
+			t.Fatalf("card %d reads %q / %q, want %q / %q", i, card.Props.Label, card.Props.Hint, o.Name, o.Description)
 		}
-		if got := app.Find("id:level-up-card-desc-" + string(rune('0'+i))).Text; got != o.Description {
-			t.Fatalf("card %d description = %q, want %q", i, got, o.Description)
+		if img, ok := g.art.cardIcon(o.ID); ok {
+			app.Advance(30 * frame)
+			if !drewImage(app.Find("id:arena").Ops, img) {
+				t.Fatalf("the canvas did not draw card %d's icon", i)
+			}
 		}
-		if o.MaxLevel > 0 {
-			app.Find("id:level-up-card-pips-" + string(rune('0'+i)))
-		}
-		if o.Heal {
-			app.Find("id:card-icon-fallback-" + o.ID)
-		} else {
-			app.Find("id:card-icon-" + o.ID)
-		}
+	}
+	if !drewHUDPiece(app.Find("id:arena").Ops, g.hudArt, hudCardFocused) || !drewHUDPiece(app.Find("id:arena").Ops, g.hudArt, hudCardCommon) {
+		t.Fatal("the canvas did not draw the focused and the other card frames")
 	}
 
 	// Run stays paused while the modal is open.
@@ -368,7 +377,12 @@ func TestALevelUpCardIsChosenFromThePrompt(t *testing.T) {
 		t.Fatalf("the run advanced from %v to %v while level-up cards were open", pausedAt, g.run.Snapshot().Time)
 	}
 
-	press(t, app, "role:button "+offers[0].Name)
+	app.Press("role:button " + offers[0].Name)
+	app.Advance(frame)
+	if p := g.run.Snapshot().Phase; p != PhaseLevelUp || !g.overlay.burning {
+		t.Fatalf("the run's phase while the chosen card burns is %v, want PhaseLevelUp", p)
+	}
+	app.Advance(time.Duration(burnFrames) * frame)
 	if p := g.run.Snapshot().Phase; p != PhasePlaying {
 		t.Fatalf("the run's phase after choosing a card is %v, want PhasePlaying", p)
 	}
@@ -397,7 +411,7 @@ func TestLevelUpCardChosenWithNumberKeyAndConfirm(t *testing.T) {
 	app.KeyCodeDown("Digit2")
 	app.Advance(2 * frame)
 	app.KeyCodeUp("Digit2")
-	app.Advance(frame)
+	app.Advance(time.Duration(burnFrames) * frame)
 	if p := g.run.Snapshot().Phase; p != PhasePlaying {
 		t.Fatalf("phase after pressing 2 = %v, want PhasePlaying", p)
 	}
@@ -419,7 +433,7 @@ func TestLevelUpCardChosenWithNumberKeyAndConfirm(t *testing.T) {
 	app.KeyDown("enter")
 	app.Advance(2 * frame)
 	app.KeyUp("enter")
-	app.Advance(frame)
+	app.Advance(time.Duration(burnFrames) * frame)
 	if p := g.run.Snapshot().Phase; p != PhasePlaying {
 		t.Fatalf("phase after Enter = %v, want PhasePlaying", p)
 	}
@@ -437,7 +451,7 @@ func TestResultsScreenForDefeatAndVictory(t *testing.T) {
 		t.Fatalf("the run's phase with no health is %v, want PhaseDefeat", p)
 	}
 	app.Find("id:results")
-	if got := app.Find("id:results-outcome").Text; got != "DEFEAT" {
+	if got := app.Find("id:results-outcome").Props.Label; got != "DEFEAT" {
 		t.Fatalf("defeat outcome = %q, want DEFEAT", got)
 	}
 	app.Find("id:results-time")
@@ -477,7 +491,7 @@ func TestResultsScreenForDefeatAndVictory(t *testing.T) {
 		t.Fatalf("phase after killing boss = %v, want PhaseVictory", p)
 	}
 	app.Find("id:results")
-	if got := app.Find("id:results-outcome").Text; got != "VICTORY" {
+	if got := app.Find("id:results-outcome").Props.Label; got != "VICTORY" {
 		t.Fatalf("victory outcome = %q, want VICTORY", got)
 	}
 
@@ -650,10 +664,10 @@ func TestLanguageSwitchUpdatesAllScreens(t *testing.T) {
 
 	// Pause + quit confirmation
 	pressPause(t, app, g)
-	app.Find("text:已暂停")
+	app.Find("label:已暂停")
 	app.Find("role:button 继续")
 	press(t, app, "id:pause-quit")
-	app.Find("text:确定返回标题？")
+	app.Find("label:确定返回标题？")
 	press(t, app, "id:pause-confirm-quit-no")
 	press(t, app, "id:pause-resume")
 
@@ -664,14 +678,12 @@ func TestLanguageSwitchUpdatesAllScreens(t *testing.T) {
 	zh := evstrings.For(evstrings.ZhCN)
 	for i, o := range offers {
 		want := zh.Card(o.ID, o.Name, o.Description)
-		if got := app.Find("id:level-up-card-name-" + string(rune('0'+i))).Text; got != want.Name {
-			t.Fatalf("zh-CN card %d name = %q, want %q", i, got, want.Name)
-		}
-		if got := app.Find("id:level-up-card-desc-" + string(rune('0'+i))).Text; got != want.Description {
-			t.Fatalf("zh-CN card %d desc = %q, want %q", i, got, want.Description)
+		card := app.Find("id:level-up-card-" + string(rune('0'+i)))
+		if card.Props.Label != want.Name || card.Props.Hint != want.Description {
+			t.Fatalf("zh-CN card %d reads %q / %q, want %q / %q", i, card.Props.Label, card.Props.Hint, want.Name, want.Description)
 		}
 	}
-	press(t, app, "id:level-up-card-0")
+	chooseCard(t, app, "id:level-up-card-0")
 
 	// Boss HUD + Victory results
 	g.run.spawnBoss()
@@ -681,10 +693,10 @@ func TestLanguageSwitchUpdatesAllScreens(t *testing.T) {
 		be.hp = 0
 	}
 	app.Advance(8 * frame)
-	if got := app.Find("id:results-outcome").Text; got != "胜利" {
+	if got := app.Find("id:results-outcome").Props.Label; got != "胜利" {
 		t.Fatalf("zh-CN victory outcome = %q, want 胜利", got)
 	}
-	if got := app.Find("id:results-record").Text; got != "刷新记录！" {
+	if got := app.Find("id:results-record").Props.Label; got != "刷新记录！" {
 		t.Fatalf("zh-CN new record = %q, want 刷新记录！", got)
 	}
 }
@@ -701,7 +713,7 @@ func TestRecordsUpdateOncePerRunAndPersist(t *testing.T) {
 		be.hp = 0
 	}
 	app.Advance(8 * frame)
-	if got := app.Find("id:results-record").Text; got != "New record" {
+	if got := app.Find("id:results-record").Props.Label; got != "New record" {
 		t.Fatalf("first run record label = %q, want New record", got)
 	}
 
@@ -727,7 +739,7 @@ func TestRecordsUpdateOncePerRunAndPersist(t *testing.T) {
 	press(t, app2, "id:title-start")
 	g2.run.keeper.health = 0
 	app2.Advance(8 * frame)
-	if got := app2.Find("id:results-record").Text; got != "No new record" {
+	if got := app2.Find("id:results-record").Props.Label; got != "No new record" {
 		t.Fatalf("worse run record label = %q, want No new record", got)
 	}
 	if rec := g2.records.Get(); rec.BestKills != wantKills || rec.BestLevel != 5 || rec.Wins != 1 {
@@ -879,7 +891,7 @@ func TestTouchLayoutAndSafeAreaOnPhoneLandscape(t *testing.T) {
 	g.run.xp = g.run.xpNeeded()
 	app.Advance(2 * frame)
 	checkSafe("level-up")
-	press(t, app, "id:level-up-card-0")
+	chooseCard(t, app, "id:level-up-card-0")
 	if g.run.Snapshot().Phase != PhasePlaying {
 		t.Fatalf("phase after tapping level-up card on phone = %v, want PhasePlaying", g.run.Snapshot().Phase)
 	}

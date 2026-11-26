@@ -1076,7 +1076,7 @@ func BenchmarkWorstWave200Enemies(b *testing.B) {
 		d.Ops = d.Ops[:0]
 		a.draw(d, 0.5)
 		motion.step(st, stepSeconds)
-		drawHUD(d, l, st, &motion, kit, a.art, tr, string(evstrings.EN), false)
+		drawHUD(d, l, st, &motion, kit, a.art, tr, string(evstrings.EN), true, false)
 	}
 }
 

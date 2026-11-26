@@ -68,7 +68,7 @@ func drawTestHUD(st hudState, kit *hudArt) []core.DrawOp {
 	var m hudMotion
 	m.step(st, stepSeconds)
 	d := &core.Drawing{}
-	drawHUD(d, layoutHUD(core.Size{Width: 1280, Height: 720}, core.Edges{}), st, &m, kit, newArtFromFS(nil, nil), evstrings.For(evstrings.EN), string(evstrings.EN), false)
+	drawHUD(d, layoutHUD(core.Size{Width: 1280, Height: 720}, core.Edges{}), st, &m, kit, newArtFromFS(nil, nil), evstrings.For(evstrings.EN), string(evstrings.EN), true, false)
 	return d.Ops
 }
 
