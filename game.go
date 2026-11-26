@@ -20,6 +20,15 @@ const (
 	volumeStep = 0.1
 )
 
+// Virtual touch stick geometry in view points, kept clear of the screen's safe area.
+const (
+	stickRadius     = 48
+	stickMargin     = 24
+	stickDeadZone   = 0.14
+	stickZoneWidth  = 220
+	stickZoneHeight = 200
+)
+
 // The actions game.yaml binds, which the shell reads by name.
 const (
 	actionLeft    = "left"
@@ -60,6 +69,8 @@ type emberVigil struct {
 	storage core.Storage
 	loop    *game.Loop
 	actions *input.Actions
+	pad     *input.VirtualPad
+	stick   *input.VirtualStick
 	art     *art
 	scene   *arenaRenderer
 	audio   *audioController
@@ -92,7 +103,10 @@ type emberVigil struct {
 	lastNewRecord bool
 
 	// size is the arena canvas's size when it last drew, which input maps into virtual pixels.
-	size core.Size
+	size      core.Size
+	stickSize core.Size
+	stickSafe core.Edges
+	touchUsed bool
 }
 
 // Root is the game's root component.
@@ -137,6 +151,21 @@ func newEmberVigil(cx *core.Scope) *emberVigil {
 	// Touches and clicks arrive in the view's points; game.yaml's regions are in virtual pixels.
 	g.actions.MapPoint = func(p core.Point) (core.Point, bool) { return viewport.ViewToGame(g.size, p) }
 	Project.BindInput(g.actions)
+	g.pad = input.NewVirtualPad()
+	g.stick = g.pad.AddStick(&input.VirtualStick{
+		Name:      "stick",
+		AxisXName: axisMoveX,
+		AxisYName: axisMoveY,
+		Radius:    stickRadius,
+		DeadZone:  stickDeadZone,
+		Floating:  true,
+	})
+	g.actions.BindVirtualPad(g.pad)
+	initialSize := cx.Env().Window()
+	if initialSize.Width <= 0 || initialSize.Height <= 0 {
+		initialSize = core.Size{Width: 960, Height: 540}
+	}
+	g.updateStickLayout(initialSize, cx.Env().SafeArea())
 	g.actions.WatchKeys(cx)
 	g.actions.WatchGamepads(cx)
 
@@ -652,10 +681,92 @@ func (g *emberVigil) confirm() {
 	}
 }
 
+// onArenaTouch routes touches on the arena to the bottom-left virtual stick while a run is actively playing.
+func (g *emberVigil) onArenaTouch(ev core.TouchEvent) {
+	g.touchUsed = true
+	if g.phase.GetUntracked() != phaseArena || g.run == nil || g.run.Snapshot().Phase != PhasePlaying {
+		return
+	}
+	size := g.size
+	if size.Width <= 0 || size.Height <= 0 {
+		size = g.cx.Env().Window()
+	}
+	g.updateStickLayout(size, g.cx.Env().SafeArea())
+	g.pad.OnTouch(ev)
+}
+
+// updateStickLayout keeps the virtual stick's resting center and activation zone inside the bottom-left safe area.
+func (g *emberVigil) updateStickLayout(size core.Size, safe core.Edges) {
+	if g.stick == nil || size.Width <= 0 || size.Height <= 0 {
+		return
+	}
+	if size == g.stickSize && safe == g.stickSafe {
+		return
+	}
+	radius := core.Points(stickRadius)
+	if maxR := size.Height * 0.2; maxR > 0 && maxR < radius {
+		radius = max(core.Points(32), maxR)
+	}
+	left := safe.Left + stickMargin
+	bottom := safe.Bottom + stickMargin
+	center := core.Point{
+		X: left + radius,
+		Y: size.Height - bottom - radius,
+	}
+	zoneWidth := min(size.Width*0.45, core.Points(stickZoneWidth))
+	zoneHeight := min(size.Height-safe.Top-safe.Bottom, core.Points(stickZoneHeight))
+	if zoneHeight < radius*2+stickMargin {
+		zoneHeight = min(size.Height-safe.Bottom, radius*2+stickMargin)
+	}
+	zoneTop := max(safe.Top+buttonSide+12, size.Height-safe.Bottom-zoneHeight)
+	if zoneTop >= size.Height-safe.Bottom {
+		zoneTop = max(safe.Top, size.Height-safe.Bottom-radius*2)
+	}
+	g.stick.Radius = float32(radius)
+	g.stick.Zone = core.Bounds{
+		Origin: core.Point{X: safe.Left, Y: zoneTop},
+		Size:   core.Size{Width: zoneWidth, Height: max(0, size.Height-safe.Bottom-zoneTop)},
+	}
+	if !g.stick.Active() {
+		g.stick.Center = center
+	}
+	g.stickSize = size
+	g.stickSafe = safe
+}
+
+// showTouchStick reports whether the bottom-left virtual stick should be drawn over the arena.
+func (g *emberVigil) showTouchStick() bool {
+	if g.phase.GetUntracked() != phaseArena || g.run == nil || g.run.Snapshot().Phase != PhasePlaying {
+		return false
+	}
+	if g.touchUsed || (g.stick != nil && g.stick.Active()) {
+		return true
+	}
+	env := g.cx.Env()
+	idiom := env.Idiom()
+	return idiom == core.IdiomPhone || idiom == core.IdiomTablet || env.Pointer() == core.PointerCoarse
+}
+
+// emberStickStyle styles the virtual stick in Ember Vigil's ash-and-ember palette with clear active feedback.
+func emberStickStyle() input.VirtualStyle {
+	return input.VirtualStyle{
+		BaseFill:        core.RGBA(0x111827, 0.42),
+		BaseStroke:      core.RGBA(0xf8fafc, 0.48),
+		BaseStrokeWidth: 2,
+		KnobFill:        core.RGBA(0xff7a1a, 0.68),
+		KnobActiveFill:  core.RGBA(0xffb347, 0.92),
+		KnobRadiusRatio: 0.42,
+	}
+}
+
 // draw draws the arena through the viewport, which keeps the virtual canvas's shape in any window.
 func (g *emberVigil) draw(d *core.Drawing, size core.Size) {
 	_ = g.frame.Get()
 	g.size = size
 	alpha := g.alpha
 	viewport.Draw(d, size, func(d *core.Drawing, _ core.Size) { g.scene.draw(d, alpha) })
+	g.updateStickLayout(size, g.cx.Env().SafeArea())
+	if g.showTouchStick() {
+		g.pad.Draw(d, emberStickStyle())
+	}
 }
