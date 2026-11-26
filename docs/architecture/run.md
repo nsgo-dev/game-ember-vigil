@@ -2,6 +2,8 @@
 
 `run.go` simulates one run without NSGo: no views, devices, sound, storage or wall clock. The shell steps it at 60 Hz with one `Controls` value and reads back the step's events and a snapshot. Tests step it the same way, so every rule is testable headlessly and a seed plus a list of controls replays a run.
 
+Today the model runs the keeper, the starter Ember Bolt, three enemies, embers, contact and four upgrade cards on a three-minute timeline. The rest of this document — further weapons and passives, ground patches, pulses, the Hollow King and the twelve-minute timeline — is the target the later milestones complete.
+
 ## Time
 
 - `Step` expects exactly one 60 Hz step. The loop owns the fixed rate; the run never scales by a display frame.

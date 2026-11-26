@@ -1,0 +1,520 @@
+package main
+
+import (
+	"bytes"
+	"embed"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"math"
+	"sync"
+
+	"go.yaml.in/yaml/v3"
+)
+
+// dataFS holds the tuning files under data/, so a designer edits the balance without touching Go.
+//
+//go:embed data/*.yaml
+var dataFS embed.FS
+
+// The schema version each data file must declare, which its loader accepts and its encoder writes.
+const (
+	runVersion   = 1
+	enemyVersion = 1
+	waveVersion  = 1
+	fileRun      = "data/run.yaml"
+	fileEnemies  = "data/enemies.yaml"
+	fileWaves    = "data/waves.yaml"
+	// statDamage, statCooldown, statMoveSpeed and statMaxHealth are the stats an upgrade card raises, as an upgrade's stat field names them.
+	statDamage    = "damage"
+	statCooldown  = "cooldown"
+	statMoveSpeed = "moveSpeed"
+	statMaxHealth = "maxHealth"
+)
+
+// A kind of enemy movement, as an enemy's motion field names it.
+const (
+	// motionChase walks straight at the keeper.
+	motionChase = "chase"
+	// motionDrift walks at the keeper while swaying across the line between them.
+	motionDrift = "drift"
+)
+
+// gameData is every tuning file a run reads, loaded and cross-checked once at startup.
+type gameData struct {
+	run     runFile
+	enemies enemyFile
+	waves   waveFile
+}
+
+// runFile is data/run.yaml: the arena, the keeper, the starter weapon, the embers, the level curve and the upgrade pool.
+type runFile struct {
+	Version  int          `yaml:"version"`
+	Arena    arenaDef     `yaml:"arena"`
+	Keeper   keeperDef    `yaml:"keeper"`
+	Weapon   weaponDef    `yaml:"weapon"`
+	Embers   emberDef     `yaml:"embers"`
+	Level    levelDef     `yaml:"level"`
+	Upgrades []upgradeDef `yaml:"upgrades"`
+	Healing  healDef      `yaml:"healing"`
+}
+
+// arenaDef is the run's world bounds, in world units, which are virtual pixels at zoom one.
+type arenaDef struct {
+	Width  float64 `yaml:"width"`
+	Height float64 `yaml:"height"`
+}
+
+// keeperDef is the keeper's size, speed and health before any upgrade.
+type keeperDef struct {
+	Radius       float64 `yaml:"radius"`
+	Speed        float64 `yaml:"speed"`
+	Health       float64 `yaml:"health"`
+	Invulnerable float64 `yaml:"invulnerable"`
+}
+
+// weaponDef is the starter weapon Ember Bolt: an auto-aimed shot, one at a time, at the nearest enemy in range.
+type weaponDef struct {
+	Damage        float64 `yaml:"damage"`
+	Cooldown      float64 `yaml:"cooldown"`
+	CooldownMin   float64 `yaml:"cooldownMin"`
+	Range         float64 `yaml:"range"`
+	ShotSpeed     float64 `yaml:"shotSpeed"`
+	ShotRadius    float64 `yaml:"shotRadius"`
+	ShotLife      float64 `yaml:"shotLife"`
+	Knockback     float64 `yaml:"knockback"`
+	KnockbackDrag float64 `yaml:"knockbackDrag"`
+}
+
+// emberDef is what an enemy leaves behind and how it reaches the keeper.
+type emberDef struct {
+	Radius       float64 `yaml:"radius"`
+	MagnetRadius float64 `yaml:"magnetRadius"`
+	MagnetSpeed  float64 `yaml:"magnetSpeed"`
+	Value        int     `yaml:"value"`
+}
+
+// levelDef is how much XP each level needs: First for level 2, then Step more for each level after.
+type levelDef struct {
+	First float64 `yaml:"first"`
+	Step  float64 `yaml:"step"`
+}
+
+// upgradeDef is one card in the upgrade pool: a stat it raises by Amount at each level, up to MaxLevel.
+type upgradeDef struct {
+	Name     string  `yaml:"name"`
+	Stat     string  `yaml:"stat"`
+	Amount   float64 `yaml:"amount"`
+	MaxLevel int     `yaml:"maxLevel"`
+}
+
+// healDef is the card that fills an offer when fewer than three upgrades remain.
+type healDef struct {
+	Name     string  `yaml:"name"`
+	Fraction float64 `yaml:"fraction"`
+}
+
+// enemyFile is data/enemies.yaml: every enemy kind the waves send.
+type enemyFile struct {
+	Version int        `yaml:"version"`
+	Enemies []enemyDef `yaml:"enemies"`
+}
+
+// enemyDef is a kind of enemy: how it moves, how hard it hits and what it leaves behind.
+type enemyDef struct {
+	Name            string   `yaml:"name"`
+	Motion          string   `yaml:"motion"`
+	Health          float64  `yaml:"health"`
+	Speed           float64  `yaml:"speed"`
+	Radius          float64  `yaml:"radius"`
+	Damage          float64  `yaml:"damage"`
+	KnockbackResist float64  `yaml:"knockbackResist"`
+	Embers          int      `yaml:"embers"`
+	Drift           driftDef `yaml:"drift,omitempty"`
+}
+
+// driftDef is how a drifting enemy sways: Amplitude is the fraction of its speed across its course, and Period is how long one sway takes, in seconds.
+type driftDef struct {
+	Amplitude float64 `yaml:"amplitude"`
+	Period    float64 `yaml:"period"`
+}
+
+// waveFile is data/waves.yaml: the spawn timeline, the ring spawns appear on and the global living cap.
+type waveFile struct {
+	Version  int       `yaml:"version"`
+	MaxAlive int       `yaml:"maxAlive"`
+	Ring     ringDef   `yaml:"ring"`
+	Spans    []spanDef `yaml:"spans"`
+}
+
+// ringDef is how far from the keeper, in world units, a spawn may appear.
+type ringDef struct {
+	Min float64 `yaml:"min"`
+	Max float64 `yaml:"max"`
+}
+
+// spanDef is one stretch of the timeline, from its From second until the next span starts.
+type spanDef struct {
+	From     float64  `yaml:"from"`
+	Every    float64  `yaml:"every"`
+	MaxAlive int      `yaml:"maxAlive"`
+	Health   float64  `yaml:"health"`
+	Damage   float64  `yaml:"damage"`
+	Enemies  []mixDef `yaml:"enemies"`
+
+	// weights is Enemies' weights in order, which the spawn stream draws from and loadGameData fills in.
+	weights []float64
+}
+
+// mixDef is how strongly a span favours one enemy kind.
+type mixDef struct {
+	Name   string  `yaml:"name"`
+	Weight float64 `yaml:"weight"`
+}
+
+// loadGameData reads, decodes and cross-checks the three tuning files.
+func loadGameData(fsys fs.FS) (*gameData, error) {
+	runBytes, err := fs.ReadFile(fsys, fileRun)
+	if err != nil {
+		return nil, err
+	}
+	run, err := parseRunFile(fileRun, runBytes)
+	if err != nil {
+		return nil, err
+	}
+	enemyBytes, err := fs.ReadFile(fsys, fileEnemies)
+	if err != nil {
+		return nil, err
+	}
+	enemies, err := parseEnemyFile(fileEnemies, enemyBytes)
+	if err != nil {
+		return nil, err
+	}
+	waveBytes, err := fs.ReadFile(fsys, fileWaves)
+	if err != nil {
+		return nil, err
+	}
+	waves, err := parseWaveFile(fileWaves, waveBytes)
+	if err != nil {
+		return nil, err
+	}
+	d := &gameData{run: *run, enemies: *enemies, waves: *waves}
+	if err := d.check(); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+// check resolves the names the waves use and prepares what a spawn reads, which a single file cannot check alone.
+func (d *gameData) check() error {
+	for si := range d.waves.Spans {
+		span := &d.waves.Spans[si]
+		span.weights = make([]float64, len(span.Enemies))
+		for mi := range span.Enemies {
+			mix := &span.Enemies[mi]
+			if _, ok := d.enemyIndex(mix.Name); !ok {
+				return fmt.Errorf("%s: span %d: no enemy %q", fileWaves, si, mix.Name)
+			}
+			span.weights[mi] = mix.Weight
+		}
+	}
+	return nil
+}
+
+// enemyIndex returns the position of the enemy kind called name in the enemies file.
+func (d *gameData) enemyIndex(name string) (int, bool) {
+	for i := range d.enemies.Enemies {
+		if d.enemies.Enemies[i].Name == name {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// parseRunFile decodes and validates data/run.yaml, refusing unknown fields, trailing documents and values a run cannot use.
+func parseRunFile(file string, data []byte) (*runFile, error) {
+	var f runFile
+	if err := decodeStrict(file, data, &f); err != nil {
+		return nil, err
+	}
+	if err := f.validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", file, err)
+	}
+	return &f, nil
+}
+
+// parseEnemyFile decodes and validates data/enemies.yaml.
+func parseEnemyFile(file string, data []byte) (*enemyFile, error) {
+	var f enemyFile
+	if err := decodeStrict(file, data, &f); err != nil {
+		return nil, err
+	}
+	if err := f.validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", file, err)
+	}
+	return &f, nil
+}
+
+// parseWaveFile decodes and validates data/waves.yaml.
+func parseWaveFile(file string, data []byte) (*waveFile, error) {
+	var f waveFile
+	if err := decodeStrict(file, data, &f); err != nil {
+		return nil, err
+	}
+	if err := f.validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", file, err)
+	}
+	return &f, nil
+}
+
+// decodeStrict decodes one YAML document into v, refusing fields v does not declare and any document after the first.
+func decodeStrict(file string, data []byte, v any) error {
+	if len(bytes.TrimSpace(data)) == 0 {
+		return fmt.Errorf("%s: empty file", file)
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(v); err != nil {
+		return fmt.Errorf("%s: decode: %w", file, err)
+	}
+	var extra any
+	switch err := dec.Decode(&extra); {
+	case err == nil:
+		return fmt.Errorf("%s: unexpected trailing YAML document", file)
+	case !errors.Is(err, io.EOF):
+		return fmt.Errorf("%s: decode: %w", file, err)
+	}
+	return nil
+}
+
+// encodeYAML writes v with 2-space indents and its fields in declaration order, so the same value always encodes to the same bytes.
+func encodeYAML(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(v); err != nil {
+		_ = enc.Close()
+		return nil, err
+	}
+	if err := enc.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (r *runFile) validate() error {
+	switch {
+	case r.Version != runVersion:
+		return fmt.Errorf("version %d, want %d", r.Version, runVersion)
+	case !positive(r.Arena.Width) || !positive(r.Arena.Height):
+		return fmt.Errorf("arena %vx%v is not above 0", r.Arena.Width, r.Arena.Height)
+	case !positive(r.Keeper.Radius):
+		return fmt.Errorf("keeper radius %v is not above 0", r.Keeper.Radius)
+	case !positive(r.Keeper.Speed):
+		return fmt.Errorf("keeper speed %v is not above 0", r.Keeper.Speed)
+	case !positive(r.Keeper.Health):
+		return fmt.Errorf("keeper health %v is not above 0", r.Keeper.Health)
+	case !finite(r.Keeper.Invulnerable) || r.Keeper.Invulnerable < 0:
+		return fmt.Errorf("keeper invulnerable %v is negative", r.Keeper.Invulnerable)
+	}
+	w := r.Weapon
+	switch {
+	case !positive(w.Damage):
+		return fmt.Errorf("weapon damage %v is not above 0", w.Damage)
+	case !positive(w.Cooldown):
+		return fmt.Errorf("weapon cooldown %v is not above 0", w.Cooldown)
+	case !positive(w.CooldownMin) || w.CooldownMin > w.Cooldown:
+		return fmt.Errorf("weapon cooldownMin %v is not above 0 and at most %v", w.CooldownMin, w.Cooldown)
+	case !positive(w.Range):
+		return fmt.Errorf("weapon range %v is not above 0", w.Range)
+	case !positive(w.ShotSpeed):
+		return fmt.Errorf("weapon shotSpeed %v is not above 0", w.ShotSpeed)
+	case !positive(w.ShotRadius):
+		return fmt.Errorf("weapon shotRadius %v is not above 0", w.ShotRadius)
+	case !positive(w.ShotLife):
+		return fmt.Errorf("weapon shotLife %v is not above 0", w.ShotLife)
+	case !finite(w.Knockback) || w.Knockback < 0:
+		return fmt.Errorf("weapon knockback %v is negative", w.Knockback)
+	case !positive(w.KnockbackDrag):
+		return fmt.Errorf("weapon knockbackDrag %v is not above 0", w.KnockbackDrag)
+	}
+	e := r.Embers
+	switch {
+	case !positive(e.Radius):
+		return fmt.Errorf("embers radius %v is not above 0", e.Radius)
+	case !positive(e.MagnetRadius):
+		return fmt.Errorf("embers magnetRadius %v is not above 0", e.MagnetRadius)
+	case !positive(e.MagnetSpeed):
+		return fmt.Errorf("embers magnetSpeed %v is not above 0", e.MagnetSpeed)
+	case e.Value < 1:
+		return fmt.Errorf("embers value %d is not at least 1", e.Value)
+	case !positive(r.Level.First):
+		return fmt.Errorf("level first %v is not above 0", r.Level.First)
+	case !finite(r.Level.Step) || r.Level.Step < 0:
+		return fmt.Errorf("level step %v is negative", r.Level.Step)
+	}
+	if len(r.Upgrades) == 0 {
+		return errors.New("no upgrades")
+	}
+	for i := range r.Upgrades {
+		u := &r.Upgrades[i]
+		if u.Name == "" {
+			return fmt.Errorf("upgrade %d has no name", i)
+		}
+		switch u.Stat {
+		case statDamage, statCooldown, statMoveSpeed, statMaxHealth:
+		default:
+			return fmt.Errorf("upgrade %q: stat %q is not %s, %s, %s or %s", u.Name, u.Stat, statDamage, statCooldown, statMoveSpeed, statMaxHealth)
+		}
+		if !positive(u.Amount) {
+			return fmt.Errorf("upgrade %q: amount %v is not above 0", u.Name, u.Amount)
+		}
+		if u.MaxLevel < 1 {
+			return fmt.Errorf("upgrade %q: maxLevel %d is not at least 1", u.Name, u.MaxLevel)
+		}
+		for _, other := range r.Upgrades[:i] {
+			if other.Name == u.Name {
+				return fmt.Errorf("upgrade %q is defined twice", u.Name)
+			}
+		}
+	}
+	switch {
+	case r.Healing.Name == "":
+		return errors.New("healing card has no name")
+	case !finite(r.Healing.Fraction) || r.Healing.Fraction <= 0 || r.Healing.Fraction > 1:
+		return fmt.Errorf("healing fraction %v is not in (0, 1]", r.Healing.Fraction)
+	}
+	return nil
+}
+
+func (f *enemyFile) validate() error {
+	if f.Version != enemyVersion {
+		return fmt.Errorf("version %d, want %d", f.Version, enemyVersion)
+	}
+	if len(f.Enemies) == 0 {
+		return errors.New("no enemies")
+	}
+	for i := range f.Enemies {
+		e := &f.Enemies[i]
+		if err := e.validate(); err != nil {
+			return err
+		}
+		for _, other := range f.Enemies[:i] {
+			if other.Name == e.Name {
+				return fmt.Errorf("enemy %q is defined twice", e.Name)
+			}
+		}
+	}
+	return nil
+}
+
+func (e *enemyDef) validate() error {
+	if e.Name == "" {
+		return errors.New("an enemy has no name")
+	}
+	fail := func(format string, args ...any) error {
+		return fmt.Errorf("enemy %q: %s", e.Name, fmt.Sprintf(format, args...))
+	}
+	switch {
+	case e.Motion != motionChase && e.Motion != motionDrift:
+		return fail("motion %q is not %s or %s", e.Motion, motionChase, motionDrift)
+	case !positive(e.Health):
+		return fail("health %v is not above 0", e.Health)
+	case !positive(e.Speed):
+		return fail("speed %v is not above 0", e.Speed)
+	case !positive(e.Radius):
+		return fail("radius %v is not above 0", e.Radius)
+	case !finite(e.Damage) || e.Damage < 0:
+		return fail("damage %v is negative", e.Damage)
+	case !finite(e.KnockbackResist) || e.KnockbackResist < 0 || e.KnockbackResist > 1:
+		return fail("knockbackResist %v is not in [0, 1]", e.KnockbackResist)
+	case e.Embers < 0:
+		return fail("embers %d is negative", e.Embers)
+	}
+	switch e.Motion {
+	case motionDrift:
+		if !finite(e.Drift.Amplitude) || e.Drift.Amplitude < 0 {
+			return fail("drift amplitude %v is negative", e.Drift.Amplitude)
+		}
+		if !positive(e.Drift.Period) {
+			return fail("a drifting enemy needs a drift period above 0")
+		}
+	case motionChase:
+		if e.Drift != (driftDef{}) {
+			return fail("a chasing enemy has drift values")
+		}
+	}
+	return nil
+}
+
+func (f *waveFile) validate() error {
+	switch {
+	case f.Version != waveVersion:
+		return fmt.Errorf("version %d, want %d", f.Version, waveVersion)
+	case f.MaxAlive < 1 || f.MaxAlive > maxEnemies:
+		return fmt.Errorf("maxAlive %d is not from 1 to %d", f.MaxAlive, maxEnemies)
+	case !positive(f.Ring.Min):
+		return fmt.Errorf("ring min %v is not above 0", f.Ring.Min)
+	case !positive(f.Ring.Max) || f.Ring.Max < f.Ring.Min:
+		return fmt.Errorf("ring max %v is not at least min %v", f.Ring.Max, f.Ring.Min)
+	case len(f.Spans) == 0:
+		return errors.New("no spans")
+	}
+	for i := range f.Spans {
+		s := &f.Spans[i]
+		if err := s.validate(); err != nil {
+			return fmt.Errorf("span %d: %w", i, err)
+		}
+		if i == 0 && s.From != 0 {
+			return fmt.Errorf("span 0 starts at %v, want 0", s.From)
+		}
+		if i > 0 && s.From <= f.Spans[i-1].From {
+			return fmt.Errorf("span %d starts at %v, not after span %d at %v", i, s.From, i-1, f.Spans[i-1].From)
+		}
+		if s.MaxAlive > f.MaxAlive {
+			return fmt.Errorf("span %d: maxAlive %d is above the file's %d", i, s.MaxAlive, f.MaxAlive)
+		}
+	}
+	return nil
+}
+
+func (s *spanDef) validate() error {
+	switch {
+	case !finite(s.From) || s.From < 0:
+		return fmt.Errorf("from %v is negative", s.From)
+	case !positive(s.Every):
+		return fmt.Errorf("every %v is not above 0", s.Every)
+	case s.MaxAlive < 1:
+		return fmt.Errorf("maxAlive %d is not at least 1", s.MaxAlive)
+	case !positive(s.Health):
+		return fmt.Errorf("health %v is not above 0", s.Health)
+	case !positive(s.Damage):
+		return fmt.Errorf("damage %v is not above 0", s.Damage)
+	case len(s.Enemies) == 0:
+		return errors.New("no enemies")
+	}
+	for i := range s.Enemies {
+		m := &s.Enemies[i]
+		if m.Name == "" {
+			return fmt.Errorf("mix %d has no enemy name", i)
+		}
+		if !positive(m.Weight) {
+			return fmt.Errorf("%s: weight %v is not above 0", m.Name, m.Weight)
+		}
+	}
+	return nil
+}
+
+func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
+
+func positive(v float64) bool { return finite(v) && v > 0 }
+
+// mustGameData is the tuning the embedded files hold, which the app cannot run without.
+var mustGameData = sync.OnceValue(func() *gameData {
+	d, err := loadGameData(dataFS)
+	if err != nil {
+		panic("embervigil: " + err.Error())
+	}
+	return d
+})

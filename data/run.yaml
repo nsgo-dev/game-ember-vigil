@@ -1,0 +1,47 @@
+version: 1
+arena:
+  width: 1920
+  height: 1280
+keeper:
+  radius: 6
+  speed: 70
+  health: 100
+  invulnerable: 0.8
+weapon:
+  damage: 8
+  cooldown: 0.55
+  cooldownMin: 0.15
+  range: 260
+  shotSpeed: 320
+  shotRadius: 4
+  shotLife: 1.2
+  knockback: 120
+  knockbackDrag: 12
+embers:
+  radius: 4
+  magnetRadius: 46
+  magnetSpeed: 220
+  value: 1
+level:
+  first: 5
+  step: 4
+upgrades:
+  - name: Wick
+    stat: damage
+    amount: 4
+    maxLevel: 5
+  - name: Oil
+    stat: cooldown
+    amount: 0.08
+    maxLevel: 5
+  - name: Step
+    stat: moveSpeed
+    amount: 10
+    maxLevel: 5
+  - name: Warmth
+    stat: maxHealth
+    amount: 20
+    maxLevel: 5
+healing:
+  name: Ember
+  fraction: 0.35

@@ -1,0 +1,60 @@
+version: 1
+maxAlive: 200
+ring:
+  min: 300
+  max: 360
+spans:
+  - from: 0
+    every: 1.5
+    maxAlive: 30
+    health: 1
+    damage: 1
+    enemies:
+      - name: Ash Mite
+        weight: 1
+  - from: 30
+    every: 1.3
+    maxAlive: 45
+    health: 1.1
+    damage: 1
+    enemies:
+      - name: Ash Mite
+        weight: 3
+      - name: Moth
+        weight: 1
+  - from: 75
+    every: 1
+    maxAlive: 70
+    health: 1.3
+    damage: 1.2
+    enemies:
+      - name: Ash Mite
+        weight: 3
+      - name: Moth
+        weight: 2
+      - name: Husk
+        weight: 1
+  - from: 120
+    every: 0.7
+    maxAlive: 100
+    health: 1.6
+    damage: 1.6
+    enemies:
+      - name: Ash Mite
+        weight: 3
+      - name: Moth
+        weight: 2
+      - name: Husk
+        weight: 2
+  - from: 180
+    every: 0.7
+    maxAlive: 100
+    health: 2
+    damage: 1.5
+    enemies:
+      - name: Ash Mite
+        weight: 3
+      - name: Moth
+        weight: 3
+      - name: Husk
+        weight: 2

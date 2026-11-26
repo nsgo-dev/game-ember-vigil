@@ -7,6 +7,7 @@ tool github.com/nsgo-dev/nsgo/cmd/nsgo
 require (
 	github.com/nsgo-dev/game/packages/game v0.0.0-20261125083919-59bc0354e207
 	github.com/nsgo-dev/nsgo v0.3.4
+	go.yaml.in/yaml/v3 v3.0.6
 )
 
 require (
@@ -30,7 +31,6 @@ require (
 	github.com/sergi/go-diff v1.1.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yuin/goldmark v1.8.7 // indirect
-	go.yaml.in/yaml/v3 v3.0.6 // indirect
 	golang.org/x/crypto v0.59.0 // indirect
 	golang.org/x/image v0.48.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
