@@ -56,10 +56,10 @@ const (
 
 // Menu item counts for directional keyboard/gamepad traversal.
 const (
-	pauseMenuCount       = 3 // Resume, Settings, Quit to Title
-	confirmQuitMenuCount = 2 // Confirm Quit, Cancel
-	settingsMenuCount    = 8 // Master, Music, SFX, Shake, Quality, Language, Apply, Back
-	resultsMenuCount     = 2 // Play Again, Title
+	pauseMenuCount       = 3                    // Resume, Settings, Quit to Title
+	confirmQuitMenuCount = 2                    // Confirm Quit, Cancel
+	settingsMenuCount    = settingsRowCount + 2 // the rows, Apply and Back
+	resultsMenuCount     = 2                    // Play Again, Title
 )
 
 // emberVigil is the game's shell: it owns the window, the fixed-step loop, input and the screens, and hands the run its steps.
@@ -107,6 +107,8 @@ type emberVigil struct {
 	settingsReturn phase
 	confirmQuit    *core.Signal[bool]
 	menuFocus      *core.Signal[int]
+	// stats reports the game's use while the saved settings allow it.
+	stats *usageStats
 
 	// Per-run record guard so a finished run updates persisted records at most once.
 	runRecorded   bool
@@ -198,6 +200,9 @@ func newEmberVigil(cx *core.Scope) *emberVigil {
 		},
 	}
 	g.loop.Run(cx)
+	g.stats = newStats(cx, func() bool { return g.savedSettings.Stats })
+	g.stats.page("/", "Title")
+	g.stats.beat(func() bool { return g.run != nil && g.phase.GetUntracked() == phaseArena })
 	return g
 }
 
@@ -385,9 +390,11 @@ func (g *emberVigil) adjustFocusedSetting(delta int) {
 	case 5:
 		g.cycleLanguage(delta)
 	case 6:
-		g.menuFocus.Set(7)
-	case 7:
-		g.menuFocus.Set(6)
+		g.toggleStats()
+	case settingsRowCount:
+		g.menuFocus.Set(settingsRowCount + 1)
+	case settingsRowCount + 1:
+		g.menuFocus.Set(settingsRowCount)
 	}
 }
 
@@ -477,6 +484,11 @@ func (g *emberVigil) recordResult(s Snapshot) {
 	_ = saveRecords(g.storage, next)
 	g.records.Set(next)
 	g.lastNewRecord = isNew
+	if s.Phase == PhaseVictory {
+		g.stats.event("victory")
+	} else {
+		g.stats.event("defeat")
+	}
 }
 
 // start begins a run from the wall clock's seed, which the run itself never reads, and keeps that seed for the arena's ground.
@@ -499,6 +511,7 @@ func (g *emberVigil) start() {
 	g.audio.playCue(cueUISelect)
 	g.audio.ensureMusic()
 	g.publishHUD()
+	g.stats.page("/run", "Run")
 }
 
 // choose takes card index of a level-up: the card burns away, and then the run applies it and resumes.
@@ -648,6 +661,10 @@ func (g *emberVigil) toggleShake() {
 	g.updateDraft(func(s *Settings) { s.ScreenShake = !s.ScreenShake })
 }
 
+func (g *emberVigil) toggleStats() {
+	g.updateDraft(func(s *Settings) { s.Stats = !s.Stats })
+}
+
 func (g *emberVigil) setQuality(q Quality) {
 	g.updateDraft(func(s *Settings) { s.Quality = q })
 }
@@ -753,8 +770,10 @@ func (g *emberVigil) confirm() {
 		case 5:
 			g.cycleLanguage(1)
 		case 6:
+			g.toggleStats()
+		case settingsRowCount:
 			g.applySettings()
-		case 7:
+		case settingsRowCount + 1:
 			g.closeSettings()
 		default:
 			g.applySettings()

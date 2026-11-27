@@ -39,6 +39,8 @@ type Settings struct {
 	ScreenShake  bool           `json:"screenShake"`
 	Quality      Quality        `json:"quality"`
 	Language     evstrings.Lang `json:"language"`
+	// Stats is whether the game reports its use to Umami.
+	Stats bool `json:"stats"`
 }
 
 // Records holds lifetime best stats persisted across sessions.
@@ -61,6 +63,7 @@ func defaultSettings() Settings {
 		ScreenShake:  true,
 		Quality:      QualityAuto,
 		Language:     evstrings.EN,
+		Stats:        true,
 	}
 }
 

@@ -20,7 +20,7 @@ const (
 	settingsToggleW     = 104
 	settingsOptionGap   = 4
 	settingsLabelFontPt = 14
-	settingsRowCount    = 6
+	settingsRowCount    = 7
 )
 
 // settingsRow is one row of the settings panel: its whole width, its label, and its controls left to right.
@@ -31,7 +31,7 @@ type settingsRow struct {
 	value rect
 }
 
-// settingsLayout places the settings panel: its heading, the volumes, shake, quality and language rows, and Apply and Back.
+// settingsLayout places the settings panel: its heading, the volumes, shake, quality, language and statistics rows, and Apply and Back.
 type settingsLayout struct {
 	scale          float32
 	panel, heading rect
@@ -40,25 +40,25 @@ type settingsLayout struct {
 	buttons        []rect
 }
 
-// layoutSettings lays the six rows in one column, or in two of three where that makes them larger, as on a phone held sideways.
+// layoutSettings lays the rows in one column, or in two where that makes them larger, as on a phone held sideways.
 func layoutSettings(size core.Size, safe core.Edges) settingsLayout {
 	area := overlayArea(size, safe)
 	colW := float32(settingsLabelW + 12 + settingsControlW)
 	rowsH := func(n int) float32 { return float32(n)*settingsRowH + float32(n-1)*settingsRowGap }
 	frame := float32(overlayPad + 32 + 12 + 14 + overlayButtonH + overlayPad)
 	oneW, oneH := colW+2*overlayPad, frame+rowsH(settingsRowCount)
-	twoW, twoH := 2*colW+settingsColumnGap+2*overlayPad, frame+rowsH(settingsRowCount/2)
+	perTwo := (settingsRowCount + 1) / 2
+	twoW, twoH := 2*colW+settingsColumnGap+2*overlayPad, frame+rowsH(perTwo)
 	u1 := overlayScale(size, area, oneW, oneH)
 	u2 := overlayScale(size, area, twoW, twoH)
-	cols, u, w, h := 1, u1, oneW, oneH
+	perCol, u, w, h := settingsRowCount, u1, oneW, oneH
 	if u2 > u1 {
-		cols, u, w, h = 2, u2, twoW, twoH
+		perCol, u, w, h = perTwo, u2, twoW, twoH
 	}
 	l := settingsLayout{scale: u, panel: centred(area, w*u, h*u)}
 	y := l.panel.y + overlayPad*u
 	l.heading = rect{l.panel.x, y, l.panel.w, 32 * u}
 	y += 44 * u
-	perCol := settingsRowCount / cols
 	for i := range settingsRowCount {
 		col, n := i/perCol, i%perCol
 		x := l.panel.x + overlayPad*u + float32(col)*(colW+settingsColumnGap)*u
@@ -71,7 +71,7 @@ func layoutSettings(size core.Size, safe core.Edges) settingsLayout {
 	return l
 }
 
-// settingsRowAt places row i's label and controls in r: three volumes' steps, shake's toggle, the four quality tiers and the two languages.
+// settingsRowAt places row i's label and controls in r: three volumes' steps, the shake and statistics toggles, the four quality tiers and the two languages.
 func settingsRowAt(r rect, i int, u float32) settingsRow {
 	s := settingsRow{row: r, label: rect{r.x + 8*u, r.y, settingsLabelW * u, r.h}}
 	x := r.x + r.w - settingsControlW*u
@@ -87,11 +87,11 @@ func settingsRowAt(r rect, i int, u float32) settingsRow {
 		step := settingsStepW * u
 		s.controls = []rect{{inner.x, inner.y, step, inner.h}, {inner.x + step + settingsValueW*u, inner.y, step, inner.h}}
 		s.value = rect{inner.x + step, inner.y, settingsValueW * u, inner.h}
-	case i == 3:
+	case i == 3 || i == 6:
 		s.controls = []rect{{inner.x, inner.y, settingsToggleW * u, inner.h}}
 	case i == 4:
 		options(len(qualityTiers))
-	default:
+	case i == 5:
 		options(len(evstrings.Languages))
 	}
 	return s
@@ -133,6 +133,12 @@ func (g *emberVigil) settingsControls(tr evstrings.Table, cfg Settings, i int) [
 			out = append(out, settingsControl{id: "settings-quality-" + string(tier), text: name, label: name, selected: cfg.Quality == tier, press: func() { g.setQuality(tier) }})
 		}
 		return out
+	case 6:
+		text := tr.Off
+		if cfg.Stats {
+			text = tr.On
+		}
+		return []settingsControl{{id: "settings-stats", text: text, label: tr.Stats + ", " + text, selected: cfg.Stats, press: g.toggleStats}}
 	default:
 		return []settingsControl{
 			{id: "settings-lang-en", text: tr.LanguageEN, label: tr.LanguageEN, selected: cfg.Language == evstrings.EN, press: func() { g.setLanguage(evstrings.EN) }},
@@ -143,7 +149,7 @@ func (g *emberVigil) settingsControls(tr evstrings.Table, cfg Settings, i int) [
 
 // settingsRowName is row i's label.
 func settingsRowName(tr evstrings.Table, i int) string {
-	return [settingsRowCount]string{tr.MasterVolume, tr.MusicVolume, tr.SFXVolume, tr.ScreenShake, tr.Quality, tr.Language}[i]
+	return [settingsRowCount]string{tr.MasterVolume, tr.MusicVolume, tr.SFXVolume, tr.ScreenShake, tr.Quality, tr.Language, tr.Stats}[i]
 }
 
 // volumeText is a volume's readout as a percentage.
@@ -194,8 +200,8 @@ func drawSettings(p *overlayPainter, l settingsLayout, rows [settingsRowCount][]
 			p.text(volumeText(settingsVolume(cfg, i)), cx, cy, 15*u, true, hudIvory, core.TextAlignCenter)
 		}
 	}
-	p.button("settings-apply", tr.Apply, l.buttons[0], u, buttonEmber, focus == 6)
-	p.button("settings-back", tr.Back, l.buttons[1], u, buttonPlain, focus == 7)
+	p.button("settings-apply", tr.Apply, l.buttons[0], u, buttonEmber, focus == settingsRowCount)
+	p.button("settings-back", tr.Back, l.buttons[1], u, buttonPlain, focus == settingsRowCount+1)
 	p.d.Restore()
 }
 
@@ -218,8 +224,8 @@ func (g *emberVigil) settingsView() core.Node {
 		}
 	}
 	children = append(children,
-		g.hitButton("settings-apply", tr.Apply, "", l.buttons[0], g.applySettings, func() { g.hoverMenu(6) }),
-		g.hitButton("settings-back", tr.Back, "", l.buttons[1], g.closeSettings, func() { g.hoverMenu(7) }),
+		g.hitButton("settings-apply", tr.Apply, "", l.buttons[0], g.applySettings, func() { g.hoverMenu(settingsRowCount) }),
+		g.hitButton("settings-back", tr.Back, "", l.buttons[1], g.closeSettings, func() { g.hoverMenu(settingsRowCount + 1) }),
 	)
 	return overlayLayer("settings", tr.SettingsTitle, children...)
 }
