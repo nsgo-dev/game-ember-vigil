@@ -49,6 +49,8 @@ go tool nsgo dev -target web
 go tool nsgo build
 ```
 
+每次推送到 `main`，[`.github/workflows/pages.yml`](.github/workflows/pages.yml) 都会把 Web 版发布到 GitHub Pages，前提是存储库的 Pages 来源设为 GitHub Actions。
+
 ## 开始游玩
 
 1. 在标题界面选择「开始」。

@@ -49,6 +49,8 @@ go tool nsgo dev -target web
 go tool nsgo build
 ```
 
+Every push to `main` publishes the web version to GitHub Pages through [`.github/workflows/pages.yml`](.github/workflows/pages.yml), once the repository's Pages source is GitHub Actions.
+
 ## Getting started
 
 1. Choose Start on the title screen.
