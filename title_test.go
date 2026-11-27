@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"image"
 	"testing"
 
 	"github.com/nsgo-dev/game/packages/game/input"
@@ -20,6 +22,17 @@ func drawTestTitle(kit *titleArt, t float64, embers int, focus int) []core.DrawO
 	return d.Ops
 }
 
+// pieceOps are the operations of ops that draw p's part of its image.
+func pieceOps(ops []core.DrawOp, p piece) []core.DrawOp {
+	var out []core.DrawOp
+	for _, op := range imageOps(ops, p.img) {
+		if op.X1 == p.sx && op.Y1 == p.sy && op.X2 == p.sw && op.Y2 == p.sh {
+			out = append(out, op)
+		}
+	}
+	return out
+}
+
 // TestTitleDrawsTheKitsLayersAndButtons checks that the cover draws every layer, moves between frames, scales its embers by the count it is given, and frames the buttons in the kit's states.
 func TestTitleDrawsTheKitsLayersAndButtons(t *testing.T) {
 	kit := newTitleArt(embeddedTitle)
@@ -27,20 +40,30 @@ func TestTitleDrawsTheKitsLayersAndButtons(t *testing.T) {
 		t.Skip("assets/title/ holds no full kit; TestTitleFallsBackToAStillCover covers the procedural cover")
 	}
 	ops := drawTestTitle(kit, 3, titleEmbers, 1)
-	for _, name := range []string{titleBG, titleMist, titleGlow, titleKeeper, titleCanopy, titleLogoEN, titleButton, titleButtonFocus} {
-		img, _ := kit.image(name)
-		if !drewImage(ops, img) {
-			t.Errorf("the title does not draw %s", name)
+	for _, name := range []string{titleBG, titleMist, titleGlow, titleKeeper, titleCanopy, titleLogoEN} {
+		for _, p := range kit.pieces[name] {
+			if len(pieceOps(ops, p)) == 0 {
+				t.Errorf("the title does not draw %s", name)
+			}
 		}
 	}
-	// Start and Quit are normal, Settings focused: two normal frames of nine slices each and one focused.
-	normal, _ := kit.image(titleButton)
-	if n := len(imageOps(ops, normal)); n != 2*9 {
-		t.Errorf("the title draws %d slices of the normal frame, want %d", n, 2*9)
+	// Start and Quit are normal, Settings focused: nine slices of the normal frame each, and the focused frame's nine under its pulse's nine.
+	slices := func(name string) int {
+		f, _ := kit.piece(name)
+		n := 0
+		for _, op := range imageOps(ops, f.img) {
+			if op.X1 >= f.sx && op.X1 < f.sx+f.sw && op.Y1 >= f.sy && op.Y1 < f.sy+f.sh {
+				n++
+			}
+		}
+		return n
+	}
+	if n, f := slices(titleButton), slices(titleButtonFocus); n != 2*9 || f != 2*9 {
+		t.Errorf("the title draws %d normal and %d focused slices, want %d and %d", n, f, 2*9, 2*9)
 	}
 
-	keeper, _ := kit.image(titleKeeper)
-	a, b := imageOps(ops, keeper), imageOps(drawTestTitle(kit, 4.2, titleEmbers, 1), keeper)
+	keeper, _ := kit.piece(titleKeeper)
+	a, b := pieceOps(ops, keeper), pieceOps(drawTestTitle(kit, 4.2, titleEmbers, 1), keeper)
 	if len(a) != 1 || len(b) != 1 || a[0].X == b[0].X && a[0].Y == b[0].Y {
 		t.Error("the keeper does not move between frames")
 	}
@@ -48,13 +71,43 @@ func TestTitleDrawsTheKitsLayersAndButtons(t *testing.T) {
 	count := func(embers int) int {
 		ops := drawTestTitle(kit, 3, embers, 0)
 		n := 0
-		for _, img := range kit.embers {
-			n += len(imageOps(ops, img))
+		for _, p := range kit.embers {
+			n += len(pieceOps(ops, p))
 		}
 		return n
 	}
 	if all, few := count(titleEmbers), count(titleEmbers/4); all != titleEmbers || few != titleEmbers/4 {
 		t.Errorf("the title draws %d and %d embers, want %d and %d", all, few, titleEmbers, titleEmbers/4)
+	}
+}
+
+// TestTitleFitsTheCanvasPixelCache checks that a frame of the title draws at most eight distinct pixel images of at most 8 Mi pixels together, which Apple, Windows and Linux keep between frames instead of copying again on every frame.
+func TestTitleFitsTheCanvasPixelCache(t *testing.T) {
+	kit := newTitleArt(embeddedTitle)
+	if !kit.animated() {
+		t.Skip("assets/title/ holds no full kit")
+	}
+	seen := map[*image.RGBA]bool{}
+	pixels := 0
+	for _, op := range drawTestTitle(kit, 3, titleEmbers, 1) {
+		if op.Kind != core.DrawImage || op.Image == nil || op.Image.Pixels == nil {
+			continue
+		}
+		img := op.Image.Pixels
+		dup := false
+		for other := range seen {
+			if other.Rect == img.Rect && bytes.Equal(other.Pix, img.Pix) {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			seen[img] = true
+			pixels += img.Rect.Dx() * img.Rect.Dy()
+		}
+	}
+	if len(seen) > 8 || pixels > 8<<20 {
+		t.Fatalf("a title frame draws %d images of %d pixels, more than the 8 images of 8 Mi pixels a canvas keeps", len(seen), pixels)
 	}
 }
 

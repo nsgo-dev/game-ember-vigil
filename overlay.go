@@ -312,7 +312,11 @@ func (p *overlayPainter) scrim(alpha float32) {
 
 // nineSlice draws the kit image img into r, keeping its insets (in the kit's pixels) at inset points each and stretching the middle.
 func (p *overlayPainter) nineSlice(img core.ImageSource, insets [4]float32, r rect, inset float32) {
-	iw, ih := float32(img.Size.Width), float32(img.Size.Height)
+	p.nineSliceFrom(img, 0, 0, float32(img.Size.Width), float32(img.Size.Height), insets, r, inset)
+}
+
+// nineSliceFrom is nineSlice of the part ox, oy, iw, ih of img, such as a frame packed in an atlas.
+func (p *overlayPainter) nineSliceFrom(img core.ImageSource, ox, oy, iw, ih float32, insets [4]float32, r rect, inset float32) {
 	k := inset / max(insets[0], insets[1], insets[2], insets[3])
 	top, right, bottom, left := insets[0]*k, insets[1]*k, insets[2]*k, insets[3]*k
 	if top+bottom > r.h {
@@ -323,8 +327,8 @@ func (p *overlayPainter) nineSlice(img core.ImageSource, insets [4]float32, r re
 		f := r.w / (left + right)
 		left, right = left*f, right*f
 	}
-	sx := [4]float32{0, insets[3], iw - insets[1], iw}
-	sy := [4]float32{0, insets[0], ih - insets[2], ih}
+	sx := [4]float32{ox, ox + insets[3], ox + iw - insets[1], ox + iw}
+	sy := [4]float32{oy, oy + insets[0], oy + ih - insets[2], oy + ih}
 	dx := [4]float32{r.x, r.x + left, r.x + r.w - right, r.x + r.w}
 	dy := [4]float32{r.y, r.y + top, r.y + r.h - bottom, r.y + r.h}
 	for row := range 3 {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"embed"
-	"io/fs"
 	"math"
 	"runtime"
 
@@ -76,39 +75,6 @@ const (
 	titleSwayTime  = 5
 	titleEmbers    = 40
 )
-
-// titleArt is the decoded title kit. The cover animates only when every layer, the glow and the embers loaded; otherwise the title draws a still procedural cover.
-type titleArt struct {
-	images map[string]core.ImageSource
-	embers [len(titleEmberNames)]core.ImageSource
-	cover  bool
-}
-
-// newTitleArt decodes every PNG under assets/title/ in fsys.
-func newTitleArt(fsys fs.FS) *titleArt {
-	a := &titleArt{images: loadKit(fsys, "assets/title")}
-	a.cover = true
-	for _, name := range []string{titleBG, titleMist, titleGlow, titleKeeper, titleCanopy} {
-		_, ok := a.images[name]
-		a.cover = a.cover && ok
-	}
-	for i, name := range titleEmberNames {
-		img, ok := a.images[name]
-		a.embers[i] = img
-		a.cover = a.cover && ok
-	}
-	return a
-}
-
-func (a *titleArt) image(name string) (core.ImageSource, bool) {
-	if a == nil {
-		return core.ImageSource{}, false
-	}
-	img, ok := a.images[name]
-	return img, ok
-}
-
-func (a *titleArt) animated() bool { return a != nil && a.cover }
 
 // quitShown reports whether the title offers Quit: not on a phone or tablet, where apps are not quit, nor on the web, where quitting cannot close the tab.
 func quitShown(idiom core.Idiom, goos string) bool {
@@ -202,6 +168,8 @@ type titleView struct {
 	// embers is how many embers rise, which the quality preset sets; still draws the cover without motion, as reduced motion asks.
 	embers int
 	still  bool
+	// under is whether settings covers the title, which then shows only its cover.
+	under bool
 }
 
 // drawTitle draws the title on the arena canvas: the cover, then the wordmark, the records and the painted menu fading in over it.
@@ -218,6 +186,11 @@ func drawTitle(p *overlayPainter, kit *titleArt, m *titleMotion, v titleView) {
 		drawCover(d, kit, v.l, t, v.embers, v.still)
 	} else {
 		drawCoverFallback(d, v.l)
+	}
+	if v.under {
+		// Settings covers the title, so only the still cover shows beneath it.
+		d.Restore()
+		return
 	}
 	d.SetAlpha(fade)
 	drawTitleShade(d, v.l)
@@ -236,12 +209,13 @@ func drawCover(d *core.Drawing, kit *titleArt, l titleLayout, t float64, embers 
 	k := l.k
 	drift := float32(math.Sin(2 * math.Pi * titleDriftHz * t))
 	layer := func(name string, parallax, dx, dy, zoom float32) {
-		img, _ := kit.image(name)
 		r := l.cover
-		zw, zh := r.w*zoom, r.h*zoom
-		x := r.x - (zw-r.w)/2 + (drift*titleDrift*parallax+dx)*k
-		y := r.y - (zh-r.h)/2 + dy*k
-		d.DrawImageIn(img, x, y, zw, zh)
+		x0 := r.x - r.w*(zoom-1)/2 + (drift*titleDrift*parallax+dx)*k
+		y0 := r.y - r.h*(zoom-1)/2 + dy*k
+		kz := k * zoom
+		for _, p := range kit.pieces[name] {
+			p.draw(d, x0+p.x*kz, y0+p.y*kz, p.w*kz, p.h*kz)
+		}
 	}
 	breathe := float32(0.01 * (1 + math.Sin(2*math.Pi*t/titleSwayTime/2)))
 	layer(titleBG, 0.15, 0, 0, titleZoom+breathe)
@@ -262,10 +236,10 @@ func drawCover(d *core.Drawing, kit *titleArt, l titleLayout, t float64, embers 
 	zy := l.cover.y - l.cover.h*(titleZoom-1)/2
 	gx := zx + (lanternX*titleZoom+keeperDX)*k
 	gy := zy + (lanternY*titleZoom+keeperDY)*k
-	glow, _ := kit.image(titleGlow)
+	glow, _ := kit.piece(titleGlow)
 	side := titleGlowBack * k * (0.94 + 0.12*flicker)
 	d.SetAlpha(0.75 + 0.25*flicker)
-	d.DrawImageIn(glow, gx-side/2, gy-side/2, side, side)
+	glow.draw(d, gx-side/2, gy-side/2, side, side)
 	d.SetAlpha(1)
 
 	layer(titleKeeper, 0.6, 0, keeperDY, titleZoom)
@@ -274,7 +248,7 @@ func drawCover(d *core.Drawing, kit *titleArt, l titleLayout, t float64, embers 
 	d.SetComposite(core.CompositeLighter)
 	front := titleGlowFront * k * (0.9 + 0.2*flicker)
 	d.SetAlpha(0.35 + 0.25*flicker)
-	d.DrawImageIn(glow, gx-front/2, gy-front/2, front, front)
+	glow.draw(d, gx-front/2, gy-front/2, front, front)
 	if !still {
 		for i := range embers {
 			drawEmber(d, kit, i, t, zx+keeperDX*k, zy+keeperDY*k, k*titleZoom)
@@ -301,7 +275,7 @@ func drawEmber(d *core.Drawing, kit *titleArt, i int, t float64, ox, oy, k float
 	x := x0 + math.Sin(t*1.3+r(7)*2*math.Pi)*titleSway
 	side := float32(titleEmberSide*(titleEmberMin+titleEmberK*r(8))) * k
 	d.SetAlpha(float32(math.Sin(phase * math.Pi)))
-	d.DrawImageIn(kit.embers[i%len(kit.embers)], ox+float32(x)*k-side/2, oy+float32(y)*k-side/2, side, side)
+	kit.embers[i%len(kit.embers)].draw(d, ox+float32(x)*k-side/2, oy+float32(y)*k-side/2, side, side)
 }
 
 // emberHash is a fixed pseudo-random number in [0, 1) for n.
@@ -353,8 +327,8 @@ func drawTitleLogo(p *overlayPainter, kit *titleArt, l titleLayout) {
 	if p.lang == string(evstrings.ZhCN) {
 		name = titleLogoZhCN
 	}
-	if img, ok := kit.image(name); ok {
-		p.d.DrawImageIn(img, l.logo.x, l.logo.y, l.logo.w, l.logo.h)
+	if logo, ok := kit.piece(name); ok {
+		logo.draw(p.d, l.logo.x, l.logo.y, l.logo.w, l.logo.h)
 		return
 	}
 	cx, cy := l.logo.center()
@@ -404,7 +378,7 @@ func drawTitleButton(p *overlayPainter, kit *titleArt, id, label string, r rect,
 	case focused:
 		name = titleButtonFocus
 	}
-	img, ok := kit.image(name)
+	frame, ok := kit.piece(name)
 	if !ok {
 		kind := buttonPlain
 		if id == "title-start" {
@@ -413,14 +387,13 @@ func drawTitleButton(p *overlayPainter, kit *titleArt, id, label string, r rect,
 		p.button(id, label, r, u, kind, focused)
 		return
 	}
+	p.nineSliceFrom(frame.img, frame.sx, frame.sy, frame.sw, frame.sh, buttonInsets, r, titleButtonInsetPt*u)
 	if focused {
-		pulse := 0.75 + 0.25*float32(math.Sin(p.m.clock*5))
+		// A pulse of the focused frame over itself, as a blurred shadow costs too much on every frame.
 		p.d.Save()
-		p.d.SetShadow(core.RGBA(0xffb347, 0.6*pulse*fade), 0, 0, 14*u)
-		p.nineSlice(img, buttonInsets, r, titleButtonInsetPt*u)
+		p.d.SetComposite(core.CompositeLighter).SetAlpha(0.25 * (0.5 + 0.5*float32(math.Sin(p.m.clock*5))) * fade)
+		p.nineSliceFrom(frame.img, frame.sx, frame.sy, frame.sw, frame.sh, buttonInsets, r, titleButtonInsetPt*u)
 		p.d.Restore()
-	} else {
-		p.nineSlice(img, buttonInsets, r, titleButtonInsetPt*u)
 	}
 	color := hudIvory
 	if focused {

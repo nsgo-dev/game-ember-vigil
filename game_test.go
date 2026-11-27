@@ -626,7 +626,7 @@ func TestSettingsPersistAndReload(t *testing.T) {
 	}
 	press(t, app, "id:settings-quality-high")
 	press(t, app, "id:settings-lang-zh-CN")
-	if got := app.Find("id:settings-heading").Text; got != "设置" {
+	if got := app.Find("id:settings-heading").Props.Label; got != "设置" {
 		t.Fatalf("settings heading after switching to zh-CN = %q, want 设置", got)
 	}
 	press(t, app, "id:settings-apply")

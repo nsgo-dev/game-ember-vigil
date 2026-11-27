@@ -20,4 +20,4 @@
 - Keep the camera and the world gliding with the keeper on displays faster than the run's steps, instead of jittering as it moves (#40 by @oneo-me).
 - Fill the whole window with the arena, showing more of it on wider or taller windows and seeing farther through the fog, instead of leaving bars (#42 by @oneo-me).
 - Publish the web version to GitHub Pages on every push to `main` (#44 by @oneo-me).
-- Redraw the title with an animated painted cover and a painted menu centred at the bottom, without Quit on phones, tablets and the web, and paint the touch stick and a thumb-sized pause button (#39, #43 by @oneo-me).
+- Redraw the title with an animated painted cover and a painted menu centred at the bottom, without Quit on phones, tablets and the web, draw settings in the painted HUD style, and paint the touch stick and a thumb-sized pause button (#39, #43 by @oneo-me).

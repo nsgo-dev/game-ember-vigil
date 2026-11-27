@@ -617,6 +617,7 @@ func (g *emberVigil) openSettings() {
 	g.settingsReturn = cur
 	g.savedSettings = g.settings.GetUntracked()
 	g.confirmQuit.Set(false)
+	g.overlay.openPanel()
 	g.setPhase(phaseSettings)
 	g.audio.playCue(cueUISelect)
 }
@@ -906,8 +907,23 @@ func (g *emberVigil) draw(d *core.Drawing, size core.Size) {
 	p := &overlayPainter{d: d, size: size, art: g.hudArt, icons: g.art, m: &g.overlay, tr: tr, lang: string(lang), pressed: g.pressed}
 	if ph == phaseTitle || (ph == phaseSettings && g.settingsReturn == phaseTitle) {
 		g.drawTitle(p, size, safe, ph == phaseSettings)
-		return
+	} else {
+		g.drawArena(d, p, size, safe, alpha)
 	}
+	if ph == phaseSettings {
+		tr, cfg := p.tr, g.settings.GetUntracked()
+		var rows [settingsRowCount][]settingsControl
+		for i := range rows {
+			rows[i] = g.settingsControls(tr, cfg, i)
+		}
+		drawSettings(p, layoutSettings(size, safe), rows, cfg, g.menuFocus.GetUntracked())
+	}
+}
+
+// drawArena draws the run through the viewport, the touch stick, the HUD and the in-run overlays.
+func (g *emberVigil) drawArena(d *core.Drawing, p *overlayPainter, size core.Size, safe core.Edges, alpha float64) {
+	ph := g.phase.GetUntracked()
+	tr, lang := p.tr, p.lang
 	viewport.Draw(d, size, func(d *core.Drawing, view core.Size) { g.scene.draw(d, alpha, view) })
 	g.updateStickLayout(size, safe)
 	if g.showTouchStick() {
@@ -917,7 +933,7 @@ func (g *emberVigil) draw(d *core.Drawing, size core.Size) {
 		return
 	}
 	st := g.hud.GetUntracked()
-	drawHUD(d, layoutHUD(size, safe), st, &g.hudMotion, g.hudArt, g.art, tr, string(lang), ph == phaseArena, g.pausePushed)
+	drawHUD(d, layoutHUD(size, safe), st, &g.hudMotion, g.hudArt, g.art, tr, lang, ph == phaseArena, g.pausePushed)
 	switch {
 	case ph == phasePaused:
 		confirm := g.confirmQuit.GetUntracked()
@@ -930,7 +946,7 @@ func (g *emberVigil) draw(d *core.Drawing, size core.Size) {
 	}
 }
 
-// drawTitle draws the title on the canvas, its menu focused as the shell's; under settings it shows only the still cover.
+// drawTitle draws the title on the canvas, its menu focused as the shell's; under settings it shows only the cover.
 func (g *emberVigil) drawTitle(p *overlayPainter, size core.Size, safe core.Edges, under bool) {
 	items := g.titleItems(p.tr)
 	embers := titleEmbers
@@ -946,10 +962,7 @@ func (g *emberVigil) drawTitle(p *overlayPainter, size core.Size, safe core.Edge
 		embers: embers,
 		still:  g.cx.Env().ReduceMotion(),
 	}
-	if under {
-		// Settings covers the menu, so only the cover shows beneath it.
-		v.items = nil
-	}
+	v.under = under
 	drawTitle(p, g.titleArt, &g.titleMotion, v)
 }
 
