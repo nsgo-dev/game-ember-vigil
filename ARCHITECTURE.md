@@ -19,6 +19,7 @@ Ember Vigil is an NSGo app with one fixed-step game loop. A run is simulated hea
 | `settings.go` | The canvas settings panel: its layout, painting and the controls over it |
 | `screens.go` | The invisible native buttons over the canvas title and overlays |
 | `audio.go`, `save.go`, `strings/` | Mixer and cues; records and settings; English and Chinese strings |
+| `stats*.go` | Anonymous usage statistics sent to Umami while the settings allow it |
 | `*_test.go` | Headless shell, run and project tests |
 
 ## Boundaries
@@ -41,7 +42,7 @@ Ember Vigil is an NSGo app with one fixed-step game loop. A run is simulated hea
 
 ## Data and state
 
-`game.yaml` holds the window, the 480×270 virtual screen (expanded to fill the window) and the input map. `data/*.yaml` holds the balance. Two save slots live in `core.Storage`: settings (volumes, language, quality, shake) and records (best time, kills, level, wins). A run is not saved: closing the app ends it. There is no account, cloud or network state.
+`game.yaml` holds the window, the 480×270 virtual screen (expanded to fill the window) and the input map. `data/*.yaml` holds the balance. Two save slots live in `core.Storage`: settings (volumes, language, quality, shake, statistics) and records (best time, kills, level, wins), beside a random install ID for the statistics. A run is not saved: closing the app ends it. There is no account or cloud state; the only network traffic is the usage statistics, a pageview on launch and on each run, an event when a run ends and a heartbeat each minute of play, which the settings turn off and builds of `nsgo dev`, tests and local web servers never send.
 
 ## Verification
 

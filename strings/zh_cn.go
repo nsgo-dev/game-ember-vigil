@@ -66,6 +66,7 @@ var zhCNTable = Table{
 	Language:       "语言",
 	LanguageEN:     "English",
 	LanguageZhCN:   "简体中文",
+	Stats:          "使用统计",
 	DecreasePrefix: "降低",
 	IncreasePrefix: "提高",
 	Apply:          "保存",

@@ -66,6 +66,7 @@ var enTable = Table{
 	Language:       "Language",
 	LanguageEN:     "English",
 	LanguageZhCN:   "简体中文",
+	Stats:          "Usage Stats",
 	DecreasePrefix: "Decrease ",
 	IncreasePrefix: "Increase ",
 	Apply:          "Apply",

@@ -88,6 +88,7 @@ type Table struct {
 	Language       string
 	LanguageEN     string
 	LanguageZhCN   string
+	Stats          string
 	DecreasePrefix string
 	IncreasePrefix string
 	Apply          string
