@@ -33,6 +33,10 @@ const (
 	hudPipUnlit    = "pip_unlit"
 	hudPause       = "pause_normal"
 	hudPausePushed = "pause_pressed"
+	// The touch stick's pieces, which the shell draws under the HUD.
+	hudStickBase       = "stick_base"
+	hudStickKnob       = "stick_knob_idle"
+	hudStickKnobActive = "stick_knob_active"
 )
 
 // The fills' active ranges in the kit's pixels, from assets/hud/README.md: health empties from the top of its glass chamber, XP and the boss bar fill from the left of their troughs.
@@ -94,30 +98,7 @@ type hudArt struct {
 
 // newHUDArt decodes every PNG under assets/hud/ in fsys, skipping what is missing or unreadable.
 func newHUDArt(fsys fs.FS) *hudArt {
-	a := &hudArt{images: map[string]core.ImageSource{}}
-	if fsys != nil {
-		entries, _ := fs.ReadDir(fsys, "assets/hud")
-		for _, e := range entries {
-			name := e.Name()
-			if e.IsDir() || len(name) < 5 || name[len(name)-4:] != ".png" {
-				continue
-			}
-			raw, err := fs.ReadFile(fsys, "assets/hud/"+name)
-			if err != nil {
-				continue
-			}
-			rgba, err := decodePNGToRGBA(raw)
-			if err != nil {
-				continue
-			}
-			b := rgba.Bounds()
-			a.images[name[:len(name)-4]] = core.ImageSource{
-				Pixels:  rgba,
-				Version: 1,
-				Size:    core.Size{Width: core.Points(b.Dx()), Height: core.Points(b.Dy())},
-			}
-		}
-	}
+	a := &hudArt{images: loadKit(fsys, "assets/hud")}
 	a.numerals = true
 	for i := range a.digits {
 		img, ok := a.images["digit_"+strconv.Itoa(i)]
@@ -132,6 +113,36 @@ func newHUDArt(fsys fs.FS) *hudArt {
 		a.numerals = false
 	}
 	return a
+}
+
+// loadKit decodes every PNG in dir of fsys by its name without the extension, skipping what is missing or unreadable.
+func loadKit(fsys fs.FS, dir string) map[string]core.ImageSource {
+	images := map[string]core.ImageSource{}
+	if fsys == nil {
+		return images
+	}
+	entries, _ := fs.ReadDir(fsys, dir)
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || len(name) < 5 || name[len(name)-4:] != ".png" {
+			continue
+		}
+		raw, err := fs.ReadFile(fsys, dir+"/"+name)
+		if err != nil {
+			continue
+		}
+		rgba, err := decodePNGToRGBA(raw)
+		if err != nil {
+			continue
+		}
+		b := rgba.Bounds()
+		images[name[:len(name)-4]] = core.ImageSource{
+			Pixels:  rgba,
+			Version: 1,
+			Size:    core.Size{Width: core.Points(b.Dx()), Height: core.Points(b.Dy())},
+		}
+	}
+	return images
 }
 
 // image returns the named piece, or false when the kit lacks it.
@@ -199,7 +210,9 @@ func layoutHUD(size core.Size, safe core.Edges) hudLayout {
 	}
 	l.bottom = slotY + (slotSide+pipSide/2)*s
 
-	l.pause = rect{right - pauseSide*s, top, pauseSide * s, pauseSide * s}
+	// The pause button never shrinks under a thumb's width, however small the window.
+	ps := max(pauseSide*s, buttonSide)
+	l.pause = rect{right - ps, top, ps, ps}
 	l.pauseHit = l.pause.grow(buttonSide)
 
 	mid := w / 2

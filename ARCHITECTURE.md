@@ -1,6 +1,6 @@
 # Ember Vigil architecture
 
-Ember Vigil is an NSGo app with one fixed-step game loop. A run is simulated headlessly at 60 Hz and drawn, with its HUD and its level-up, pause and results overlays, into one canvas; native NSGo views show the title and settings and lie, invisible, over the canvas's buttons. YAML files under `data/` hold the balance; the shell owns screens, input and saves.
+Ember Vigil is an NSGo app with one fixed-step game loop. A run is simulated headlessly at 60 Hz and drawn, with its HUD and its level-up, pause and results overlays, into one canvas, which also draws the animated title and settings; invisible native NSGo views lie over the canvas's buttons. YAML files under `data/` hold the balance; the shell owns screens, input and saves.
 
 ## Code map
 
@@ -14,8 +14,10 @@ Ember Vigil is an NSGo app with one fixed-step game loop. A run is simulated hea
 | `data.go`, `data/` | Tuning YAML and its loaders: version checked, unknown fields refused, canonical round trip |
 | `art.go`, `draw.go`, `quality.go` | Palette, embedded sprite-sheet atlases with procedural fallback; world, lighting, effects and quality presets |
 | `hud.go` | The canvas HUD: the `assets/hud/` kit with procedural fallback, its layout, motion and pause hit area |
+| `title.go` | The canvas title: the `assets/title/` kit with a still procedural fallback, its layout, cover motion and menu |
 | `overlay.go` | The canvas level-up cards, pause and results: layout, deal, lift and burn motion, and their painting |
-| `screens.go` | Native title and settings, and the invisible buttons over the canvas overlays |
+| `settings.go` | The canvas settings panel: its layout, painting and the controls over it |
+| `screens.go` | The invisible native buttons over the canvas title and overlays |
 | `audio.go`, `save.go`, `strings/` | Mixer and cues; records and settings; English and Chinese strings |
 | `*_test.go` | Headless shell, run and project tests |
 
@@ -24,8 +26,8 @@ Ember Vigil is an NSGo app with one fixed-step game loop. A run is simulated hea
 - `run.go` knows nothing about NSGo views, devices, sound, storage or wall-clock time. It takes one step of controls and a fixed `dt`, and returns a snapshot and the step's events.
 - The shell turns input into controls and events into sounds, screen changes and saves. A rule never lives in a view, and a view never mutates a run.
 - Tuning lives in `data/*.yaml`, versioned and canonical, with unknown fields refused. Constants in code only name things no designer would tune.
-- `art.go` and `hud.go` load embedded stylized 2D sprite sheets (`assets/sprites/`), arena environment tiles and props (`assets/environment/`), card icons (`assets/icons/`) and the HUD kit (`assets/hud/`), falling back to the procedural atlas and ground when any asset is absent, and paints the ground once per run from its seed.
-- One canvas draws the world and, at the canvas's real size, the HUD and the in-run overlays. The title and settings are native views above it. Both read run snapshots through a signal instead of polling the simulation.
+- `art.go` and `hud.go` load embedded stylized 2D sprite sheets (`assets/sprites/`), arena environment tiles and props (`assets/environment/`), card icons (`assets/icons/`), the HUD kit (`assets/hud/`) and the title kit (`assets/title/`), falling back to the procedural atlas and ground when any asset is absent, and paints the ground once per run from its seed.
+- One canvas draws the title or the world and, at the canvas's real size, the HUD and the in-run overlays. Invisible native views above it take the presses. Both read run snapshots through a signal instead of polling the simulation.
 - A seed plus a list of controls replays a run. The map, spawns, offers and drops all derive from the run's streams.
 - Pin `nsgo-dev/game` and `nsgo-dev/nsgo`; upgrade both in a change of its own after the tests pass. No cgo and no hand-written C.
 
@@ -43,11 +45,11 @@ Ember Vigil is an NSGo app with one fixed-step game loop. A run is simulated hea
 
 ## Verification
 
-Headless tests play a run from its own API: replays, movement, contact, kills, embers, level cards, defeat and three minutes of waves. `nsgotest` tests play the shell from the title into the arena, through a pause and back, press the canvas pause button, take a level-up card by tap, key, hover and gamepad, and read the HUD through its state and the canvas's label and the defeat overlay. Canvas tests check a frame's ground and sprites, the camera's clamp, a seed's ground and the HUD's fills, slots, boss bar, fallback and layout, and a benchmark keeps two hundred enemies and the HUD inside the frame budget. `go tool nsgo check -target macos,windows,linux,web` covers builds. Frame pacing, gamepad feel, sound and the read of the fog need a manual run.
+Headless tests play a run from its own API: replays, movement, contact, kills, embers, level cards, defeat and three minutes of waves. `nsgotest` tests play the shell from the title into the arena, through a pause and back, press the canvas pause button, take a level-up card by tap, key, hover and gamepad, hide Quit on phones, and read the HUD through its state and the canvas's label and the defeat overlay. Canvas tests check a frame's ground and sprites, the camera's clamp, a seed's ground and the HUD's fills, slots, boss bar, fallback and layout, and a benchmark keeps two hundred enemies and the HUD inside the frame budget. `go tool nsgo check -target macos,windows,linux,web` covers builds. Frame pacing, gamepad feel, sound and the read of the fog need a manual run.
 
 ## Subjects
 
 | Document | When to read |
 | --- | --- |
 | [The run model](docs/architecture/run.md) | Changing simulation, spawning, collision or upgrades |
-| [The arena](docs/architecture/arena.md) | Changing the canvas, the camera, the light, the fog, the effects or the HUD |
+| [The arena](docs/architecture/arena.md) | Changing the canvas, the camera, the light, the fog, the effects, the HUD, the touch controls or the title |

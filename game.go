@@ -56,7 +56,6 @@ const (
 
 // Menu item counts for directional keyboard/gamepad traversal.
 const (
-	titleMenuCount       = 3 // Start, Settings, Quit
 	pauseMenuCount       = 3 // Resume, Settings, Quit to Title
 	confirmQuitMenuCount = 2 // Confirm Quit, Cancel
 	settingsMenuCount    = 8 // Master, Music, SFX, Shake, Quality, Language, Apply, Back
@@ -73,10 +72,13 @@ type emberVigil struct {
 	stick   *input.VirtualStick
 	art     *art
 	hudArt  *hudArt
-	scene   *arenaRenderer
-	audio   *audioController
-	quality *quality.Selector
-	run     *Run
+	// titleArt is the title's kit, and titleMotion the cover's clock.
+	titleArt    *titleArt
+	titleMotion titleMotion
+	scene       *arenaRenderer
+	audio       *audioController
+	quality     *quality.Selector
+	run         *Run
 
 	// seed is the run's seed, which the arena's ground decoration is drawn from, so it stays put for the whole run.
 	seed uint64
@@ -137,6 +139,7 @@ func newEmberVigil(cx *core.Scope) *emberVigil {
 		actions:        input.NewActions(),
 		art:            newArt(),
 		hudArt:         newHUDArt(embeddedHUD),
+		titleArt:       newTitleArt(embeddedTitle),
 		phase:          core.NewSignal(cx, phaseTitle),
 		frame:          core.NewSignal(cx, uint64(0)),
 		hud:            core.NewSignal(cx, hudState{}),
@@ -226,6 +229,10 @@ func (g *emberVigil) update(dt time.Duration) {
 		g.hudMotion.step(g.hud.GetUntracked(), dt.Seconds())
 	}
 	g.overlay.step(dt.Seconds(), g.cardFocus)
+	// The cover moves only while the title shows, and stays still when the system asks for less motion.
+	if g.phase.GetUntracked() == phaseTitle && !g.cx.Env().ReduceMotion() {
+		g.titleMotion.step(dt.Seconds())
+	}
 	if index, ok := g.overlay.burnt(); ok {
 		g.commitChoice(index)
 	}
@@ -292,7 +299,13 @@ func (g *emberVigil) handleMenuNavigation() {
 	p := g.phase.GetUntracked()
 	switch p {
 	case phaseTitle:
-		g.stepVerticalFocus(titleMenuCount)
+		// The menu is a row, so either axis moves along it, wrapping over the buttons shown.
+		n := len(g.titleItems(g.tr()))
+		if g.actions.JustPressed(actionLeft) || g.actions.JustPressed(actionUp) {
+			g.moveFocus(-1, n)
+		} else if g.actions.JustPressed(actionRight) || g.actions.JustPressed(actionDown) {
+			g.moveFocus(1, n)
+		}
 		if g.actions.JustPressed(actionConfirm) {
 			g.confirm()
 		}
@@ -587,6 +600,7 @@ func (g *emberVigil) quitRun() {
 	g.confirmQuit.Set(false)
 	g.run = nil
 	g.runRecorded = false
+	g.titleMotion = titleMotion{}
 	g.setPhase(phaseTitle)
 	g.audio.setPaused(false)
 	g.audio.stopMusic()
@@ -603,6 +617,7 @@ func (g *emberVigil) openSettings() {
 	g.settingsReturn = cur
 	g.savedSettings = g.settings.GetUntracked()
 	g.confirmQuit.Set(false)
+	g.overlay.openPanel()
 	g.setPhase(phaseSettings)
 	g.audio.playCue(cueUISelect)
 }
@@ -700,14 +715,8 @@ func (g *emberVigil) confirm() {
 	focus := g.menuFocus.GetUntracked()
 	switch g.phase.GetUntracked() {
 	case phaseTitle:
-		switch focus {
-		case 1:
-			g.openSettings()
-		case 2:
-			g.quitApp()
-		default:
-			g.start()
-		}
+		items := g.titleItems(g.tr())
+		items[max(0, min(len(items)-1, focus))].press()
 	case phaseArena:
 		if g.run != nil {
 			if p := g.run.Snapshot().Phase; p == PhaseVictory || p == PhaseDefeat {
@@ -892,20 +901,39 @@ func (g *emberVigil) draw(d *core.Drawing, size core.Size) {
 	g.size = size
 	alpha := g.alpha
 	safe := g.cx.Env().SafeArea()
+	ph := g.phase.GetUntracked()
+	lang := g.settings.GetUntracked().Language
+	tr := evstrings.For(lang)
+	p := &overlayPainter{d: d, size: size, art: g.hudArt, icons: g.art, m: &g.overlay, tr: tr, lang: string(lang), pressed: g.pressed}
+	if ph == phaseTitle || (ph == phaseSettings && g.settingsReturn == phaseTitle) {
+		g.drawTitle(p, size, safe, ph == phaseSettings)
+	} else {
+		g.drawArena(d, p, size, safe, alpha)
+	}
+	if ph == phaseSettings {
+		tr, cfg := p.tr, g.settings.GetUntracked()
+		var rows [settingsRowCount][]settingsControl
+		for i := range rows {
+			rows[i] = g.settingsControls(tr, cfg, i)
+		}
+		drawSettings(p, layoutSettings(size, safe), rows, cfg, g.menuFocus.GetUntracked())
+	}
+}
+
+// drawArena draws the run through the viewport, the touch stick, the HUD and the in-run overlays.
+func (g *emberVigil) drawArena(d *core.Drawing, p *overlayPainter, size core.Size, safe core.Edges, alpha float64) {
+	ph := g.phase.GetUntracked()
+	tr, lang := p.tr, p.lang
 	viewport.Draw(d, size, func(d *core.Drawing, view core.Size) { g.scene.draw(d, alpha, view) })
 	g.updateStickLayout(size, safe)
 	if g.showTouchStick() {
-		g.pad.Draw(d, emberStickStyle())
+		drawStick(d, g.stick, g.hudArt, g.pad)
 	}
-	ph := g.phase.GetUntracked()
-	if g.run == nil || ph == phaseTitle {
+	if g.run == nil {
 		return
 	}
-	lang := g.settings.GetUntracked().Language
-	tr := evstrings.For(lang)
 	st := g.hud.GetUntracked()
-	drawHUD(d, layoutHUD(size, safe), st, &g.hudMotion, g.hudArt, g.art, tr, string(lang), ph == phaseArena, g.pausePushed)
-	p := &overlayPainter{d: d, size: size, art: g.hudArt, icons: g.art, m: &g.overlay, tr: tr, lang: string(lang), pressed: g.pressed}
+	drawHUD(d, layoutHUD(size, safe), st, &g.hudMotion, g.hudArt, g.art, tr, lang, ph == phaseArena, g.pausePushed)
 	switch {
 	case ph == phasePaused:
 		confirm := g.confirmQuit.GetUntracked()
@@ -916,4 +944,52 @@ func (g *emberVigil) draw(d *core.Drawing, size core.Size) {
 	case st.phase == PhaseVictory || st.phase == PhaseDefeat:
 		drawResults(p, layoutResults(size, safe), st, resultsTextOf(tr, st, g.records.GetUntracked()), g.menuFocus.GetUntracked())
 	}
+}
+
+// drawTitle draws the title on the canvas, its menu focused as the shell's; under settings it shows only the cover.
+func (g *emberVigil) drawTitle(p *overlayPainter, size core.Size, safe core.Edges, under bool) {
+	items := g.titleItems(p.tr)
+	embers := titleEmbers
+	if g.quality != nil {
+		embers = g.quality.Preset().Particles(titleEmbers)
+	}
+	v := titleView{
+		l:      layoutTitle(size, safe, len(items)),
+		items:  items,
+		focus:  g.menuFocus.GetUntracked(),
+		tr:     p.tr,
+		rec:    g.records.GetUntracked(),
+		embers: embers,
+		still:  g.cx.Env().ReduceMotion(),
+	}
+	v.under = under
+	drawTitle(p, g.titleArt, &g.titleMotion, v)
+}
+
+// Stick piece sizes in points for a stick of stickRadius, from assets/hud/README.md.
+const (
+	stickBasePt = 128
+	stickKnobPt = 56
+)
+
+// drawStick draws the virtual stick in the HUD kit's base and knob, idle or held, or the pad's flat circles when the kit lacks them.
+func drawStick(d *core.Drawing, s *input.VirtualStick, kit *hudArt, pad *input.VirtualPad) {
+	knobName := hudStickKnob
+	if s.Active() {
+		knobName = hudStickKnobActive
+	}
+	base, okBase := kit.image(hudStickBase)
+	knob, okKnob := kit.image(knobName)
+	if !okBase || !okKnob {
+		pad.Draw(d, emberStickStyle())
+		return
+	}
+	k := s.Radius / stickRadius
+	b, n := s.BasePosition(), s.KnobPosition()
+	bs, ks := stickBasePt*k, stickKnobPt*k
+	d.Save()
+	d.SetImageSmoothing(true)
+	d.DrawImageIn(base, float32(b.X)-bs/2, float32(b.Y)-bs/2, bs, bs)
+	d.DrawImageIn(knob, float32(n.X)-ks/2, float32(n.Y)-ks/2, ks, ks)
+	d.Restore()
 }

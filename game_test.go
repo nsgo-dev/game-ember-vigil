@@ -218,8 +218,9 @@ func TestSettingsPlaceholderReturnsToTheTitle(t *testing.T) {
 	app.Find("id:title")
 }
 
+// TestTitleQuitQuitsTheApp checks that a desktop title quits the app from its Quit button.
 func TestTitleQuitQuitsTheApp(t *testing.T) {
-	app, _ := startEmberVigil(t)
+	app, _ := startEmberVigil(t, nsgotest.Idiom(core.IdiomDesktop))
 
 	press(t, app, "role:button Quit")
 	if app.Quits != 1 {
@@ -527,19 +528,87 @@ func TestTheArenaCanvasDrawsTheWorld(t *testing.T) {
 	}
 }
 
-// TestTitleArtAndFallback checks that the title displays embedded Title.png key art and cleanly falls back when absent.
+// TestTitleArtAndFallback checks that the title shows the animated cover from the kit, and the still procedural cover when a layer is missing.
 func TestTitleArtAndFallback(t *testing.T) {
-	app, _ := startEmberVigil(t)
+	app, g := startEmberVigil(t)
+	if !g.titleArt.animated() {
+		t.Fatal("the embedded title kit does not animate the cover")
+	}
 	app.Find("id:title-art")
 	app.Find("id:title-records")
 
 	appFallback := nsgotest.Start(t, func(cx *core.Scope) core.Node {
 		g := newEmberVigil(cx)
-		g.art.hasTitleArt = false
+		g.titleArt = newTitleArt(nil)
 		return g.view()
 	}, nsgotest.Size(960, 540), nsgotest.ManualFrames())
 	appFallback.Advance(3 * frame)
 	appFallback.Find("id:title-art-fallback")
+	press(t, appFallback, "id:title-start")
+}
+
+// TestTitleHidesQuitOnPhones checks that a phone's title offers only Start and Settings, and that the keyboard's focus wraps over those two.
+func TestTitleHidesQuitOnPhones(t *testing.T) {
+	app, g := startEmberVigil(t, nsgotest.Idiom(core.IdiomPhone))
+	app.Find("id:title-start")
+	app.Find("id:title-settings")
+	if n := len(app.Query("id:title-quit")); n != 0 {
+		t.Fatalf("a phone's title shows %d Quit buttons, want none", n)
+	}
+	g.moveFocus(1, len(g.titleItems(g.tr())))
+	g.moveFocus(1, len(g.titleItems(g.tr())))
+	if f := g.menuFocus.Get(); f != 0 {
+		t.Fatalf("focus after two steps over two buttons = %d, want 0", f)
+	}
+	g.confirm()
+	if g.phase.Get() != phaseArena {
+		t.Fatalf("confirming the first button gave phase %v, want phaseArena", g.phase.Get())
+	}
+	for _, c := range []struct {
+		idiom core.Idiom
+		goos  string
+		want  bool
+	}{
+		{core.IdiomDesktop, "darwin", true},
+		{core.IdiomPhone, "android", false},
+		{core.IdiomTablet, "ios", false},
+		{core.IdiomDesktop, "js", false},
+	} {
+		if got := quitShown(c.idiom, c.goos); got != c.want {
+			t.Errorf("quitShown(%v, %q) = %v, want %v", c.idiom, c.goos, got, c.want)
+		}
+	}
+}
+
+// TestTitleLayoutKeepsTheMenuAtTheBottomCentre checks the menu sits centred along the bottom of the safe area at desktop and phone sizes, with every button a thumb's size.
+func TestTitleLayoutKeepsTheMenuAtTheBottomCentre(t *testing.T) {
+	for _, c := range []struct {
+		size core.Size
+		safe core.Edges
+		n    int
+	}{
+		{core.Size{Width: 1280, Height: 720}, core.Edges{}, 3},
+		{core.Size{Width: 844, Height: 390}, core.Edges{Left: 47, Right: 47, Bottom: 21}, 2},
+		{core.Size{Width: 390, Height: 844}, core.Edges{Top: 47, Bottom: 34}, 2},
+	} {
+		l := layoutTitle(c.size, c.safe, c.n)
+		first, last := l.buttons[0], l.buttons[len(l.buttons)-1]
+		left, right := first.x-float32(c.safe.Left), float32(c.size.Width-c.safe.Right)-(last.x+last.w)
+		if d := left - right; d > 1 || d < -1 {
+			t.Errorf("%v: the menu is off centre by %v", c.size, d)
+		}
+		if bottom := float32(c.size.Height - c.safe.Bottom); last.y+last.h > bottom || last.y+last.h < bottom-overlayMargin-1 {
+			t.Errorf("%v: the menu ends at %v, not at the safe area's bottom %v", c.size, last.y+last.h, bottom)
+		}
+		for _, b := range l.buttons {
+			if b.h < buttonSide || b.w < buttonSide {
+				t.Errorf("%v: a button is %vx%v", c.size, b.w, b.h)
+			}
+		}
+		if l.recordsHeading.y < l.logo.y+l.logo.h {
+			t.Errorf("%v: the records overlap the wordmark", c.size)
+		}
+	}
 }
 
 // TestSettingsPersistAndReload checks that edited settings apply immediately, persist to core.Storage and reload on restart.
@@ -557,12 +626,12 @@ func TestSettingsPersistAndReload(t *testing.T) {
 	}
 	press(t, app, "id:settings-quality-high")
 	press(t, app, "id:settings-lang-zh-CN")
-	if got := app.Find("id:settings-heading").Text; got != "设置" {
+	if got := app.Find("id:settings-heading").Props.Label; got != "设置" {
 		t.Fatalf("settings heading after switching to zh-CN = %q, want 设置", got)
 	}
 	press(t, app, "id:settings-apply")
 	app.Find("id:title")
-	if got := app.Find("id:title-heading").Text; got != "余烬守望" {
+	if got := app.Find("id:title-heading").Props.Label; got != "余烬守望" {
 		t.Fatalf("title heading after applying zh-CN = %q, want 余烬守望", got)
 	}
 
@@ -584,7 +653,7 @@ func TestSettingsPersistAndReload(t *testing.T) {
 	if got.Language != evstrings.ZhCN {
 		t.Fatalf("reloaded Language = %q, want %q", got.Language, evstrings.ZhCN)
 	}
-	if heading := app2.Find("id:title-heading").Text; heading != "余烬守望" {
+	if heading := app2.Find("id:title-heading").Props.Label; heading != "余烬守望" {
 		t.Fatalf("reloaded title heading = %q, want 余烬守望", heading)
 	}
 }
@@ -645,13 +714,13 @@ func TestPauseSettingsRoundTripKeepsClockFrozen(t *testing.T) {
 
 // TestLanguageSwitchUpdatesAllScreens checks that switching to Simplified Chinese translates title, settings, HUD, boss bar, level-up cards, pause, quit confirmation and results.
 func TestLanguageSwitchUpdatesAllScreens(t *testing.T) {
-	app, g := startEmberVigil(t)
+	app, g := startEmberVigil(t, nsgotest.Idiom(core.IdiomDesktop))
 	press(t, app, "id:title-settings")
 	press(t, app, "id:settings-lang-zh-CN")
 	press(t, app, "id:settings-apply")
 
 	// Title screen
-	if got := app.Find("id:title-heading").Text; got != "余烬守望" {
+	if got := app.Find("id:title-heading").Props.Label; got != "余烬守望" {
 		t.Fatalf("zh-CN title = %q, want 余烬守望", got)
 	}
 	app.Find("role:button 开始")
@@ -728,10 +797,10 @@ func TestRecordsUpdateOncePerRunAndPersist(t *testing.T) {
 	wantKills := g.run.Snapshot().Kills
 	persisted := storageSnapshot(app.Storage())
 	app2, g2 := startEmberVigil(t, nsgotest.Storage(persisted))
-	if got := app2.Find("id:title-record-wins").Text; got != "Wins 1" {
+	if got := app2.Find("id:title-record-wins").Props.Label; got != "Wins 1" {
 		t.Fatalf("reloaded title wins = %q, want Wins 1", got)
 	}
-	if got := app2.Find("id:title-record-kills").Text; got != evstrings.For(evstrings.EN).BestKills(wantKills) {
+	if got := app2.Find("id:title-record-kills").Props.Label; got != evstrings.For(evstrings.EN).BestKills(wantKills) {
 		t.Fatalf("reloaded title kills = %q, want %q", got, evstrings.For(evstrings.EN).BestKills(wantKills))
 	}
 
