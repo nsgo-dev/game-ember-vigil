@@ -15,8 +15,6 @@ var (
 	textColor      = core.RGB(0xf8fafc)
 	dimColor       = core.RGB(0x8a93a8)
 	panelColor     = core.RGBA(0x111827, 0.92)
-	titleScrim     = core.RGBA(0x0b0d17, 0.78)
-	cardColor      = core.RGBA(0x1a2234, 0.96)
 	cardBorder     = core.RGBA(0x3b4a66, 0.9)
 	buttonColor    = core.RGB(0xc2410c)
 	secondaryColor = core.RGB(0x27314a)
@@ -239,108 +237,39 @@ func (g *emberVigil) resultsOverlay() core.Node {
 	)
 }
 
-// title is the first screen: full-bleed title key art (or dark ash-and-ember fallback) with title, best records and menu buttons in the left third.
+// title is the native layer over the canvas's title: what the cover, the wordmark and the records show for assistive technology, and one invisible button over each painted menu button.
 func (g *emberVigil) title() core.Node {
 	tr := g.tr()
-	rec := g.records.Get()
-	focus := g.menuFocus.Get()
-
-	var backdrop core.Node
-	if img, ok := g.art.titleKeyArt(); ok {
-		backdrop = core.Image{
-			TestID:     "title-art",
-			Label:      tr.TitleArtLabel,
-			Source:     img,
-			ResizeMode: core.Cover,
-			Style:      fill(),
-		}
-	} else {
-		backdrop = core.View{
-			TestID: "title-art-fallback",
-			Style: core.Style{
-				Position:   core.Absolute,
-				Top:        core.Pt(0),
-				Right:      core.Pt(0),
-				Bottom:     core.Pt(0),
-				Left:       core.Pt(0),
-				Background: barColor,
-			},
-		}
+	items := g.titleItems(tr)
+	l := layoutTitle(g.viewSize.Get(), g.cx.Env().SafeArea(), len(items))
+	art := "title-art"
+	if !g.titleArt.animated() {
+		art = "title-art-fallback"
 	}
-
-	var recordChildren []core.Node
-	if rec.HasRecord {
-		recordChildren = []core.Node{
-			label("title-records-heading", tr.BestRecords, 12, xpColor),
-			label("title-record-time", tr.BestTime(clockText(rec.BestTime)), 12, textColor),
-			label("title-record-kills", tr.BestKills(rec.BestKills), 12, textColor),
-			label("title-record-level", tr.BestLevel(rec.BestLevel), 12, textColor),
-			label("title-record-wins", tr.Wins(rec.Wins), 12, dimColor),
-		}
-	} else {
-		recordChildren = []core.Node{
-			label("title-records-heading", tr.BestRecords, 12, xpColor),
-			label("title-records-empty", tr.NoRecordsYet, 12, dimColor),
-		}
+	records := titleRecordTexts(tr, g.records.Get())
+	recordIDs := []string{"title-record-time", "title-record-kills", "title-record-level", "title-record-wins"}
+	if len(records) == 1 {
+		recordIDs = []string{"title-records-empty"}
 	}
-
-	return core.View{
-		TestID: "title",
-		Label:  tr.GameTitle,
-		Style: core.Style{
-			Position:   core.Absolute,
-			Top:        core.Pt(0),
-			Right:      core.Pt(0),
-			Bottom:     core.Pt(0),
-			Left:       core.Pt(0),
-			Direction:  core.Row,
-			AlignItems: core.AlignStretch,
-			Background: barColor,
-		},
-		Children: []core.Node{
-			backdrop,
-			core.View{
-				Style: core.Style{
-					Width:          core.Pct(36),
-					MinWidth:       core.Pt(240),
-					MaxWidth:       core.Pt(380),
-					Height:         core.Pct(100),
-					Background:     titleScrim,
-					Padding:        core.Symmetric(14, 20),
-					PaddingEnv:     core.EnvAll(core.EnvSafeArea),
-					Direction:      core.Column,
-					AlignItems:     core.AlignStart,
-					JustifyContent: core.JustifyCenter,
-					Gap:            10,
-				},
-				Children: []core.Node{
-					core.Text{
-						TestID:  "title-heading",
-						Content: tr.GameTitle,
-						Style:   core.Style{Color: textColor, FontSize: 28, FontWeight: core.FontWeightBold},
-					},
-					core.View{
-						TestID: "title-records",
-						Style: core.Style{
-							Direction:    core.Column,
-							AlignItems:   core.AlignStart,
-							Gap:          3,
-							Background:   cardColor,
-							BorderWidth:  1,
-							BorderColor:  cardBorder,
-							CornerRadius: 10,
-							Padding:      core.Symmetric(10, 14),
-							MinWidth:     core.Pt(menuButtonWidth),
-						},
-						Children: recordChildren,
-					},
-					actionButton("title-start", tr.Start, menuButtonWidth, buttonColor, focus == 0, g.start),
-					actionButton("title-settings", tr.Settings, menuButtonWidth, secondaryColor, focus == 1, g.openSettings),
-					actionButton("title-quit", tr.Quit, menuButtonWidth, secondaryColor, focus == 2, g.quitApp),
-				},
-			},
-		},
+	heading := l.recordsHeading
+	recordViews := []core.Node{infoView("title-records-heading", tr.BestRecords, rect{0, 0, heading.w, heading.h})}
+	for i, text := range records {
+		r := l.records[i]
+		if len(records) == 1 {
+			r.w *= 4
+		}
+		recordViews = append(recordViews, infoView(recordIDs[i], text, rect{r.x - heading.x, r.y - heading.y, r.w, r.h}))
 	}
+	children := []core.Node{
+		core.View{TestID: art, Label: tr.TitleArtLabel, Style: fill()},
+		infoView("title-heading", tr.GameTitle, l.logo),
+		core.View{TestID: "title-records", Style: at(rect{heading.x, heading.y, heading.w, heading.h * 2}), Children: recordViews},
+	}
+	for i, it := range items {
+		idx := i
+		children = append(children, g.hitButton(it.id, it.label, "", l.buttons[i], it.press, func() { g.hoverMenu(idx) }))
+	}
+	return overlayLayer("title", tr.GameTitle, children...)
 }
 
 // paused is the native layer over the canvas's pause panel: resume, open settings, or quit to the title screen with confirmation.
