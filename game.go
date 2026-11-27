@@ -218,6 +218,8 @@ func (g *emberVigil) tr() evstrings.Table {
 // update samples input once and steps the run while the arena shows.
 func (g *emberVigil) update(dt time.Duration) {
 	g.actions.Step()
+	// Until the run steps below, frames hold its last step instead of blending toward one that is not coming.
+	g.scene.hold()
 	if g.phase.GetUntracked() == phaseArena {
 		g.hudMotion.step(g.hud.GetUntracked(), dt.Seconds())
 	}
