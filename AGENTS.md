@@ -8,7 +8,7 @@ A twelve-minute survivors-like 2D game in Go with NSGo and nsgo-dev/game. Read [
 - Keep balance in `data/*.yaml`; a view never holds a rule or a tuning number.
 - Keep procedural ground, actors and particles in code as fallback (with lightweight particles drawn procedurally); stylized 2D sprite sheets, arena environment art, card icons, app icon and title key art live under `assets/` and are designed by 彩叶.
 - Pin the game layer and NSGo. Ask before changing either dependency, adding one or changing a public API.
-- Add no CI until the user asks for it.
+- Add no CI beyond the Pages workflow until the user asks for it.
 
 ## Working with the user
 
