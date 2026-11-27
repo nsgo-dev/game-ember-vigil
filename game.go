@@ -162,6 +162,8 @@ func newEmberVigil(cx *core.Scope) *emberVigil {
 	g.actions.MapPoint = func(p core.Point) (core.Point, bool) { return viewport.ViewToGame(g.size, p) }
 	Project.BindInput(g.actions)
 	g.pad = input.NewVirtualPad()
+	// The stick is laid out in the view's points, so the pad keeps them instead of taking the actions' virtual mapping.
+	g.pad.MapPoint = func(p core.Point) (core.Point, bool) { return p, true }
 	g.stick = g.pad.AddStick(&input.VirtualStick{
 		Name:      "stick",
 		AxisXName: axisMoveX,
@@ -890,7 +892,7 @@ func (g *emberVigil) draw(d *core.Drawing, size core.Size) {
 	g.size = size
 	alpha := g.alpha
 	safe := g.cx.Env().SafeArea()
-	viewport.Draw(d, size, func(d *core.Drawing, _ core.Size) { g.scene.draw(d, alpha) })
+	viewport.Draw(d, size, func(d *core.Drawing, view core.Size) { g.scene.draw(d, alpha, view) })
 	g.updateStickLayout(size, safe)
 	if g.showTouchStick() {
 		g.pad.Draw(d, emberStickStyle())

@@ -15,8 +15,8 @@ import (
 const (
 	cameraEase      = 8.0
 	ambientDarkness = 0.26
-	visionClear     = 120.0
-	visionSolid     = 210.0
+	visionClear     = 170.0
+	visionSolid     = 290.0
 	shakePixels     = 3.0
 )
 
@@ -79,25 +79,53 @@ func enemyKind(name string) int {
 	}
 }
 
-// camera is the arena's window onto the world: the world point under the canvas's top-left corner, which never leaves the arena, and where it was on the step before, which a frame blends from as it does the actors.
+// camera is the arena's window onto the world: the world point under the canvas's top-left corner, which never leaves the arena, where it was on the step before, which a frame blends from as it does the actors, and the size of the world the window shows, which follows the window's shape.
 type camera struct {
 	x, y       float64
 	wasX, wasY float64
+	w, h       float64
+}
+
+// size returns the world area the camera shows, the run's view until a frame has told it the window's.
+func (c *camera) size() (float64, float64) {
+	if c.w <= 0 || c.h <= 0 {
+		return viewWidth, viewHeight
+	}
+	return c.w, c.h
+}
+
+// resize shows w by h of the world from now on, keeping the window's centre where it was so a resize does not jolt the frame.
+func (c *camera) resize(w, h float64, arena Vec2) {
+	oldW, oldH := c.size()
+	if w <= 0 || h <= 0 || (w == oldW && h == oldH) {
+		return
+	}
+	dx, dy := (oldW-w)/2, (oldH-h)/2
+	c.w, c.h = w, h
+	c.x += dx
+	c.y += dy
+	c.wasX += dx
+	c.wasY += dy
+	c.clamp(arena)
+	c.wasX = clampLength(c.wasX, 0, arena.X-w)
+	c.wasY = clampLength(c.wasY, 0, arena.Y-h)
 }
 
 // follow eases c toward centering target, at a rate that does not depend on the frame's length, and clamps it to the arena.
 func (c *camera) follow(target, arena Vec2, dt float64) {
 	c.wasX, c.wasY = c.x, c.y
 	k := 1 - math.Exp(-cameraEase*dt)
-	c.x += (target.X - viewWidth/2 - c.x) * k
-	c.y += (target.Y - viewHeight/2 - c.y) * k
+	w, h := c.size()
+	c.x += (target.X - w/2 - c.x) * k
+	c.y += (target.Y - h/2 - c.y) * k
 	c.clamp(arena)
 }
 
 // snap puts c on target at once, which a run's first step and a retry do instead of sliding in from the last run's place.
 func (c *camera) snap(target, arena Vec2) {
-	c.x = target.X - viewWidth/2
-	c.y = target.Y - viewHeight/2
+	w, h := c.size()
+	c.x = target.X - w/2
+	c.y = target.Y - h/2
 	c.clamp(arena)
 	c.wasX, c.wasY = c.x, c.y
 }
@@ -109,8 +137,9 @@ func (c *camera) at(alpha float64) (float64, float64) {
 
 // clamp keeps the camera's window inside the arena; an arena smaller than the view pins it to the corner.
 func (c *camera) clamp(arena Vec2) {
-	c.x = clampLength(c.x, 0, arena.X-viewWidth)
-	c.y = clampLength(c.y, 0, arena.Y-viewHeight)
+	w, h := c.size()
+	c.x = clampLength(c.x, 0, arena.X-w)
+	c.y = clampLength(c.y, 0, arena.Y-h)
 }
 
 // actor is one drawn thing: what kind it is, where it is now and where it was on the step before, which the loop's alpha blends between.
@@ -684,12 +713,14 @@ func (r *arenaRenderer) burst(pos Vec2, kind, n int, speed, life float64) {
 }
 
 // draw paints one frame of the run at alpha, the loop's distance between the last step and the next. Every frame blends while the run steps, however many frames fall between two steps; a held run, such as a paused one, shows the last step's places instead of drifting between them.
-func (r *arenaRenderer) draw(d *core.Drawing, alpha float64) {
+func (r *arenaRenderer) draw(d *core.Drawing, alpha float64, view core.Size) {
 	if r.holding {
 		alpha = 1
 	}
 	r.alpha = alpha
-	w, h := float32(viewWidth), float32(viewHeight)
+	r.cam.resize(float64(view.Width), float64(view.Height), r.arena)
+	vw, vh := r.cam.size()
+	w, h := float32(vw), float32(vh)
 	d.SetImageSmoothing(false)
 	d.SetFillColor(arenaColor).FillRect(0, 0, w, h)
 	if r.ground == nil {
@@ -773,8 +804,9 @@ func sampleAnimation(sa sheetActor, id uint64, animTime time.Duration) sprite.Fr
 // origin returns the world point the frame is drawn from: the camera blended by the frame's alpha, with its shake added, kept inside the arena. It is not rounded to whole virtual pixels, which a scaled canvas would show as the world stepping a few screen pixels at a time while the keeper glides.
 func (r *arenaRenderer) origin() (float32, float32) {
 	cx, cy := r.cam.at(r.alpha)
-	x := clampLength(cx+r.fx.shakeX, 0, r.arena.X-viewWidth)
-	y := clampLength(cy+r.fx.shakeY, 0, r.arena.Y-viewHeight)
+	w, h := r.cam.size()
+	x := clampLength(cx+r.fx.shakeX, 0, r.arena.X-w)
+	y := clampLength(cy+r.fx.shakeY, 0, r.arena.Y-h)
 	return float32(x), float32(y)
 }
 
@@ -784,8 +816,10 @@ func toScreen(p Vec2, ox, oy float32) (float32, float32) {
 }
 
 // inView reports whether a canvas position is close enough to the canvas to be worth drawing.
-func inView(x, y float32) bool {
-	return x >= -viewMargin && x <= viewWidth+viewMargin && y >= -viewMargin && y <= viewHeight+viewMargin
+func (r *arenaRenderer) inView(x, y float32) bool {
+	vw, vh := r.cam.size()
+	w, h := float32(vw), float32(vh)
+	return x >= -viewMargin && x <= w+viewMargin && y >= -viewMargin && y <= h+viewMargin
 }
 
 // addEmbers adds the embers waiting on the ground.
@@ -938,7 +972,7 @@ func (r *arenaRenderer) drawEliteAuras(d *core.Drawing, ox, oy float32) {
 		}
 		p := Vec2{e.was.X + (e.pos.X-e.was.X)*r.alpha, e.was.Y + (e.pos.Y-e.was.Y)*r.alpha}
 		x, y := toScreen(p, ox, oy)
-		if !inView(x, y) {
+		if !r.inView(x, y) {
 			continue
 		}
 		rad := float32(e.radius + 4)
@@ -963,7 +997,7 @@ func (r *arenaRenderer) drawEliteBars(d *core.Drawing, ox, oy float32) {
 		}
 		p := Vec2{e.was.X + (e.pos.X-e.was.X)*r.alpha, e.was.Y + (e.pos.Y-e.was.Y)*r.alpha}
 		x, y := toScreen(p, ox, oy)
-		if !inView(x, y) {
+		if !r.inView(x, y) {
 			continue
 		}
 		frac := float32(min(max(e.hp/e.maxHP, 0), 1))
@@ -1039,6 +1073,8 @@ func (r *arenaRenderer) addHalo(ox, oy float32) {
 // drawPatches paints Cinder Trail's burning ground patches over the forest floor before sprites draw,
 // using the animated cinder_trail sprite sheet when loaded and falling back to procedural arcs otherwise.
 func (r *arenaRenderer) drawPatches(d *core.Drawing, ox, oy float32) {
+	cw, ch := r.cam.size()
+	vw, vh := float32(cw), float32(ch)
 	if len(r.patches) == 0 {
 		return
 	}
@@ -1049,7 +1085,7 @@ func (r *arenaRenderer) drawPatches(d *core.Drawing, ox, oy float32) {
 			p := &r.patches[i]
 			x, y := float32(p.Pos.X)-ox, float32(p.Pos.Y)-oy
 			rad := float32(p.Radius)
-			if x+rad < 0 || x-rad > viewWidth || y+rad < 0 || y-rad > viewHeight {
+			if x+rad < 0 || x-rad > vw || y+rad < 0 || y-rad > vh {
 				continue
 			}
 			frame := sampleAnimation(sa, p.ID, r.animTime)
@@ -1074,7 +1110,7 @@ func (r *arenaRenderer) drawPatches(d *core.Drawing, ox, oy float32) {
 		p := &r.patches[i]
 		x, y := toScreen(p.Pos, ox, oy)
 		rad := float32(p.Radius)
-		if x+rad < 0 || x-rad > viewWidth || y+rad < 0 || y-rad > viewHeight {
+		if x+rad < 0 || x-rad > vw || y+rad < 0 || y-rad > vh {
 			continue
 		}
 		fade := float32(math.Min(1, p.Life/0.5))
@@ -1089,6 +1125,8 @@ func (r *arenaRenderer) drawPatches(d *core.Drawing, ox, oy float32) {
 // drawPulses paints Bell Toll's expanding shockwave rings over the sprites,
 // mapping pulse progress across bell_toll's 4 frames when loaded and falling back to procedural rings otherwise.
 func (r *arenaRenderer) drawPulses(d *core.Drawing, ox, oy float32) {
+	cw, ch := r.cam.size()
+	vw, vh := float32(cw), float32(ch)
 	if len(r.pulses) == 0 {
 		return
 	}
@@ -1101,7 +1139,7 @@ func (r *arenaRenderer) drawPulses(d *core.Drawing, ox, oy float32) {
 			x, y := float32(p.Pos.X)-ox, float32(p.Pos.Y)-oy
 			t := float32(min(max(1-p.Life/max(p.Max, 0.001), 0), 1))
 			rad := float32(p.Radius) * (0.45 + 0.65*t)
-			if x+rad < 0 || x-rad > viewWidth || y+rad < 0 || y-rad > viewHeight {
+			if x+rad < 0 || x-rad > vw || y+rad < 0 || y-rad > vh {
 				continue
 			}
 			idx := min(int(t*float32(len(frames))), len(frames)-1)
@@ -1127,7 +1165,7 @@ func (r *arenaRenderer) drawPulses(d *core.Drawing, ox, oy float32) {
 		x, y := toScreen(p.Pos, ox, oy)
 		t := float32(1 - p.Life/max(p.Max, 0.001))
 		rad := float32(p.Radius) * (0.2 + 0.8*t)
-		if x+rad < 0 || x-rad > viewWidth || y+rad < 0 || y-rad > viewHeight {
+		if x+rad < 0 || x-rad > vw || y+rad < 0 || y-rad > vh {
 			continue
 		}
 		alpha := float32(math.Max(0, 1-float64(t)))
@@ -1176,7 +1214,7 @@ func (r *arenaRenderer) addParticles(ox, oy float32) {
 		}
 		left := float32(math.Max(0, p.life/max(p.max, 0.001)))
 		x, y := toScreen(p.pos, ox, oy)
-		if !inView(x, y) {
+		if !r.inView(x, y) {
 			continue
 		}
 		s := r.next(frame)
@@ -1194,7 +1232,7 @@ func (r *arenaRenderer) blend(a actor) Vec2 {
 func (r *arenaRenderer) add(frame sprite.Frame, a actor, ox, oy float32, alpha float32, z int) *sprite.Sprite {
 	p := Vec2{a.was.X + (a.pos.X-a.was.X)*r.alpha, a.was.Y + (a.pos.Y-a.was.Y)*r.alpha}
 	x, y := toScreen(p, ox, oy)
-	if !inView(x, y) {
+	if !r.inView(x, y) {
 		return nil
 	}
 	s := r.next(frame)
@@ -1207,7 +1245,7 @@ func (r *arenaRenderer) add(frame sprite.Frame, a actor, ox, oy float32, alpha f
 func (r *arenaRenderer) addSheet(frame sprite.Frame, scale float32, a actor, ox, oy float32, alpha float32, z int) *sprite.Sprite {
 	p := Vec2{a.was.X + (a.pos.X-a.was.X)*r.alpha, a.was.Y + (a.pos.Y-a.was.Y)*r.alpha}
 	x, y := float32(p.X)-ox, float32(p.Y)-oy
-	if !inView(x, y) {
+	if !r.inView(x, y) {
 		return nil
 	}
 	s := r.next(frame)
@@ -1293,7 +1331,7 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 			break
 		}
 		x, y := toScreen(r.blend(r.halo[i]), ox, oy)
-		if !inView(x, y) {
+		if !r.inView(x, y) {
 			continue
 		}
 		l := r.glows[glow]
@@ -1306,7 +1344,7 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 			break
 		}
 		x, y := toScreen(r.patches[i].Pos, ox, oy)
-		if !inView(x, y) {
+		if !r.inView(x, y) {
 			continue
 		}
 		l := r.glows[glow]
@@ -1319,7 +1357,7 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 			break
 		}
 		x, y := toScreen(r.blend(r.shots[i]), ox, oy)
-		if !inView(x, y) {
+		if !r.inView(x, y) {
 			continue
 		}
 		l := r.glows[glow]
@@ -1332,7 +1370,7 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 			break
 		}
 		x, y := toScreen(r.blend(r.pickups[i]), ox, oy)
-		if !inView(x, y) {
+		if !r.inView(x, y) {
 			continue
 		}
 		l := r.glows[glow]
@@ -1345,7 +1383,7 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 			break
 		}
 		x, y := toScreen(r.blend(r.enemyShots[i]), ox, oy)
-		if !inView(x, y) {
+		if !r.inView(x, y) {
 			continue
 		}
 		l := r.glows[glow]
@@ -1362,7 +1400,7 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 			break
 		}
 		x, y := toScreen(r.blend(r.embers[i]), ox, oy)
-		if !inView(x, y) {
+		if !r.inView(x, y) {
 			continue
 		}
 		l := r.glows[glow]

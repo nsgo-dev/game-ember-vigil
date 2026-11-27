@@ -39,7 +39,7 @@ Ember Vigil is an NSGo app with one fixed-step game loop. A run is simulated hea
 
 ## Data and state
 
-`game.yaml` holds the window, the 480×270 virtual screen and the input map. `data/*.yaml` holds the balance. Two save slots live in `core.Storage`: settings (volumes, language, quality, shake) and records (best time, kills, level, wins). A run is not saved: closing the app ends it. There is no account, cloud or network state.
+`game.yaml` holds the window, the 480×270 virtual screen (expanded to fill the window) and the input map. `data/*.yaml` holds the balance. Two save slots live in `core.Storage`: settings (volumes, language, quality, shake) and records (best time, kills, level, wins). A run is not saved: closing the app ends it. There is no account, cloud or network state.
 
 ## Verification
 

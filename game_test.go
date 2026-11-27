@@ -227,13 +227,13 @@ func TestTitleQuitQuitsTheApp(t *testing.T) {
 	}
 }
 
-// TestViewportKeepsTheVirtualCanvasShape checks that the window scales the 480x270 canvas without stretching it, whatever its aspect ratio.
-func TestViewportKeepsTheVirtualCanvasShape(t *testing.T) {
+// TestViewportFillsTheWindow checks that the window scales the 480x270 canvas without stretching or bars, showing more of the world along its longer side.
+func TestViewportFillsTheWindow(t *testing.T) {
 	if viewport.Width != 480 || viewport.Height != 270 {
 		t.Fatalf("virtual canvas = %vx%v, want 480x270", viewport.Width, viewport.Height)
 	}
-	if viewport.Mode != screen.ModeFit {
-		t.Fatalf("viewport mode = %v, want screen.ModeFit", viewport.Mode)
+	if viewport.Mode != screen.ModeExpand {
+		t.Fatalf("viewport mode = %v, want screen.ModeExpand", viewport.Mode)
 	}
 	if !viewport.PixelSnap {
 		t.Fatal("viewport does not snap pixels")
@@ -249,11 +249,11 @@ func TestViewportKeepsTheVirtualCanvasShape(t *testing.T) {
 		if place.ScaleX != place.ScaleY {
 			t.Fatalf("window %v scales x by %v and y by %v", window, place.ScaleX, place.ScaleY)
 		}
-		if place.VirtualSize.Width != 480 || place.VirtualSize.Height != 270 {
-			t.Fatalf("window %v shows a %v virtual canvas, want 480x270", window, place.VirtualSize)
+		if place.VirtualSize.Width < 480-0.01 || place.VirtualSize.Height < 270-0.01 {
+			t.Fatalf("window %v shows a %v virtual canvas, less than 480x270", window, place.VirtualSize)
 		}
-		if place.Rect.Size.Width > window.Width+0.01 || place.Rect.Size.Height > window.Height+0.01 {
-			t.Fatalf("window %v holds a %v canvas, which does not fit", window, place.Rect)
+		if place.Rect.Size != window || len(place.Bars) > 0 {
+			t.Fatalf("window %v holds a %v canvas with %d bars, want it filled", window, place.Rect, len(place.Bars))
 		}
 	}
 }
