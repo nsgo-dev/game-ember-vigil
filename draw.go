@@ -79,13 +79,15 @@ func enemyKind(name string) int {
 	}
 }
 
-// camera is the arena's window onto the world: the world point under the canvas's top-left corner, which never leaves the arena.
+// camera is the arena's window onto the world: the world point under the canvas's top-left corner, which never leaves the arena, and where it was on the step before, which a frame blends from as it does the actors.
 type camera struct {
-	x, y float64
+	x, y       float64
+	wasX, wasY float64
 }
 
 // follow eases c toward centering target, at a rate that does not depend on the frame's length, and clamps it to the arena.
 func (c *camera) follow(target, arena Vec2, dt float64) {
+	c.wasX, c.wasY = c.x, c.y
 	k := 1 - math.Exp(-cameraEase*dt)
 	c.x += (target.X - viewWidth/2 - c.x) * k
 	c.y += (target.Y - viewHeight/2 - c.y) * k
@@ -97,6 +99,12 @@ func (c *camera) snap(target, arena Vec2) {
 	c.x = target.X - viewWidth/2
 	c.y = target.Y - viewHeight/2
 	c.clamp(arena)
+	c.wasX, c.wasY = c.x, c.y
+}
+
+// at returns the camera's window alpha of the way from the last step's to this step's.
+func (c *camera) at(alpha float64) (float64, float64) {
+	return c.wasX + (c.x-c.wasX)*alpha, c.wasY + (c.y-c.wasY)*alpha
 }
 
 // clamp keeps the camera's window inside the arena; an arena smaller than the view pins it to the corner.
@@ -207,8 +215,8 @@ type arenaRenderer struct {
 	quality      qualityProfile
 	cosmetics    *random.Stream
 
-	// fresh is whether a step arrived since the last frame, which a paused run does not do: a frame between steps blends, a frame without a step holds still.
-	fresh bool
+	// holding is whether the shell's last update left the run unstepped, as a paused run's does: a frame then holds the last step's places instead of blending toward a step that is not coming.
+	holding bool
 
 	// batch, pool, effects and lights are reused every frame, so drawing a steady frame allocates nothing.
 	batch        sprite.Batch
@@ -284,7 +292,7 @@ func (r *arenaRenderer) startRun(seed uint64) {
 	}
 	r.fx = effects{flash: map[uint64]float64{}}
 	r.alpha = 0
-	r.fresh = false
+	r.holding = false
 	r.started, r.seenKeeper = false, false
 	r.invuln = 0
 	r.lastHealth = 0
@@ -372,7 +380,12 @@ func (r *arenaRenderer) sync(s Snapshot, events []Event, dt float64) {
 	}
 	r.stepEffects(events, keeperDamaged, dt)
 	r.emitTrails(dt)
-	r.fresh = true
+	r.holding = false
+}
+
+// hold tells the renderer the shell updated without stepping the run, so frames until the next step hold still.
+func (r *arenaRenderer) hold() {
+	r.holding = true
 }
 
 // stepKeeperAnimation switches between idle and walk clips and advances the keeper's animation by dt.
@@ -670,12 +683,11 @@ func (r *arenaRenderer) burst(pos Vec2, kind, n int, speed, life float64) {
 	}
 }
 
-// draw paints one frame of the run at alpha, the loop's distance between the last step and the next. A frame with no step behind it, such as a paused run's, holds the last step's places instead of drifting between them.
+// draw paints one frame of the run at alpha, the loop's distance between the last step and the next. Every frame blends while the run steps, however many frames fall between two steps; a held run, such as a paused one, shows the last step's places instead of drifting between them.
 func (r *arenaRenderer) draw(d *core.Drawing, alpha float64) {
-	if !r.fresh {
+	if r.holding {
 		alpha = 1
 	}
-	r.fresh = false
 	r.alpha = alpha
 	w, h := float32(viewWidth), float32(viewHeight)
 	d.SetImageSmoothing(false)
@@ -758,16 +770,17 @@ func sampleAnimation(sa sheetActor, id uint64, animTime time.Duration) sprite.Fr
 	return sampleClip(sa.move, sa.round, id, animTime)
 }
 
-// origin returns the whole virtual pixels the frame's world is drawn from, with the camera's shake added and kept inside the arena.
+// origin returns the world point the frame is drawn from: the camera blended by the frame's alpha, with its shake added, kept inside the arena. It is not rounded to whole virtual pixels, which a scaled canvas would show as the world stepping a few screen pixels at a time while the keeper glides.
 func (r *arenaRenderer) origin() (float32, float32) {
-	x := clampLength(math.Round(r.cam.x+r.fx.shakeX), 0, r.arena.X-viewWidth)
-	y := clampLength(math.Round(r.cam.y+r.fx.shakeY), 0, r.arena.Y-viewHeight)
+	cx, cy := r.cam.at(r.alpha)
+	x := clampLength(cx+r.fx.shakeX, 0, r.arena.X-viewWidth)
+	y := clampLength(cy+r.fx.shakeY, 0, r.arena.Y-viewHeight)
 	return float32(x), float32(y)
 }
 
-// toScreen returns a world position in canvas pixels, rounded so the pixel art stays crisp.
+// toScreen returns a world position in canvas pixels. It is not rounded: rounding a position and the origin apart would make an actor the camera follows flicker a pixel back and forth.
 func toScreen(p Vec2, ox, oy float32) (float32, float32) {
-	return float32(math.Round(p.X)) - ox, float32(math.Round(p.Y)) - oy
+	return float32(p.X) - ox, float32(p.Y) - oy
 }
 
 // inView reports whether a canvas position is close enough to the canvas to be worth drawing.
@@ -1172,6 +1185,11 @@ func (r *arenaRenderer) addParticles(ox, oy float32) {
 	}
 }
 
+// blend returns where a is this frame: alpha of the way from where it was on the last step to where it is.
+func (r *arenaRenderer) blend(a actor) Vec2 {
+	return Vec2{a.was.X + (a.pos.X-a.was.X)*r.alpha, a.was.Y + (a.pos.Y-a.was.Y)*r.alpha}
+}
+
 // add adds one procedural-atlas sprite of frame at a's blended position with the given alpha and depth, and returns it, or nil when it is off the canvas.
 func (r *arenaRenderer) add(frame sprite.Frame, a actor, ox, oy float32, alpha float32, z int) *sprite.Sprite {
 	p := Vec2{a.was.X + (a.pos.X-a.was.X)*r.alpha, a.was.Y + (a.pos.Y-a.was.Y)*r.alpha}
@@ -1227,7 +1245,7 @@ func (r *arenaRenderer) drawLevelFlourish(d *core.Drawing, ox, oy float32) {
 	}
 	t := float32(1 - r.fx.levelFlash/levelFlashSeconds)
 	alpha := float32(math.Max(0, 1-float64(t)))
-	x, y := toScreen(r.keeper.pos, ox, oy)
+	x, y := toScreen(r.blend(r.keeper), ox, oy)
 	rad := 14 + 54*t
 	d.SetFillColor(core.RGBA(0xffd166, 0.18*alpha)).
 		BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Fill()
@@ -1274,7 +1292,7 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 		if glow >= glowLimit {
 			break
 		}
-		x, y := toScreen(r.halo[i].pos, ox, oy)
+		x, y := toScreen(r.blend(r.halo[i]), ox, oy)
 		if !inView(x, y) {
 			continue
 		}
@@ -1300,7 +1318,7 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 		if glow >= glowLimit {
 			break
 		}
-		x, y := toScreen(r.shots[i].pos, ox, oy)
+		x, y := toScreen(r.blend(r.shots[i]), ox, oy)
 		if !inView(x, y) {
 			continue
 		}
@@ -1313,7 +1331,7 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 		if glow >= glowLimit {
 			break
 		}
-		x, y := toScreen(r.pickups[i].pos, ox, oy)
+		x, y := toScreen(r.blend(r.pickups[i]), ox, oy)
 		if !inView(x, y) {
 			continue
 		}
@@ -1326,7 +1344,7 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 		if glow >= glowLimit {
 			break
 		}
-		x, y := toScreen(r.enemyShots[i].pos, ox, oy)
+		x, y := toScreen(r.blend(r.enemyShots[i]), ox, oy)
 		if !inView(x, y) {
 			continue
 		}
@@ -1343,7 +1361,7 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 		if glow >= glowLimit {
 			break
 		}
-		x, y := toScreen(r.embers[i].pos, ox, oy)
+		x, y := toScreen(r.blend(r.embers[i]), ox, oy)
 		if !inView(x, y) {
 			continue
 		}

@@ -10,13 +10,13 @@ A displayed frame draws, in order: the ground crop (`SetImageSmoothing(true)` wh
 
 Animations advance on fixed steps only while `Phase == PhasePlaying`, freezing cleanly when paused or on the level-up modal. The keeper switches between `idle` and `walk` clips based on movement, two-row enemies (`hollow_king.png`, `gloomwarden.png`) switch from row 0 movement to row 1 attack/telegraph clips when telegraphing or striking at close range, enemies derive deterministic per-ID phase offsets so crowds do not march in lockstep, horizontal `FlipX` respects each sheet's default facing (every sheet defaults right), and projectiles rotate along their travel direction.
 
-Positions come from the shell's copy of the last two steps: the sprite batch places an actor between where it was and where it is by the loop's alpha, so movement stays smooth on displays faster than the fixed step. A frame with no step behind it, such as a paused run's, holds the last step's places instead of blending toward nothing.
+Positions come from the shell's copy of the last two steps: every frame places an actor, its glow and the camera between where they were and where they are by the loop's alpha, so movement stays smooth on displays faster than the fixed step, however many frames fall between two steps. Positions are not rounded to virtual pixels: the canvas is scaled up, and rounding the camera and an actor apart made the followed keeper flicker a pixel. While the shell's updates leave the run unstepped, as a paused run's do, frames hold the last step's places instead of blending toward a step that is not coming.
 
 The ground is the exception: the whole arena (2400×1760 pixels) painted once when a run starts, drawn each frame as the camera's crop of it. It comes from a cosmetic stream on the run's seed, so a seed always paints the same forest floor, and painting it never touches the run. `art.go` embeds `assets/environment/*.png`, blends seamless `ground_soil.png` and `ground_moss.png` through smooth two-octave value noise, scatters proportionally scaled transparent forest props (`grass_tuft`, `fern`, `moss_stone`, `mushrooms`, `stump`, `fallen_branch`), and frames all four outer edges with overlapping `tree_canopy.png` (purely visual, never blocking movement), falling back cleanly to procedural moonlit soil when environment assets are absent.
 
 ## Camera
 
-The camera eases toward the keeper at a rate independent of frame length, then clamps to the arena, which is the only wall the arena has. An arena smaller than the view stays pinned to its corner. Screen shake moves the same clamped window, so a violent frame still cannot show outside the arena.
+The camera eases toward the keeper on each step at a rate independent of frame length, blends between steps like an actor, then clamps to the arena, which is the only wall the arena has. An arena smaller than the view stays pinned to its corner. Screen shake moves the same clamped window, so a violent frame still cannot show outside the arena.
 
 ## Light
 

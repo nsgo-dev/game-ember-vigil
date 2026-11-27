@@ -1121,3 +1121,41 @@ func TestFogOfWarDarkensPastTheKeepersSight(t *testing.T) {
 		t.Fatal("the frame laid no fog past the keeper's sight")
 	}
 }
+
+// TestTheCameraBlendsBetweenSteps checks that a frame between two steps places the camera between them, as it does the actors, so the world and the keeper glide together.
+func TestTheCameraBlendsBetweenSteps(t *testing.T) {
+	a := newArenaRenderer(newArt())
+	a.arena = Vec2{X: 2000, Y: 2000}
+	a.cam.snap(Vec2{X: 1000, Y: 1000}, a.arena)
+	a.cam.follow(Vec2{X: 1100, Y: 1000}, a.arena, stepSeconds)
+	was, now := a.cam.wasX, a.cam.x
+	if now <= was {
+		t.Fatalf("the camera stayed at x %v following a keeper to its right, from %v", now, was)
+	}
+	a.alpha = 0.5
+	if x, _ := a.origin(); math.Abs(float64(x)-(was+now)/2) > 1e-3 {
+		t.Fatalf("the camera's window starts at x %v halfway between steps, want %v", x, (was+now)/2)
+	}
+}
+
+// TestFramesWithoutAStepKeepBlendingUnlessHeld checks that a display faster than the steps blends every frame, and that a held run holds its last step.
+func TestFramesWithoutAStepKeepBlendingUnlessHeld(t *testing.T) {
+	r := quietRun(t)
+	a := newArenaRenderer(newArt())
+	a.startRun(7)
+	for range 2 {
+		r.Step(stepTime, Controls{Move: Vec2{X: 1}})
+		a.sync(r.Snapshot(), r.Events(), stepSeconds)
+	}
+	d := &core.Drawing{}
+	a.draw(d, 0.25)
+	a.draw(d, 0.75)
+	if a.alpha != 0.75 {
+		t.Fatalf("a second frame between the same steps drew at alpha %v, want 0.75", a.alpha)
+	}
+	a.hold()
+	a.draw(d, 0.25)
+	if a.alpha != 1 {
+		t.Fatalf("a held run drew at alpha %v, want its last step's places (1)", a.alpha)
+	}
+}
