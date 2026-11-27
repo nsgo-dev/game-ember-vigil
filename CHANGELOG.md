@@ -18,3 +18,4 @@
 - Keep every stage of a run demanding but winnable with sharp movement: fewer, harder-hitting monsters early, steeper scaling after six minutes and a tougher Hollow King (#37 by @oneo-me).
 - Draw the level-up cards, pause menu and results on the arena canvas in the painted HUD style, with cards that deal in, lift and glow when focused and burn away when chosen (#32, #36 by @oneo-me).
 - Keep the camera and the world gliding with the keeper on displays faster than the run's steps, instead of jittering as it moves (#40 by @oneo-me).
+- Fill the whole window with the arena, showing more of it on wider or taller windows and seeing farther through the fog, instead of leaving bars (#42 by @oneo-me).

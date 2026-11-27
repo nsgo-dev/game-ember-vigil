@@ -11,7 +11,7 @@ window:
 display:
   width: 480
   height: 270
-  mode: fit
+  mode: expand
   pixelSnap: true
   barColor: '#0b0d17'
 input:

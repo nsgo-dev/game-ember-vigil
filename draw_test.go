@@ -12,6 +12,9 @@ import (
 	evstrings "me.oneo/embervigil/strings"
 )
 
+// runView is the visible world of a 16:9 window: the run's own view.
+var runView = core.Size{Width: viewWidth, Height: viewHeight}
+
 // newTestArena prepares an arena renderer on a run's arena, as the shell does when it starts one.
 func newTestArena(t *testing.T, r *Run, seed uint64) *arenaRenderer {
 	t.Helper()
@@ -205,7 +208,7 @@ func TestFrameDrawsTheRunAndItsGround(t *testing.T) {
 	keeper, enemies := r.keeper.pos, len(r.enemies)
 	a.sync(r.Snapshot(), r.Events(), stepSeconds)
 	d := &core.Drawing{}
-	a.draw(d, 0.5)
+	a.draw(d, 0.5, runView)
 
 	ground := 0
 	for _, op := range d.Ops {
@@ -247,7 +250,7 @@ func TestFrameCullsWhatIsOffScreen(t *testing.T) {
 	a.sync(r.Snapshot(), r.Events(), stepSeconds)
 
 	d := &core.Drawing{}
-	a.draw(d, 0)
+	a.draw(d, 0, runView)
 	// One sprite for the keeper, and none for the enemy 600 world units away.
 	if got := countSprites(d.Ops); got != 1 {
 		t.Fatalf("the frame drew %d sprites, want only the keeper", got)
@@ -304,7 +307,7 @@ func TestFrameDrawsNewWeapons(t *testing.T) {
 	a.sync(r.Snapshot(), r.Events(), stepSeconds)
 
 	d := &core.Drawing{}
-	a.draw(d, 0.5)
+	a.draw(d, 0.5, runView)
 
 	// Keeper + 3 halo orbs + Cinder Trail patch + Bell Toll pulse sprites.
 	if got := countSprites(d.Ops); got < 6 {
@@ -322,7 +325,7 @@ func TestFrameDrawsNewWeapons(t *testing.T) {
 	fb.startRun(9)
 	fb.sync(r.Snapshot(), r.Events(), stepSeconds)
 	d.Ops = d.Ops[:0]
-	fb.draw(d, 0.5)
+	fb.draw(d, 0.5, runView)
 	hasStroke := false
 	hasArc := false
 	for _, op := range d.Ops {
@@ -356,7 +359,7 @@ func TestFrameDrawsNewEnemiesPickupsAndBossTelegraph(t *testing.T) {
 	stepOnce(r, Controls{})
 	a.sync(r.Snapshot(), r.Events(), stepSeconds)
 	d := &core.Drawing{}
-	a.draw(d, 0.5)
+	a.draw(d, 0.5, runView)
 	if got := countSprites(d.Ops); got < 11 {
 		t.Fatalf("frame drew %d sprites, want keeper + 7 enemies + 2 enemy shots + 1 heal cache", got)
 	}
@@ -369,7 +372,7 @@ func TestFrameDrawsNewEnemiesPickupsAndBossTelegraph(t *testing.T) {
 	r.boss.chargeDir = Vec2{X: 1}
 	a.sync(r.Snapshot(), r.Events(), stepSeconds)
 	d.Ops = d.Ops[:0]
-	a.draw(d, 0.5)
+	a.draw(d, 0.5, runView)
 	hasLine := false
 	for _, op := range d.Ops {
 		if op.Kind == core.DrawLineTo {
@@ -554,7 +557,7 @@ func TestEmbeddedEnvironmentArtAndFallback(t *testing.T) {
 	r := quietRun(t)
 	ar := newTestArena(t, r, 7)
 	d := &core.Drawing{}
-	ar.draw(d, 1)
+	ar.draw(d, 1, runView)
 	groundSmooth := false
 	for _, op := range d.Ops {
 		if op.Kind == core.DrawImage && op.Image != nil && isGround(op.Image) && op.Sampling == core.ImageSamplingSmooth {
@@ -589,7 +592,7 @@ func TestBossTelegraphAndGloomwardenActionRows(t *testing.T) {
 	}, nil, stepSeconds)
 
 	d := &core.Drawing{}
-	a.draw(d, 1)
+	a.draw(d, 1, runView)
 	bossFrame, wardenFrame := "", ""
 	for _, s := range a.sheetSprites {
 		if s.Z != 2 {
@@ -625,7 +628,7 @@ func TestBossTelegraphAndGloomwardenActionRows(t *testing.T) {
 		},
 	}, nil, stepSeconds)
 	d.Ops = d.Ops[:0]
-	a.draw(d, 1)
+	a.draw(d, 1, runView)
 	bossFrame, wardenFrame = "", ""
 	for _, s := range a.sheetSprites {
 		if s.Z != 2 {
@@ -737,7 +740,7 @@ func TestSpriteFacingFlipsAndBoltRotation(t *testing.T) {
 	}, nil, stepSeconds)
 
 	d := &core.Drawing{}
-	a.draw(d, 1)
+	a.draw(d, 1, runView)
 
 	var keeperFlip, miteFlip bool
 	var boltRot float32
@@ -775,7 +778,7 @@ func TestSpriteFacingFlipsAndBoltRotation(t *testing.T) {
 		Enemies: []EnemyView{{ID: 10, Kind: "Ash Mite", Pos: mitePos, Radius: 7}},
 	}, nil, stepSeconds)
 	d.Ops = d.Ops[:0]
-	a.draw(d, 1)
+	a.draw(d, 1, runView)
 	for _, s := range a.sheetSprites {
 		if s.Z == 4 && !s.FlipX {
 			t.Fatal("keeper moving left had FlipX=false, want FlipX=true")
@@ -821,7 +824,7 @@ func TestMissingSpritesAndIconsFallBackCleanly(t *testing.T) {
 	stepOnce(r, Controls{})
 	a.sync(r.Snapshot(), r.Events(), stepSeconds)
 	d := &core.Drawing{}
-	a.draw(d, 1)
+	a.draw(d, 1, runView)
 	if got := countSprites(d.Ops); got < 3 {
 		t.Fatalf("fallback frame drew %d sprites, want at least keeper and two enemies", got)
 	}
@@ -914,7 +917,7 @@ func TestDamageVignetteLevelFlourishAndShakeSetting(t *testing.T) {
 	}
 
 	d := &core.Drawing{}
-	a.draw(d, 1)
+	a.draw(d, 1, runView)
 	gradients := 0
 	for _, op := range d.Ops {
 		if op.Kind == core.DrawFillGradient {
@@ -978,14 +981,14 @@ func TestQualityLimitsParticlesAndGlowLights(t *testing.T) {
 	}
 
 	d := &core.Drawing{}
-	a.draw(d, 1)
+	a.draw(d, 1, runView)
 	if got := len(a.lights); got > low.maxGlowLights {
 		t.Fatalf("low quality emitted %d lights, above %d glows", got, low.maxGlowLights)
 	}
 
 	a.setQuality(high)
 	d.Ops = d.Ops[:0]
-	a.draw(d, 1)
+	a.draw(d, 1, runView)
 	if got := len(a.lights); got <= low.maxGlowLights {
 		t.Fatalf("high quality emitted %d lights, want more than low cap (%d)", got, low.maxGlowLights)
 	}
@@ -1012,7 +1015,7 @@ func BenchmarkArenaFrame(b *testing.B) {
 		r.Step(stepTime, Controls{})
 		a.sync(r.Snapshot(), r.Events(), stepSeconds)
 		d.Ops = d.Ops[:0]
-		a.draw(d, 0.5)
+		a.draw(d, 0.5, runView)
 	}
 }
 
@@ -1074,7 +1077,7 @@ func BenchmarkWorstWave200Enemies(b *testing.B) {
 		r.Step(stepTime, Controls{Move: Vec2{X: math.Cos(float64(i) * 0.05), Y: math.Sin(float64(i) * 0.05)}})
 		a.sync(r.Snapshot(), r.Events(), stepSeconds)
 		d.Ops = d.Ops[:0]
-		a.draw(d, 0.5)
+		a.draw(d, 0.5, runView)
 		motion.step(st, stepSeconds)
 		drawHUD(d, l, st, &motion, kit, a.art, tr, string(evstrings.EN), true, false)
 	}
@@ -1110,7 +1113,7 @@ func TestFogOfWarDarkensPastTheKeepersSight(t *testing.T) {
 	stepOnce(r, Controls{})
 	a.sync(r.Snapshot(), r.Events(), stepSeconds)
 	d := &core.Drawing{}
-	a.draw(d, 1)
+	a.draw(d, 1, runView)
 	fog := 0
 	for _, op := range d.Ops {
 		if op.Kind == core.DrawFillGradient {
@@ -1138,6 +1141,36 @@ func TestTheCameraBlendsBetweenSteps(t *testing.T) {
 	}
 }
 
+// TestAWiderWindowShowsMoreOfTheArena checks that a window wider than 16:9 widens the ground crop instead of leaving bars, keeps the keeper centred, and keeps the keeper's sight short of the spawn ring.
+func TestAWiderWindowShowsMoreOfTheArena(t *testing.T) {
+	r := quietRun(t)
+	a := newTestArena(t, r, 7)
+	stepOnce(r, Controls{})
+	a.sync(r.Snapshot(), r.Events(), stepSeconds)
+	a.draw(&core.Drawing{}, 1, runView)
+	before, _ := a.origin()
+
+	wide := core.Size{Width: 630, Height: viewHeight}
+	d := &core.Drawing{}
+	a.draw(d, 1, wide)
+	after, _ := a.origin()
+	if got, want := float64(before-after), (630.0-viewWidth)/2; math.Abs(got-want) > 1e-3 {
+		t.Fatalf("widening the window moved the view's left edge by %v, want %v so the keeper stays centred", got, want)
+	}
+	cropped := false
+	for _, op := range d.Ops {
+		if op.Kind == core.DrawImage && op.Image != nil && isGround(op.Image) {
+			cropped = op.W == 630 && op.H == viewHeight
+		}
+	}
+	if !cropped {
+		t.Fatal("the wide frame did not draw a 630x270 ground crop")
+	}
+	if visionSolid >= r.data.waves.Ring.Min {
+		t.Fatalf("the keeper sees %v far, past the spawn ring's %v, so enemies would appear in sight", visionSolid, r.data.waves.Ring.Min)
+	}
+}
+
 // TestFramesWithoutAStepKeepBlendingUnlessHeld checks that a display faster than the steps blends every frame, and that a held run holds its last step.
 func TestFramesWithoutAStepKeepBlendingUnlessHeld(t *testing.T) {
 	r := quietRun(t)
@@ -1148,13 +1181,13 @@ func TestFramesWithoutAStepKeepBlendingUnlessHeld(t *testing.T) {
 		a.sync(r.Snapshot(), r.Events(), stepSeconds)
 	}
 	d := &core.Drawing{}
-	a.draw(d, 0.25)
-	a.draw(d, 0.75)
+	a.draw(d, 0.25, runView)
+	a.draw(d, 0.75, runView)
 	if a.alpha != 0.75 {
 		t.Fatalf("a second frame between the same steps drew at alpha %v, want 0.75", a.alpha)
 	}
 	a.hold()
-	a.draw(d, 0.25)
+	a.draw(d, 0.25, runView)
 	if a.alpha != 1 {
 		t.Fatalf("a held run drew at alpha %v, want its last step's places (1)", a.alpha)
 	}

@@ -1,6 +1,6 @@
 # The arena
 
-The arena draws one run into the 480×270 canvas, and its HUD, level-up cards, pause and results over it at the canvas's real size. It reads a run only through `Snapshot`, `Events` and a copied seed, so nothing in drawing can change a run or its replay.
+The arena draws one run into a canvas that fills the window: 480×270 virtual pixels on its shorter side, widened on its longer one so a window of any shape shows more of the arena instead of bars. It draws its HUD, level-up cards, pause and results over it at the canvas's real size. It reads a run only through `Snapshot`, `Events` and a copied seed, so nothing in drawing can change a run or its replay.
 
 The palette and the procedural fallback atlas are generated at startup from `art.go`'s rows of palette indices, so one colour list governs the ground, particles, fallback actors and native screens. Stylized 2D sprite sheets under `assets/sprites/` are embedded via `go:embed`, sliced from uniform grids into `sprite.Frame` and `sprite.Animation` clips, and packed into a single padded `sheetAtlas` (2 px transparent gaps prevent bilinear edge bleeding). Upgrade card icons under `assets/icons/` are embedded and decoded once at startup for the HUD's slots and the level-up cards; any missing sheet or icon falls back cleanly to the procedural atlas or glyph badge without crashing.
 
@@ -16,7 +16,7 @@ The ground is the exception: the whole arena (2400×1760 pixels) painted once wh
 
 ## Camera
 
-The camera eases toward the keeper on each step at a rate independent of frame length, blends between steps like an actor, then clamps to the arena, which is the only wall the arena has. An arena smaller than the view stays pinned to its corner. Screen shake moves the same clamped window, so a violent frame still cannot show outside the arena.
+The camera shows as much world as the window's virtual size; a resize keeps its centre. The run's spawn check still counts the 480×270 view, so the keeper's sight in the fog stays short of the spawn ring and a wider window never shows a monster appear. The camera eases toward the keeper on each step at a rate independent of frame length, blends between steps like an actor, then clamps to the arena, which is the only wall the arena has. An arena smaller than the view stays pinned to its corner. Screen shake moves the same clamped window, so a violent frame still cannot show outside the arena.
 
 ## Light
 
