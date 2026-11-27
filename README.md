@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img alt="Ember Vigil gameplay screenshot showing the lantern-lit Cinderwood Grove, animated enemies, Ember Bolt and HUD" src="docs/screenshot.png" width="760">
+  <img alt="Ember Vigil title screen showing the hooded watcher raising a lantern in the Cinderwood Grove, best records and the Start, Settings and Quit buttons" src="docs/screenshot.jpg" width="760">
 </p>
 
 ## Features

@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img alt="余烬守望实机截图：守夜人提灯光影、灰烬森林手绘场景、动画怪物、余烬箭与 HUD" src="docs/screenshot.png" width="760">
+  <img alt="余烬守望标题画面：灰烬森林中提灯的兜帽守夜人、最佳记录与开始、设置、退出按钮" src="docs/screenshot.jpg" width="760">
 </p>
 
 ## 功能
