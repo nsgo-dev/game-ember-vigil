@@ -17,4 +17,4 @@
 - Draw the in-run HUD on the arena canvas from the hand-painted kit, with easing fills, a hit flash, a flickering lantern at low health, a level-up glow, popping weapon slots, a Gloomwarden bar and a canvas pause button (#31, #35 by @oneo-me).
 - Keep every stage of a run demanding but winnable with sharp movement: fewer, harder-hitting monsters early, steeper scaling after six minutes and a tougher Hollow King (#37 by @oneo-me).
 - Draw the level-up cards, pause menu and results on the arena canvas in the painted HUD style, with cards that deal in, lift and glow when focused and burn away when chosen (#32, #36 by @oneo-me).
-- Keep the camera and the world gliding with the keeper on displays faster than the run's steps, instead of jittering as it moves (by @oneo-me).
+- Keep the camera and the world gliding with the keeper on displays faster than the run's steps, instead of jittering as it moves (#40 by @oneo-me).
