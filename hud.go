@@ -317,8 +317,8 @@ type hudPainter struct {
 	pushed bool
 }
 
-// drawHUD draws the HUD over the lit arena at the canvas's real size, so the kit's 2× pixels stay crisp.
-func drawHUD(d *core.Drawing, l hudLayout, st hudState, m *hudMotion, kit *hudArt, icons *art, tr evstrings.Table, lang string, pushed bool) {
+// drawHUD draws the HUD over the lit arena at the canvas's real size, so the kit's 2× pixels stay crisp. The pause button shows only while canPause, which a pause or settings screen over the run turns off.
+func drawHUD(d *core.Drawing, l hudLayout, st hudState, m *hudMotion, kit *hudArt, icons *art, tr evstrings.Table, lang string, canPause, pushed bool) {
 	if st.maxHealth <= 0 {
 		return
 	}
@@ -334,7 +334,7 @@ func drawHUD(d *core.Drawing, l hudLayout, st hudState, m *hudMotion, kit *hudAr
 	if st.bossActive {
 		p.drawBoss()
 	}
-	if st.phase == PhasePlaying {
+	if canPause && st.phase == PhasePlaying {
 		p.drawPause()
 	}
 	d.Restore()
