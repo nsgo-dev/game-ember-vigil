@@ -548,20 +548,21 @@ func TestTitleArtAndFallback(t *testing.T) {
 	press(t, appFallback, "id:title-start")
 }
 
-// TestTitleHidesQuitOnPhones checks that a phone's title offers only Start, Collection and Settings, and that the keyboard's focus wraps over those three.
+// TestTitleHidesQuitOnPhones checks that a phone's title offers only Start, Shop, Collection and Settings, and that the keyboard's focus wraps over those four.
 func TestTitleHidesQuitOnPhones(t *testing.T) {
 	app, g := startEmberVigil(t, nsgotest.Idiom(core.IdiomPhone))
 	app.Find("id:title-start")
+	app.Find("id:title-shop")
 	app.Find("id:title-collection")
 	app.Find("id:title-settings")
 	if n := len(app.Query("id:title-quit")); n != 0 {
 		t.Fatalf("a phone's title shows %d Quit buttons, want none", n)
 	}
-	for range 3 {
+	for range 4 {
 		g.moveFocus(1, len(g.titleItems(g.tr())))
 	}
 	if f := g.menuFocus.Get(); f != 0 {
-		t.Fatalf("focus after three steps over three buttons = %d, want 0", f)
+		t.Fatalf("focus after four steps over four buttons = %d, want 0", f)
 	}
 	g.confirm()
 	if g.phase.Get() != phaseArena {

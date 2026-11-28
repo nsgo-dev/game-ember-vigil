@@ -9,3 +9,41 @@ unlocks:
   - id: evolution
     name: Evolution
     win: true
+shop:
+  costs:
+    - 50
+    - 100
+    - 150
+    - 200
+    - 250
+  items:
+    - id: banked-fire
+      name: Banked Fire
+      stat: damage
+      description: +3% weapon damage per level.
+      amount: 0.03
+    - id: lamp-oil
+      name: Lamp Oil
+      stat: cooldown
+      description: -2% weapon cooldown per level.
+      amount: 0.02
+    - id: hearth
+      name: Hearth
+      stat: maxHealth
+      description: +10 max health per level.
+      amount: 10
+    - id: light-foot
+      name: Light Foot
+      stat: moveSpeed
+      description: +3 move speed per level.
+      amount: 3
+    - id: lure
+      name: Lure
+      stat: pickup
+      description: +5 ember pickup radius per level.
+      amount: 5
+    - id: redraw
+      name: Redraw
+      stat: redraw
+      description: One more redraw of the level-up cards per run per level.
+      amount: 1

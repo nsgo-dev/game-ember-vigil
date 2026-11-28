@@ -82,6 +82,14 @@ input:
           code: Digit3
         - kind: gamepadButton
           button: east
+    - name: redraw
+      bindings:
+        - kind: keyCode
+          code: KeyR
+        - kind: gamepadButton
+          button: back
+        - kind: gamepadButton
+          button: leftShoulder
   axes:
     - name: move_x
       negative: left

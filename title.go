@@ -87,13 +87,13 @@ type titleItem struct {
 	press     func()
 }
 
-// titleItems are the title menu's buttons in focus order: Start, the Long Night tier once more than one is open, Collection, Settings and, where the app can quit, Quit.
+// titleItems are the title menu's buttons in focus order: Start, the Long Night tier once more than one is open, Shop, Collection, Settings and, where the app can quit, Quit.
 func (g *emberVigil) titleItems(tr evstrings.Table) []titleItem {
 	items := []titleItem{{"title-start", tr.Start, g.start}}
 	if g.progress.openTier(mustGameData().tiers.maxTier()) > 1 {
 		items = append(items, titleItem{"title-tier", tr.Tier(g.tier.Get()), func() { g.cycleTier(1) }})
 	}
-	items = append(items, titleItem{"title-collection", tr.Collection, g.openCollection}, titleItem{"title-settings", tr.Settings, g.openSettings})
+	items = append(items, titleItem{"title-shop", tr.Shop, g.openShop}, titleItem{"title-collection", tr.Collection, g.openCollection}, titleItem{"title-settings", tr.Settings, g.openSettings})
 	if quitShown(g.cx.Env().Idiom(), runtime.GOOS) {
 		items = append(items, titleItem{"title-quit", tr.Quit, g.quitApp})
 	}

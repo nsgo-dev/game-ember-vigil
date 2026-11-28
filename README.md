@@ -28,7 +28,7 @@
 - Chests from every Gloomwarden that, after a first win, evolve a maxed weapon held with its paired passive, and a collection of the recipes found.
 - Stylized 2D animated sprites and hand-painted forest environment in a lantern-lit ash grove.
 - Keyboard, gamepad and touch controls, with English and Simplified Chinese interface.
-- Embers paid by every run, best records and settings kept between sessions.
+- Embers paid by every run and spent in a shop of small permanent bonuses, including redraws of the level-up cards; embers, records and settings kept between sessions.
 - Builds for macOS, Windows, Linux and the web.
 
 The first version is complete; see the [roadmap](docs/roadmap.md) for what each milestone delivered and what comes later.

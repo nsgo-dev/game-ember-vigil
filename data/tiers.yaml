@@ -17,6 +17,7 @@ tiers:
   - tier: 4
     healCards: 1
     regen: 0.5
+    shop: 0.5
   - tier: 5
     enemySpeed: 1.1
     bossEarlier: 60

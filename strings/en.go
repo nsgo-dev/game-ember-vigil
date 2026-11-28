@@ -7,6 +7,7 @@ var enTable = Table{
 	Start:         "Start",
 	Settings:      "Settings",
 	Collection:    "Collection",
+	Shop:          "Shop",
 	Quit:          "Quit",
 	BestRecords:   "Best Records",
 	NoRecordsYet:  "No runs recorded yet",
@@ -57,6 +58,23 @@ var enTable = Table{
 		"wildfire-path":   {Name: "Wildfire Path", Description: "Fire spreads sideways and touching patches merge.", Hint: "The trail longs for swifter feet."},
 		"dawn-bell":       {Name: "Dawn Bell", Description: "The pulse briefly stuns foes and heals you a little.", Hint: "The bell longs for a warmer heart."},
 	},
+
+	RedrawPrefix: "Redraw ",
+	RedrawHint:   "Deals three new cards. Key R or the gamepad's Back or left shoulder.",
+
+	ShopTitle: "Ember Shop",
+	ShopItems: map[string]CardCopy{
+		"banked-fire": {Name: "Banked Fire", Description: "+3% weapon damage per level."},
+		"lamp-oil":    {Name: "Lamp Oil", Description: "-2% weapon cooldown per level."},
+		"hearth":      {Name: "Hearth", Description: "+10 max health per level."},
+		"light-foot":  {Name: "Light Foot", Description: "+3 move speed per level."},
+		"lure":        {Name: "Lure", Description: "+5 ember pickup radius per level."},
+		"redraw":      {Name: "Redraw", Description: "One more redraw of the level-up cards per run."},
+	},
+	ShopNowFmt:  "Now ",
+	ShopCostFmt: "Next %d embers",
+	ShopMax:     "MAX",
+	ShopHalved:  "Long Night 4 and 5 halve these bonuses.",
 
 	Paused:           "Paused",
 	Resume:           "Resume",

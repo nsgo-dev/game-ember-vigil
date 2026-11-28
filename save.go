@@ -361,3 +361,34 @@ func addEvolutions(prev Progression, ids []string) (Progression, []string) {
 	}
 	return next, added
 }
+
+// shopLevel is the level the progression holds of shop item id, at most the shop's highest.
+func (p Progression) shopLevel(shop *shopDef, id string) int {
+	return max(0, min(shop.maxLevel(), p.Shop[id]))
+}
+
+// shopCost is what the next level of item id costs, and false when the item is unknown or at its last level.
+func (p Progression) shopCost(shop *shopDef, id string) (int, bool) {
+	level := p.shopLevel(shop, id)
+	if shop.item(id) < 0 || level >= shop.maxLevel() {
+		return 0, false
+	}
+	return shop.Costs[level], true
+}
+
+// buyShopItem spends the next level's cost of item id from prev's embers and raises its level, reporting false, with prev unchanged, when the item is unknown, at its last level or more than the balance.
+func buyShopItem(prev Progression, shop *shopDef, id string) (Progression, bool) {
+	next := normalizeProgression(prev)
+	cost, ok := next.shopCost(shop, id)
+	if !ok || cost > next.Embers {
+		return next, false
+	}
+	next.Embers -= cost
+	shopLevels := make(map[string]int, len(next.Shop)+1)
+	for k, v := range next.Shop {
+		shopLevels[k] = v
+	}
+	shopLevels[id] = next.shopLevel(shop, id) + 1
+	next.Shop = shopLevels
+	return next, true
+}

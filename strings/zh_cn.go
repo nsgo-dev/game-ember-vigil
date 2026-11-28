@@ -7,6 +7,7 @@ var zhCNTable = Table{
 	Start:         "开始",
 	Settings:      "设置",
 	Collection:    "图鉴",
+	Shop:          "商店",
 	Quit:          "退出",
 	BestRecords:   "最佳记录",
 	NoRecordsYet:  "尚无游玩记录",
@@ -57,6 +58,23 @@ var zhCNTable = Table{
 		"wildfire-path":   {Name: "野火之径", Description: "火焰向两侧蔓延，相触的火堆彼此合并。", Hint: "烬火渴望更轻快的脚步。"},
 		"dawn-bell":       {Name: "破晓之钟", Description: "震波短暂震晕敌人，并为你恢复少许生命。", Hint: "钟声渴望一颗更温暖的心。"},
 	},
+
+	RedrawPrefix: "重抽",
+	RedrawHint:   "换一组三张新卡牌。按 R 键，或手柄的 Back 键、左肩键。",
+
+	ShopTitle: "余烬商店",
+	ShopItems: map[string]CardCopy{
+		"banked-fire": {Name: "封炉之火", Description: "每级武器伤害 +3%。"},
+		"lamp-oil":    {Name: "长明油", Description: "每级武器冷却 -2%。"},
+		"hearth":      {Name: "壁炉", Description: "每级最大生命 +10。"},
+		"light-foot":  {Name: "轻履", Description: "每级移动速度 +3。"},
+		"lure":        {Name: "引烬符", Description: "每级余烬拾取半径 +5。"},
+		"redraw":      {Name: "重抽", Description: "每局多一次升级卡牌重抽。"},
+	},
+	ShopNowFmt:  "当前 ",
+	ShopCostFmt: "下一级 %d 余烬",
+	ShopMax:     "已满级",
+	ShopHalved:  "长夜 4 与 5 中这些加成减半。",
 
 	Paused:           "已暂停",
 	Resume:           "继续",

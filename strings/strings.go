@@ -2,6 +2,7 @@
 package strings
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -49,6 +50,7 @@ type Table struct {
 	Start         string
 	Settings      string
 	Collection    string
+	Shop          string
 	Quit          string
 	BestRecords   string
 	NoRecordsYet  string
@@ -84,6 +86,18 @@ type Table struct {
 	CollectionMadeFmt string
 	RecipeSeparator   string
 	Evolutions        map[string]EvolutionCopy
+
+	// Redraw: the level-up button that deals new cards, which RedrawPrefix leads before the redraws left, and how the keyboard and gamepad reach it.
+	RedrawPrefix string
+	RedrawHint   string
+
+	// Ember shop: the heading, the item copy by id in data/progression.yaml, what leads an item's bonus now and its next cost, the word for a maxed item, the balance and the note that Long Night 4 and 5 halve the bonuses.
+	ShopTitle   string
+	ShopItems   map[string]CardCopy
+	ShopNowFmt  string
+	ShopCostFmt string
+	ShopMax     string
+	ShopHalved  string
 
 	// Pause & quit confirmation
 	Paused           string
@@ -226,6 +240,23 @@ func (t Table) Evolution(id, fallbackName, fallbackDesc, fallbackHint string) Ev
 	}
 	return EvolutionCopy{Name: fallbackName, Description: fallbackDesc, Hint: fallbackHint}
 }
+
+// Redraw labels the level-up's Redraw button with the redraws left, such as "Redraw (2)".
+func (t Table) Redraw(n int) string { return t.RedrawPrefix + "(" + strconv.Itoa(n) + ")" }
+
+// ShopItem returns the localized name and per-level effect of a shop item, falling back to the raw strings.
+func (t Table) ShopItem(id, fallbackName, fallbackDesc string) CardCopy {
+	if c, ok := t.ShopItems[id]; ok {
+		return c
+	}
+	return CardCopy{Name: fallbackName, Description: fallbackDesc}
+}
+
+// ShopNow writes the bonus a shop item gives now, such as "Now +6%".
+func (t Table) ShopNow(bonus string) string { return t.ShopNowFmt + bonus }
+
+// ShopCost writes the cost of a shop item's next level, such as "Next 100 embers".
+func (t Table) ShopCost(n int) string { return fmt.Sprintf(t.ShopCostFmt, n) }
 
 // CollectionMade formats how many recipes of total are made, such as "Made 1/4".
 func (t Table) CollectionMade(n, total int) string {

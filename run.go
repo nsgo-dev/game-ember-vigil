@@ -340,6 +340,9 @@ type Run struct {
 	weaponLevels  []int
 	passiveLevels []int
 	offersNow     []offer
+	// shopLevels holds the bought level of each ember shop item, in data/progression.yaml's order, and redraws how many level-up redraws are left.
+	shopLevels []int
+	redraws    int
 	// evolution is whether chests may evolve weapons, evolved which weapons have, in weapons order, and made the evolution ids this run made, in order.
 	evolution bool
 	evolved   []bool
@@ -380,6 +383,7 @@ func newRunWith(d *gameData, seed uint64, tier int) *Run {
 		weaponLevels:    make([]int, len(d.weapons.Weapons)),
 		weaponCooldowns: make([]float64, len(d.weapons.Weapons)),
 		passiveLevels:   make([]int, len(d.upgrades.Passives)),
+		shopLevels:      make([]int, len(d.progression.Shop.Items)),
 		offersNow:       make([]offer, 0, offerCount),
 		events:          make([]Event, 0, maxEvents),
 		enemies:         make([]enemy, 0, maxEnemies),
@@ -411,6 +415,31 @@ func newRunWith(d *gameData, seed uint64, tier int) *Run {
 
 // EnableEvolution lets the run's chests evolve weapons, as the player's first win unlocks. The shell calls it before the first step; a replay must call it the same way.
 func (r *Run) EnableEvolution() { r.evolution = true }
+
+// SetShop gives the run the ember shop levels bought, by item id, which its derived stats and its redraws fold in, halved or less by its Long Night tier. The shell calls it before the first step; a replay must call it the same way.
+func (r *Run) SetShop(levels map[string]int) {
+	shop := &r.data.progression.Shop
+	r.redraws = 0
+	for i := range shop.Items {
+		it := &shop.Items[i]
+		r.shopLevels[i] = max(0, min(shop.maxLevel(), levels[it.ID]))
+		if it.Stat == statRedraw {
+			r.redraws += int(math.Floor(it.Amount * float64(r.shopLevels[i]) * r.rules.shop))
+		}
+	}
+	r.recomputeStats()
+	r.keeper.health = r.stats.maxHealth
+}
+
+// Redraw replaces the cards a level-up offers with new ones from the offer stream, spending one of the run's redraws; it reports false when no level-up is open or no redraw is left.
+func (r *Run) Redraw() bool {
+	if r.phase != PhaseLevelUp || r.redraws <= 0 {
+		return false
+	}
+	r.redraws--
+	r.offersNow = r.drawOffers(r.offersNow...)
+	return true
+}
 
 // Evolutions returns the ids of the evolutions this run has made, in the order it made them.
 func (r *Run) Evolutions() []string { return r.made }
@@ -1566,8 +1595,10 @@ type Snapshot struct {
 	XPNeeded  float64 `json:"xpNeeded"`
 	Kills     int     `json:"kills"`
 	// Tier is the Long Night tier the run plays, and Sight how far the keeper sees through the fog, as a fraction of the base run's.
-	Tier       int             `json:"tier"`
-	Sight      float64         `json:"sight"`
+	Tier  int     `json:"tier"`
+	Sight float64 `json:"sight"`
+	// Redraws is how many times the level-up cards may still be redrawn this run.
+	Redraws    int             `json:"redraws"`
 	Enemies    []EnemyView     `json:"enemies"`
 	Shots      []ShotView      `json:"shots"`
 	EnemyShots []EnemyShotView `json:"enemyShots"`
@@ -1737,6 +1768,7 @@ func (r *Run) Snapshot() Snapshot {
 	s.Kills = r.kills
 	s.Tier = r.tier
 	s.Sight = r.rules.sight
+	s.Redraws = r.redraws
 
 	s.Enemies = s.Enemies[:0]
 	for i := range r.enemies {

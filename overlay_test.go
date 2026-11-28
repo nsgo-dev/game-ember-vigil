@@ -83,7 +83,7 @@ func TestOverlayLayoutsFitTheSafeArea(t *testing.T) {
 				t.Fatalf("%s: %s %+v leaves the safe area of %v %+v", c.name, what, r, c.size, c.safe)
 			}
 		}
-		cards := layoutCards(c.size, c.safe, offerCount)
+		cards := layoutCards(c.size, c.safe, offerCount, false)
 		inside("heading", cards.heading)
 		for i, r := range cards.cards {
 			inside("card", r)
@@ -116,7 +116,7 @@ func TestOverlaysDrawTheKitAndFallBack(t *testing.T) {
 	st := testOffers()
 	for _, lang := range []evstrings.Lang{evstrings.EN, evstrings.ZhCN} {
 		d := &core.Drawing{}
-		drawCards(testPainter(d, size, kit, settled(0), lang), layoutCards(size, core.Edges{}, offerCount), st, 0)
+		drawCards(testPainter(d, size, kit, settled(0), lang), layoutCards(size, core.Edges{}, offerCount, false), st, 0)
 		for _, name := range []string{hudCardFocused, hudCardCommon, hudPipLit, hudPipUnlit} {
 			if !drewHUDPiece(d.Ops, kit, name) {
 				t.Fatalf("%s: the cards did not draw %s", lang, name)
@@ -158,7 +158,7 @@ func TestOverlaysDrawTheKitAndFallBack(t *testing.T) {
 	// Without the kit every overlay still draws its frames and words.
 	empty := newHUDArt(nil)
 	d := &core.Drawing{}
-	drawCards(testPainter(d, size, empty, settled(0), evstrings.EN), layoutCards(size, core.Edges{}, offerCount), st, 0)
+	drawCards(testPainter(d, size, empty, settled(0), evstrings.EN), layoutCards(size, core.Edges{}, offerCount, false), st, 0)
 	drawPause(testPainter(d, size, empty, settled(0), evstrings.EN), layoutPause(size, core.Edges{}, true), true, 0)
 	st.phase = PhaseDefeat
 	drawResults(testPainter(d, size, empty, settled(0), evstrings.EN), layoutResults(size, core.Edges{}, false), st, resultsTextOf(evstrings.For(evstrings.EN), st, Records{}, runReward{}, 0), 0)

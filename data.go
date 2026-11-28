@@ -55,6 +55,8 @@ const (
 	statRegen     = "regen"
 	statPickup    = "pickup"
 	statXPGain    = "xpGain"
+	// statRedraw is the shop's own stat: redraws of the level-up cards a run starts with.
+	statRedraw = "redraw"
 )
 
 // A kind of enemy movement, as an enemy's motion field names it.
@@ -379,6 +381,35 @@ type progressionFile struct {
 	Version int         `yaml:"version"`
 	Payout  payoutDef   `yaml:"payout"`
 	Unlocks []unlockDef `yaml:"unlocks"`
+	Shop    shopDef     `yaml:"shop"`
+}
+
+// shopDef is the ember shop: what each level of an item costs, in order, and the items, which all have as many levels as there are costs.
+type shopDef struct {
+	Costs []int         `yaml:"costs"`
+	Items []shopItemDef `yaml:"items"`
+}
+
+// shopItemDef is one permanent bonus: each level adds Amount to Stat, a passive's stat or redraw.
+type shopItemDef struct {
+	ID          string  `yaml:"id"`
+	Name        string  `yaml:"name"`
+	Stat        string  `yaml:"stat"`
+	Description string  `yaml:"description"`
+	Amount      float64 `yaml:"amount"`
+}
+
+// maxLevel is the highest level an item of the shop reaches.
+func (s *shopDef) maxLevel() int { return len(s.Costs) }
+
+// item returns the index of the item id, or -1.
+func (s *shopDef) item(id string) int {
+	for i := range s.Items {
+		if s.Items[i].ID == id {
+			return i
+		}
+	}
+	return -1
 }
 
 // payoutDef is how many embers a finished run earns, multiplied by 1 + TierBonus for each Long Night tier above 1.
@@ -1301,6 +1332,43 @@ func (f *progressionFile) validate() error {
 		for _, other := range f.Unlocks[:i] {
 			if other.ID == u.ID {
 				return fmt.Errorf("unlock %q is defined twice", u.ID)
+			}
+		}
+	}
+	return f.Shop.validate()
+}
+
+func (s *shopDef) validate() error {
+	if len(s.Costs) == 0 {
+		return errors.New("shop: no costs")
+	}
+	for i, c := range s.Costs {
+		if c < 1 {
+			return fmt.Errorf("shop: cost %d of level %d is not at least 1", c, i+1)
+		}
+	}
+	for i := range s.Items {
+		it := &s.Items[i]
+		switch {
+		case it.ID == "":
+			return fmt.Errorf("shop item %d has no id", i)
+		case it.Name == "" || it.Description == "":
+			return fmt.Errorf("shop item %q has no name or description", it.ID)
+		case !positive(it.Amount):
+			return fmt.Errorf("shop item %q: amount %v is not above 0", it.ID, it.Amount)
+		case it.Stat == statCooldown && it.Amount*float64(s.maxLevel()) >= 1:
+			return fmt.Errorf("shop item %q: cooldown reduction reaches 100%%", it.ID)
+		case it.Stat == statRedraw && it.Amount != math.Trunc(it.Amount):
+			return fmt.Errorf("shop item %q: redraws %v are not whole", it.ID, it.Amount)
+		}
+		switch it.Stat {
+		case statDamage, statCooldown, statMoveSpeed, statMaxHealth, statPickup, statRedraw:
+		default:
+			return fmt.Errorf("shop item %q: unknown stat %q", it.ID, it.Stat)
+		}
+		for _, other := range s.Items[:i] {
+			if other.ID == it.ID {
+				return fmt.Errorf("shop item %q is defined twice", it.ID)
 			}
 		}
 	}
