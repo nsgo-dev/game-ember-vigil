@@ -9,6 +9,12 @@ unlocks:
   - id: evolution
     name: Evolution
     win: true
+  - id: spark-chain
+    name: Spark Chain
+    kills: 3000
+  - id: ash-censer
+    name: Ash Censer
+    elites: 3
 shop:
   costs:
     - 50

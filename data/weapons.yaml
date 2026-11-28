@@ -166,3 +166,92 @@ weapons:
       damage: 1.3
       stun: 0.3
       heal: 1
+  - id: spark-chain
+    name: Spark Chain
+    kind: chain
+    description: A spark leaps between nearby foes, 3 jumps rising to 6.
+    cooldownMin: 0.3
+    range: 200
+    duration: 0.22
+    unlock: spark-chain
+    jumpRange: 72
+    levels:
+      - damage: 6
+        cooldown: 1.4
+        knockback: 30
+        count: 3
+      - damage: 8
+        cooldown: 1.3
+        knockback: 30
+        count: 4
+      - damage: 10
+        cooldown: 1.2
+        knockback: 35
+        count: 4
+      - damage: 12
+        cooldown: 1.1
+        knockback: 35
+        count: 5
+      - damage: 14
+        cooldown: 1
+        knockback: 40
+        count: 6
+    evolution:
+      id: ember-storm
+      name: Ember Storm
+      passive: wick
+      description: Every jump forks to one more foe.
+      hint: The spark longs for a hotter wick.
+      damage: 1.2
+      fork: 1
+  - id: ash-censer
+    name: Ash Censer
+    kind: censer
+    description: Lobs a censer at the densest crowd; it bursts and leaves a small fire.
+    cooldownMin: 0.8
+    range: 230
+    unlock: ash-censer
+    flight: 0.6
+    fireRadius: 0.7
+    fireDamage: 0.15
+    levels:
+      - damage: 8
+        cooldown: 4
+        knockback: 40
+        radius: 30
+        duration: 2
+        tick: 0.5
+      - damage: 11
+        cooldown: 3.8
+        knockback: 45
+        radius: 33
+        duration: 2.4
+        tick: 0.48
+      - damage: 14
+        cooldown: 3.6
+        knockback: 50
+        radius: 36
+        duration: 2.8
+        tick: 0.45
+      - damage: 17
+        cooldown: 3.4
+        knockback: 55
+        radius: 39
+        duration: 3.2
+        tick: 0.42
+      - damage: 20
+        cooldown: 3.2
+        knockback: 60
+        radius: 42
+        duration: 3.6
+        tick: 0.4
+    evolution:
+      id: pyre-censer
+      name: Pyre Censer
+      passive: gathering
+      description: Each burst first pulls foes and embers to its centre.
+      hint: The censer longs to gather more.
+      damage: 1.3
+      pull: 0.35
+      pullRadius: 90
+      pullSpeed: 160

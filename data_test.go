@@ -68,8 +68,8 @@ func TestEmbeddedDataLoads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(d.weapons.Weapons) != 4 {
-		t.Fatalf("embedded weapons = %d, want 4", len(d.weapons.Weapons))
+	if len(d.weapons.Weapons) != 6 {
+		t.Fatalf("embedded weapons = %d, want 6", len(d.weapons.Weapons))
 	}
 	for _, w := range d.weapons.Weapons {
 		if len(w.Levels) != 5 {
@@ -85,6 +85,9 @@ func TestEmbeddedDataLoads(t *testing.T) {
 			if c := evstrings.For(lang).Evolutions[evo.ID]; c.Name == "" {
 				t.Fatalf("evolution %q has no %s strings", evo.ID, lang)
 			}
+		}
+		if c := evstrings.For(evstrings.EN).Cards[w.ID]; c.Name != w.Name || c.Description != w.Description {
+			t.Fatalf("weapon %q's English strings %+v differ from its data", w.ID, c)
 		}
 		if c := evstrings.For(evstrings.EN).Evolutions[evo.ID]; c.Name != evo.Name || c.Description != evo.Description || c.Hint != evo.Hint {
 			t.Fatalf("evolution %q's English strings %+v differ from its data", evo.ID, c)
@@ -209,7 +212,42 @@ func TestDataLoadersRefuseBrokenFiles(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			return (&gameData{weapons: *weapons, upgrades: *upgrades}).check()
+			progression, err := parseProgressionFile(fileProgression, progressionYAML)
+			if err != nil {
+				return err
+			}
+			return (&gameData{weapons: *weapons, upgrades: *upgrades, progression: *progression}).check()
+		}},
+		{"a weapon locked behind a missing unlock", func() error {
+			weapons, err := parseWeaponFile(fileWeapons, replace(weaponYAML, "unlock: ash-censer", "unlock: ash"))
+			if err != nil {
+				return err
+			}
+			upgrades, err := parseUpgradeFile(fileUpgrades, upgradeYAML)
+			if err != nil {
+				return err
+			}
+			progression, err := parseProgressionFile(fileProgression, progressionYAML)
+			if err != nil {
+				return err
+			}
+			return (&gameData{weapons: *weapons, upgrades: *upgrades, progression: *progression}).check()
+		}},
+		{"a chain that cannot jump", func() error {
+			_, err := parseWeaponFile(fileWeapons, replace(weaponYAML, "jumpRange: 72", "jumpRange: 0"))
+			return err
+		}},
+		{"a censer setting a chain's field", func() error {
+			_, err := parseWeaponFile(fileWeapons, replace(weaponYAML, "flight: 0.6", "flight: 0.6\n    jumpRange: 10"))
+			return err
+		}},
+		{"an evolved chain striking past the cap", func() error {
+			_, err := parseWeaponFile(fileWeapons, replace(weaponYAML, "fork: 1", "fork: 9"))
+			return err
+		}},
+		{"a censer evolution that does not pull", func() error {
+			_, err := parseWeaponFile(fileWeapons, replace(weaponYAML, "pull: 0.35", "pull: 0"))
+			return err
 		}},
 		{"run with a chest that never holds", func() error {
 			_, err := parseRunFile(fileRun, replace(runYAML, "hold: 0.6", "hold: 0"))

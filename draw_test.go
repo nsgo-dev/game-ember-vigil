@@ -392,6 +392,60 @@ func TestFrameDrawsChestsAndEvolutions(t *testing.T) {
 	}
 }
 
+// TestFrameDrawsSparkChainAndAshCenser checks that a frame draws the spark's leaps, a censer in flight and pulling, and a censer's burst and fire from the art kit, and from strokes and circles without it.
+func TestFrameDrawsSparkChainAndAshCenser(t *testing.T) {
+	r := quietRun(t)
+	r.weaponLevels[r.data.starterWeapon] = 0
+	r.weaponLevels[weaponByName(t, r, "Spark Chain")] = 1
+	r.weaponLevels[weaponByName(t, r, "Ash Censer")] = 1
+	for k := range 4 {
+		r.addEnemy(enemyByName(t, r, "Husk"), r.keeper.pos.Add(Vec2{X: 30 + 20*float64(k)}), 50, 1)
+	}
+	stepOnce(r, Controls{})
+	s := r.Snapshot()
+	if len(s.Arcs) == 0 || len(s.Censers) != 1 {
+		t.Fatalf("the run shows %d leaps and %d censers, want leaps and one censer", len(s.Arcs), len(s.Censers))
+	}
+	at := s.Keeper.Add(Vec2{X: 40})
+	s.Arcs = append(s.Arcs, ArcView{ID: 900, From: s.Keeper, To: at, Life: 0.1, Max: 0.2, Storm: true})
+	s.Censers = append(s.Censers, CenserView{ID: 901, Pos: at, Progress: 1, Pulling: 0.5, Radius: 60})
+	s.Pulses = append(s.Pulses, PulseView{ID: 902, Pos: at, Radius: 40, Life: 0.2, Max: 0.4, Censer: true}, PulseView{ID: 903, Pos: at, Radius: 40, Life: 0.2, Max: 0.4, Censer: true, Pyre: true})
+	s.Patches = append(s.Patches, PatchView{ID: 904, Pos: at, Radius: 24, Life: 1, Max: 2, Censer: true})
+	for _, kit := range []*art{newArt(), newArtFromFS(fstest.MapFS{}, fstest.MapFS{})} {
+		a := newArenaRenderer(kit)
+		a.startRun(9)
+		a.sync(s, r.Events(), stepSeconds)
+		d := &core.Drawing{}
+		a.draw(d, 1, runView)
+		if kit.sheetAtlas != nil {
+			// Each leap and its spark, the censer in flight and the pull.
+			if want := 2*len(s.Arcs) + 2; len(a.sparkSprites) != want {
+				t.Fatalf("the kit drew %d spark and censer sprites, want %d", len(a.sparkSprites), want)
+			}
+			if len(a.pulseSprites) != 2 || len(a.patchSprites) != 1 {
+				t.Fatalf("the kit drew %d bursts and %d fires, want 2 and 1", len(a.pulseSprites), len(a.patchSprites))
+			}
+			continue
+		}
+		strokes := func(d *core.Drawing) int {
+			n := 0
+			for _, op := range d.Ops {
+				if op.Kind == core.DrawStroke {
+					n++
+				}
+			}
+			return n
+		}
+		with := strokes(d)
+		a.arcs, a.censers = a.arcs[:0], a.censers[:0]
+		plain := &core.Drawing{}
+		a.draw(plain, 1, runView)
+		if with < strokes(plain)+len(s.Arcs)+1 {
+			t.Fatalf("the fallback stroked %d times with the leaps and pull and %d without", with, strokes(plain))
+		}
+	}
+}
+
 // TestFrameDrawsNewEnemiesPickupsAndBossTelegraph checks that late enemies, enemy shots, heal caches and boss telegraphs render cleanly.
 func TestFrameDrawsNewEnemiesPickupsAndBossTelegraph(t *testing.T) {
 	r := quietRun(t)
@@ -907,7 +961,7 @@ func TestMissingSpritesAndIconsFallBackCleanly(t *testing.T) {
 func TestUpgradeCardIconsLoadAndFallback(t *testing.T) {
 	a := newArt()
 	expected := []string{
-		"ember-bolt", "lantern-halo", "cinder-trail", "bell-toll",
+		"ember-bolt", "lantern-halo", "cinder-trail", "bell-toll", "spark-chain", "ash-censer",
 		"wick", "oil", "reach", "step", "warmth", "mending", "gathering", "glow",
 	}
 	for _, id := range expected {

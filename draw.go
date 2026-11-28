@@ -229,6 +229,8 @@ type arenaRenderer struct {
 	patches    []PatchView
 	pulses     []PulseView
 	shadows    []ShadowView
+	arcs       []ArcView
+	censers    []CenserView
 	boss       BossView
 	// sight is how far the keeper sees through the fog, as a fraction of the base run's, which a Long Night tier shortens.
 	sight float64
@@ -262,6 +264,8 @@ type arenaRenderer struct {
 	pulseBatch   sprite.Batch
 	ringBatch    sprite.Batch
 	ringSprites  []*sprite.Sprite
+	sparkBatch   sprite.Batch
+	sparkSprites []*sprite.Sprite
 	sheetSprites []*sprite.Sprite
 	patchSprites []*sprite.Sprite
 	pulseSprites []*sprite.Sprite
@@ -423,6 +427,8 @@ func (r *arenaRenderer) sync(s Snapshot, events []Event, dt float64) {
 	r.trackHalo(s)
 	r.patches = append(r.patches[:0], s.Patches...)
 	r.pulses = append(r.pulses[:0], s.Pulses...)
+	r.arcs = append(r.arcs[:0], s.Arcs...)
+	r.censers = append(r.censers[:0], s.Censers...)
 	r.shadows = append(r.shadows[:0], s.Shadows...)
 	r.sight = s.Sight
 	r.boss = s.Boss
@@ -820,6 +826,7 @@ func (r *arenaRenderer) draw(d *core.Drawing, alpha float64, view core.Size) {
 	}
 	r.drawRing(d, ox, oy)
 	r.drawPulses(d, ox, oy)
+	r.drawSparks(d, ox, oy)
 	d.SetImageSmoothing(false)
 	r.drawStuns(d, ox, oy)
 	r.drawEliteBars(d, ox, oy)
@@ -1222,9 +1229,15 @@ func (r *arenaRenderer) drawPatches(d *core.Drawing, ox, oy float32) {
 				sheet = r.art.sheets.wildfire
 			}
 			frame := sampleAnimation(sheet, p.ID, r.animTime)
+			// The fire fills about the whole cinder frame, but only censerFireShare of a censer burst's.
+			fill := float32(2.15)
+			if burst := r.art.sheets.censerBurst; p.Censer && burst.loaded && len(burst.move.Frames) == 4 {
+				frame = censerFire(burst, p.ID, r.animTime)
+				fill = 2 / censerFireShare
+			}
 			fade := float32(math.Min(1, p.Life/0.5))
 			flicker := float32(1 + 0.05*math.Sin(r.fx.time*14+float64(p.ID)))
-			scale := (rad * 2.15 * flicker) / max(frame.W, 1)
+			scale := (rad * fill * flicker) / max(frame.W, 1)
 			s := r.next(frame)
 			s.X, s.Y, s.ScaleX, s.ScaleY, s.Alpha, s.Z = x, y, scale, scale, fade, 0
 			r.patchSprites = append(r.patchSprites, s)
@@ -1249,8 +1262,11 @@ func (r *arenaRenderer) drawPatches(d *core.Drawing, ox, oy float32) {
 		fade := float32(math.Min(1, p.Life/0.5))
 		flicker := float32(1 + 0.06*math.Sin(r.fx.time*14+float64(p.ID)))
 		outer, inner := uint32(0xa3341a), uint32(0xff7a1a)
-		if p.Wild {
+		switch {
+		case p.Wild:
 			outer, inner = 0xff7a1a, 0xffd166
+		case p.Censer:
+			outer, inner = 0x5a3a2e, 0xd9541e
 		}
 		d.SetFillColor(core.RGBA(outer, 0.42*fade)).
 			BeginPath().Arc(x, y, rad*flicker, 0, 2*math.Pi, false).Fill()
@@ -1279,13 +1295,19 @@ func (r *arenaRenderer) drawPulses(d *core.Drawing, ox, oy float32) {
 			x, y := float32(p.Pos.X)-ox, float32(p.Pos.Y)-oy
 			t := float32(min(max(1-p.Life/max(p.Max, 0.001), 0), 1))
 			rad := float32(p.Radius) * (0.45 + 0.65*t)
-			if x+rad < 0 || x-rad > vw || y+rad < 0 || y-rad > vh {
+			fill := float32(2)
+			if p.Censer {
+				// A censer's burst is at its full size at once and only flares a little.
+				frames, fill = r.censerBurstFrames(p.Pyre), 2/censerBurstShare
+				rad = float32(p.Radius) * (0.85 + 0.25*t)
+			}
+			if len(frames) == 0 || x+rad < 0 || x-rad > vw || y+rad < 0 || y-rad > vh {
 				continue
 			}
 			idx := min(int(t*float32(len(frames))), len(frames)-1)
 			frame := frames[idx].Frame
 			alpha := float32(math.Max(0, 1-float64(t)*0.85))
-			scale := (rad * 2) / max(frame.W, 1)
+			scale := (rad * fill) / max(frame.W, 1)
 			s := r.next(frame)
 			s.X, s.Y, s.ScaleX, s.ScaleY, s.Alpha, s.Z = x, y, scale, scale, alpha, 6
 			r.pulseSprites = append(r.pulseSprites, s)
@@ -1310,8 +1332,13 @@ func (r *arenaRenderer) drawPulses(d *core.Drawing, ox, oy float32) {
 		}
 		alpha := float32(math.Max(0, 1-float64(t)))
 		fill, stroke := uint32(0xffb347), uint32(0xffd166)
-		if p.Dawn {
+		switch {
+		case p.Dawn:
 			fill, stroke = 0xfff1d6, 0xfff1d6
+		case p.Censer:
+			rad = float32(p.Radius)
+			d.SetFillColor(core.RGBA(0xd9541e, 0.4*alpha)).BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Fill()
+			fill, stroke = 0xffb347, 0xff7a1a
 		}
 		d.SetFillColor(core.RGBA(fill, 0.16*alpha)).
 			BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Fill()
@@ -1658,4 +1685,137 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 		DisableShadows: !r.quality.shadows,
 	}
 	r.scene.Draw(d, core.Bounds{Size: core.Size{Width: core.Points(w), Height: core.Points(h)}})
+}
+
+// The shares of an ash_censer_burst frame's width its burst and its fire fill.
+const (
+	censerBurstShare = 0.9
+	censerFireShare  = 0.6
+)
+
+// censerBurstFrames returns the frames a censer's burst plays across: a Pyre Censer's flare, else the Ash Censer's burst, or none without the art.
+func (r *arenaRenderer) censerBurstFrames(pyre bool) []sprite.AnimationFrame {
+	if p := r.art.sheets.pyre; pyre && p.loaded && len(p.move.Frames) == 4 {
+		return p.move.Frames[3:]
+	}
+	if b := r.art.sheets.censerBurst; b.loaded && len(b.move.Frames) == 4 {
+		return b.move.Frames[:2]
+	}
+	return nil
+}
+
+// censerFire returns the frame a censer's fire shows at animTime: ash_censer_burst's last two frames in turn, offset by id.
+func censerFire(burst sheetActor, id uint64, animTime time.Duration) sprite.Frame {
+	each := max(burst.round/4, time.Millisecond)
+	k := int((animTime+phaseOffset(id, 2*each))/each) % 2
+	return burst.move.Frames[2+k].Frame
+}
+
+// censerLift is how high an Ash Censer arcs over the ground at the top of its flight, in world units.
+const censerLift = 30
+
+// drawSparks paints Spark Chain's leaps and Ash Censers in flight or pulling over the sprites: the sheets when loaded, strokes and circles otherwise.
+func (r *arenaRenderer) drawSparks(d *core.Drawing, ox, oy float32) {
+	if len(r.arcs) == 0 && len(r.censers) == 0 {
+		return
+	}
+	sheets := &r.art.sheets
+	if r.art.sheetAtlas == nil || !sheets.sparkArc.loaded || !sheets.censer.loaded {
+		r.drawSparkStrokes(d, ox, oy)
+		return
+	}
+	r.sparkSprites = r.sparkSprites[:0]
+	for i := range r.arcs {
+		a := &r.arcs[i]
+		sheet := sheets.sparkArc
+		if a.Storm && sheets.emberStorm.loaded {
+			sheet = sheets.emberStorm
+		}
+		t := float32(min(max(1-a.Life/max(a.Max, 0.001), 0), 1))
+		frames := sheet.move.Frames
+		frame := frames[min(int(t*float32(len(frames))), len(frames)-1)].Frame
+		fx, fy := toScreen(a.From, ox, oy)
+		tx, ty := toScreen(a.To, ox, oy)
+		length := float32(math.Hypot(float64(tx-fx), float64(ty-fy)))
+		s := r.next(frame)
+		s.X, s.Y = (fx+tx)/2, (fy+ty)/2
+		s.ScaleX = length / max(frame.W*0.9, 1)
+		s.ScaleY = sheet.scale
+		s.Rotation = float32(math.Atan2(float64(ty-fy), float64(tx-fx)))
+		s.Alpha, s.Z = 1-0.6*t, 7
+		r.sparkSprites = append(r.sparkSprites, s)
+		if sp := sheets.spark; sp.loaded {
+			head := r.next(sampleAnimation(sp, a.ID, r.animTime))
+			head.X, head.Y, head.ScaleX, head.ScaleY, head.Alpha, head.Z = tx, ty, sp.scale, sp.scale, 1-t, 8
+			r.sparkSprites = append(r.sparkSprites, head)
+		}
+	}
+	for i := range r.censers {
+		c := &r.censers[i]
+		x, y := toScreen(c.Pos, ox, oy)
+		if p := sheets.pyre; c.Pulling > 0 && p.loaded && len(p.move.Frames) == 4 {
+			frame := p.move.Frames[min(int(c.Pulling*3), 2)].Frame
+			// The swirl is drawn inside the pull's reach and half see-through, so the foes it draws in stay readable.
+			scale := float32(1.6*c.Radius) / max(frame.W*censerBurstShare, 1)
+			s := r.next(frame)
+			s.X, s.Y, s.ScaleX, s.ScaleY, s.Alpha, s.Z = x, y, scale, scale, 0.55, 6
+			s.Rotation = -float32(c.Pulling) * 2 * math.Pi
+			r.sparkSprites = append(r.sparkSprites, s)
+			continue
+		}
+		if c.Progress >= 1 {
+			continue
+		}
+		lift := censerLift * float32(math.Sin(math.Pi*c.Progress))
+		s := r.next(sampleAnimation(sheets.censer, c.ID, r.animTime))
+		s.X, s.Y, s.ScaleX, s.ScaleY, s.Alpha, s.Z = x, y-lift, sheets.censer.scale, sheets.censer.scale, 1, 8
+		r.sparkSprites = append(r.sparkSprites, s)
+	}
+	if len(r.sparkSprites) > 0 {
+		d.SetImageSmoothing(true)
+		r.sparkBatch.Atlas = r.art.sheetAtlas
+		r.sparkBatch.Sprites = r.sparkSprites
+		r.sparkBatch.Draw(d)
+	}
+}
+
+// drawSparkStrokes is drawSparks without the sheets: each leap a jagged golden line, each censer a dark bead over its shadow, and each pull a closing ring.
+func (r *arenaRenderer) drawSparkStrokes(d *core.Drawing, ox, oy float32) {
+	d.SetImageSmoothing(false)
+	for i := range r.arcs {
+		a := &r.arcs[i]
+		alpha := float32(min(max(a.Life/max(a.Max, 0.001), 0), 1))
+		fx, fy := toScreen(a.From, ox, oy)
+		tx, ty := toScreen(a.To, ox, oy)
+		nx, ny := -(ty - fy), tx-fx
+		if l := float32(math.Hypot(float64(nx), float64(ny))); l > 0 {
+			nx, ny = nx/l, ny/l
+		}
+		color := uint32(0xffd166)
+		if a.Storm {
+			color = 0xff7a1a
+		}
+		d.SetStrokeColor(core.RGBA(color, 0.9*alpha)).SetLineWidth(1.5).BeginPath().MoveTo(fx, fy)
+		// Two kinks, bent to either side by the arc's id, make a stroke read as a spark.
+		bend := float32(3 + a.ID%4)
+		d.LineTo(fx+(tx-fx)/3+nx*bend, fy+(ty-fy)/3+ny*bend)
+		d.LineTo(fx+2*(tx-fx)/3-nx*bend, fy+2*(ty-fy)/3-ny*bend)
+		d.LineTo(tx, ty).Stroke()
+	}
+	for i := range r.censers {
+		c := &r.censers[i]
+		x, y := toScreen(c.Pos, ox, oy)
+		if c.Pulling > 0 {
+			rad := float32(c.Radius) * (1 - float32(c.Pulling)*0.7)
+			d.SetStrokeColor(core.RGBA(0xff7a1a, 0.7)).SetLineWidth(2).BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Stroke()
+			continue
+		}
+		if c.Progress >= 1 {
+			continue
+		}
+		lift := censerLift * float32(math.Sin(math.Pi*c.Progress))
+		d.SetFillColor(core.RGBA(0x000000, 0.3)).BeginPath().Ellipse(x, y, 4, 2).Fill()
+		d.SetFillColor(core.RGB(0x5a3a2e)).BeginPath().Arc(x, y-lift, 4, 0, 2*math.Pi, false).Fill()
+		d.SetFillColor(core.RGB(0xff7a1a)).BeginPath().Arc(x, y-lift, 1.8, 0, 2*math.Pi, false).Fill()
+	}
 }

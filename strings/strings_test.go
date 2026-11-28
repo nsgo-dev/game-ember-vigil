@@ -7,7 +7,7 @@ import (
 
 func TestTablesAreComplete(t *testing.T) {
 	cardIDs := []string{
-		"ember-bolt", "lantern-halo", "cinder-trail", "bell-toll",
+		"ember-bolt", "lantern-halo", "cinder-trail", "bell-toll", "spark-chain", "ash-censer",
 		"wick", "oil", "reach", "step", "warmth", "mending", "gathering", "glow",
 		"ember-heal",
 	}
@@ -22,7 +22,7 @@ func TestTablesAreComplete(t *testing.T) {
 				t.Errorf("lang %q: field %s is empty", lang, typ.Field(i).Name)
 			}
 		}
-		for _, id := range []string{"starfall-volley", "sun-ring", "wildfire-path", "dawn-bell"} {
+		for _, id := range []string{"starfall-volley", "sun-ring", "wildfire-path", "dawn-bell", "ember-storm", "pyre-censer"} {
 			if c := tbl.Evolutions[id]; c.Name == "" || c.Description == "" || c.Hint == "" {
 				t.Errorf("lang %q: evolution %q is incomplete: %+v", lang, id, c)
 			}
@@ -32,8 +32,10 @@ func TestTablesAreComplete(t *testing.T) {
 				t.Errorf("lang %q: shop item %q is incomplete: %+v", lang, id, c)
 			}
 		}
-		if tbl.Unlocks["evolution"] == "" {
-			t.Errorf("lang %q: the evolution unlock has no name", lang)
+		for _, id := range []string{"evolution", "spark-chain", "ash-censer"} {
+			if tbl.Unlocks[id] == "" {
+				t.Errorf("lang %q: the %q unlock has no name", lang, id)
+			}
 		}
 		for _, id := range cardIDs {
 			c, ok := tbl.Cards[id]

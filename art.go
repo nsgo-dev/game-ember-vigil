@@ -428,6 +428,13 @@ type sheetFrames struct {
 	sunRing  sheetActor
 	wildfire sheetActor
 	dawnBell sheetActor
+	// spark is Spark Chain's spark where it strikes, sparkArc and emberStorm its leaps, censer the Ash Censer in flight, censerBurst its burst (frames 0–1) and fire (frames 2–3), and pyre a Pyre Censer's pull.
+	spark       sheetActor
+	sparkArc    sheetActor
+	emberStorm  sheetActor
+	censer      sheetActor
+	censerBurst sheetActor
+	pyre        sheetActor
 }
 
 // sheetSpec describes one uniform-grid PNG sprite sheet under assets/sprites/.
@@ -579,6 +586,42 @@ var sheetSpecs = []sheetSpec{
 		rows: 1, cols: 4, moveFrameTime: 90 * time.Millisecond,
 		worldHeight: 64,
 		target:      func(s *sheetFrames) *sheetActor { return &s.dawnBell },
+	},
+	{
+		name: "spark_chain", file: "assets/sprites/spark_chain.png",
+		rows: 1, cols: 4, moveFrameTime: 60 * time.Millisecond,
+		worldHeight: 12,
+		target:      func(s *sheetFrames) *sheetActor { return &s.spark },
+	},
+	{
+		name: "spark_arc", file: "assets/sprites/spark_arc.png",
+		rows: 1, cols: 4, moveFrameTime: 60 * time.Millisecond,
+		worldHeight: 16,
+		target:      func(s *sheetFrames) *sheetActor { return &s.sparkArc },
+	},
+	{
+		name: "ember_storm", file: "assets/sprites/ember_storm.png",
+		rows: 1, cols: 4, moveFrameTime: 60 * time.Millisecond,
+		worldHeight: 16,
+		target:      func(s *sheetFrames) *sheetActor { return &s.emberStorm },
+	},
+	{
+		name: "ash_censer", file: "assets/sprites/ash_censer.png",
+		rows: 1, cols: 4, moveFrameTime: 90 * time.Millisecond,
+		worldHeight: 14,
+		target:      func(s *sheetFrames) *sheetActor { return &s.censer },
+	},
+	{
+		name: "ash_censer_burst", file: "assets/sprites/ash_censer_burst.png",
+		rows: 1, cols: 4, moveFrameTime: 110 * time.Millisecond,
+		worldHeight: 64,
+		target:      func(s *sheetFrames) *sheetActor { return &s.censerBurst },
+	},
+	{
+		name: "pyre_censer", file: "assets/sprites/pyre_censer.png",
+		rows: 1, cols: 4, moveFrameTime: 90 * time.Millisecond,
+		worldHeight: 64,
+		target:      func(s *sheetFrames) *sheetActor { return &s.pyre },
 	},
 }
 

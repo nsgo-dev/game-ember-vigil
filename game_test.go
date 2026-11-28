@@ -999,6 +999,31 @@ func TestTouchLayoutAndSafeAreaOnPhoneLandscape(t *testing.T) {
 	checkSafe("results")
 }
 
+// TestLaterWeaponsUnlockAndAreOfferedAfterARestart checks that a run of 3000 kills and three Gloomwardens unlocks Spark Chain and Ash Censer, names them on the results and saves them, and that runs after a restart offer them.
+func TestLaterWeaponsUnlockAndAreOfferedAfterARestart(t *testing.T) {
+	app, g := startEmberVigil(t)
+	press(t, app, "id:title-start")
+	if ids := offeredIDs(g.run); slices.Contains(ids, unlockSparkChain) || slices.Contains(ids, unlockAshCenser) {
+		t.Fatalf("a first run offers %v", ids)
+	}
+	g.run.kills, g.run.elites = 3000, 3
+	g.run.keeper.health = 0
+	app.Advance(8 * frame)
+	if !g.progress.has(unlockSparkChain) || !g.progress.has(unlockAshCenser) {
+		t.Fatalf("the run did not unlock both weapons: %+v", g.progress)
+	}
+	en := evstrings.For(evstrings.EN)
+	if got, want := app.Find("id:results-unlocked").Props.Label, en.UnlockedList([]string{"Spark Chain", "Ash Censer"}); got != want {
+		t.Fatalf("results unlocked = %q, want %q", got, want)
+	}
+
+	app2, g2 := startEmberVigil(t, nsgotest.Storage(storageSnapshot(app.Storage())))
+	press(t, app2, "id:title-start")
+	if ids := offeredIDs(g2.run); !slices.Contains(ids, unlockSparkChain) || !slices.Contains(ids, unlockAshCenser) {
+		t.Fatalf("a run after a restart offers %v", ids)
+	}
+}
+
 // TestEvolutionUnlocksByAWinAndTheCollectionPersists checks that evolution waits for the first win, that a chest then evolves a met recipe, shows it in the HUD and saves it to the collection at once, and that the collection lists it, and the rest as "???" with a hint, after a restart.
 func TestEvolutionUnlocksByAWinAndTheCollectionPersists(t *testing.T) {
 	app, g := startEmberVigil(t)
@@ -1046,8 +1071,8 @@ func TestEvolutionUnlocksByAWinAndTheCollectionPersists(t *testing.T) {
 		t.Fatalf("Collection opened phase %v", g2.phase.Get())
 	}
 	app2.Find("id:collection-heading")
-	if got := app2.Find("id:collection-made").Props.Label; got != en.CollectionMade(1, 4) {
-		t.Fatalf("collection count = %q, want %q", got, en.CollectionMade(1, 4))
+	if got, want := app2.Find("id:collection-made").Props.Label, en.CollectionMade(1, len(recipes(mustGameData()))); got != want {
+		t.Fatalf("collection count = %q, want %q", got, want)
 	}
 	if got := app2.Find("id:collection-recipe-starfall-volley").Props.Label; !strings.Contains(got, "Starfall Volley") || !strings.Contains(got, "Ember Bolt + Oil") {
 		t.Fatalf("a made recipe reads %q", got)

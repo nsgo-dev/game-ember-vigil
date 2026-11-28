@@ -167,7 +167,7 @@ func offered(cards []offer, id string) int {
 	return 0
 }
 
-// offerPool is every eligible weapon and passive still below its maximum level and fitting within the slot caps, in data order.
+// offerPool is every eligible weapon and passive still below its maximum level and fitting within the slot caps, in data order; a locked weapon is never eligible.
 func (r *Run) offerPool() []offer {
 	canAddWeapon := r.ownedWeapons() < r.data.upgrades.WeaponSlots
 	canAddPassive := r.ownedPassives() < r.data.upgrades.PassiveSlots
@@ -175,7 +175,7 @@ func (r *Run) offerPool() []offer {
 	for i := range r.data.weapons.Weapons {
 		w := &r.data.weapons.Weapons[i]
 		lvl := r.weaponLevels[i]
-		if lvl >= len(w.Levels) || (lvl == 0 && !canAddWeapon) {
+		if lvl >= len(w.Levels) || (lvl == 0 && (!canAddWeapon || r.locked[i])) {
 			continue
 		}
 		pool = append(pool, offer{
