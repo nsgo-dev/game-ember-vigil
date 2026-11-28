@@ -1,2 +1,6 @@
 .nsgo/
 dist/
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
