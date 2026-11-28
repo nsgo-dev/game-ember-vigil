@@ -17,7 +17,7 @@ func stepOnce(r *Run, c Controls) { r.Step(stepTime, c) }
 // quietRun starts a run with the wave director held back, so a test decides alone what the keeper meets.
 func quietRun(t *testing.T) *Run {
 	t.Helper()
-	r := NewRun(7)
+	r := NewRun(7, 1)
 	r.director.nextSpawn = math.Inf(1)
 	r.director.nextSurge = len(r.data.waves.Surges)
 	r.director.nextElite = len(r.data.waves.Elites)
@@ -62,7 +62,7 @@ func circleControls(step int) Controls {
 // TestSameSeedAndControlsReplayIdentically plays two runs with one seed and one control script and compares every event and the final snapshot.
 func TestSameSeedAndControlsReplayIdentically(t *testing.T) {
 	play := func() (*Run, []Event) {
-		r := NewRun(4242)
+		r := NewRun(4242, 1)
 		var events []Event
 		for step := range 3 * 60 * 60 {
 			if r.Snapshot().Phase == PhaseLevelUp {
@@ -81,25 +81,26 @@ func TestSameSeedAndControlsReplayIdentically(t *testing.T) {
 	if !reflect.DeepEqual(first.Snapshot(), second.Snapshot()) {
 		t.Fatalf("the same seed and controls ended in different runs:\n%+v\n%+v", first.Snapshot(), second.Snapshot())
 	}
-	if a, b := first.Payout(1), second.Payout(1); a != b {
+	if a, b := first.Payout(), second.Payout(); a != b {
 		t.Fatalf("the same seed and controls paid %d and %d embers", a, b)
 	}
 }
 
 // TestPayoutFollowsTheDesign checks the ember payout of docs/meta-progression.md: 5 a whole minute, 2 per whole hundred kills, 15 a chest and 50 a win, times 1 + 0.25 per tier above 1.
 func TestPayoutFollowsTheDesign(t *testing.T) {
-	r := NewRun(1)
-	if got := r.Payout(1); got != 0 {
+	r := NewRun(1, 1)
+	if got := r.Payout(); got != 0 {
 		t.Fatalf("a fresh run pays %d embers, want 0", got)
 	}
 	r.time, r.kills, r.chests, r.phase = 3*60+59, 250, 0, PhaseDefeat
-	if got := r.Payout(1); got != 3*5+2*2 {
+	if got := r.Payout(); got != 3*5+2*2 {
 		t.Fatalf("a death at 3:59 with 250 kills pays %d, want 19", got)
 	}
 	r.time, r.kills, r.chests, r.phase = 14*60, 5000, 2, PhaseVictory
 	base := 14*5 + 50*2 + 2*15 + 50
 	for tier, want := range map[int]int{0: base, 1: base, 3: base * 3 / 2, 5: 2 * base} {
-		if got := r.Payout(tier); got != want {
+		r.tier = tier
+		if got := r.Payout(); got != want {
 			t.Fatalf("a won run at tier %d pays %d, want %d", tier, got, want)
 		}
 	}
@@ -113,7 +114,7 @@ func TestUnlocksNeedEveryConditionTheyName(t *testing.T) {
 		{ID: "elites-and-win", Name: "Elites and win", Elites: 2, Win: true},
 		{ID: "win", Name: "Win", Win: true},
 	}
-	r := newRunWith(&d, 7)
+	r := newRunWith(&d, 7, 1)
 	if got := r.Unlocks(); len(got) != 0 {
 		t.Fatalf("a fresh run unlocks %v, want nothing", got)
 	}
@@ -152,7 +153,7 @@ func TestThreeMinutesWithFixedControlsLevelsUpTakesACardAndDies(t *testing.T) {
 	for i := range d.enemies.Enemies {
 		d.enemies.Enemies[i].Health = 1
 	}
-	r := newRunWith(&d, 2024)
+	r := newRunWith(&d, 2024, 1)
 	leveled, chose, died := playSteps(t, r, 6*60*60, func(int) Controls { return Controls{} })
 	if !leveled {
 		t.Fatal("the keeper never reached level 2")

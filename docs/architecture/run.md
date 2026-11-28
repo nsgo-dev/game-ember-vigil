@@ -12,7 +12,7 @@ Today the model runs the complete twelve-minute run: the keeper, all four weapon
 
 ## Determinism
 
-- `NewRun(seed)` derives separate streams for spawns, offers and drops. The shell draws the ground's decor and its particles from its own streams on the same seed, so drawing never changes a run.
+- `NewRun(seed, tier)` derives separate streams for spawns, offers and drops. The shell draws the ground's decor and its particles from its own streams on the same seed, so drawing never changes a run.
 - Every iteration is over a slice, never a map. Ties break by index.
 - The run never reads the system random source, `time.Now` or map order. Cosmetic randomness uses its own stream and never changes gameplay.
 - A seed and a control list produce the same events on every platform; tests compare two runs step by step.
@@ -58,11 +58,17 @@ At 12:00 the director stops normal spawns, clears space and spawns the Hollow Ki
 
 `upgrades.go` owns four weapon slots and four passive slots. The starter Ember Bolt fills one weapon slot at the start. The offer pool is every owned weapon and passive below level five plus every new weapon or passive that still fits a slot.
 
-Three distinct cards are drawn from the pool on the offer stream. If fewer than three remain, the rest are healing cards. There is no reroll in the first version. Applying a card raises a level and recomputes one derived stat block: damage, cooldown, area, move speed, max health, regeneration, pickup radius and XP gain. Weapons read the block every step instead of caching a modified copy.
+Three distinct cards are drawn from the pool on the offer stream. If fewer than three remain, the rest are healing cards, up to the limit the run's tier sets. There is no reroll in the first version. Applying a card raises a level and recomputes one derived stat block: damage, cooldown, area, move speed, max health, regeneration, pickup radius and XP gain. Weapons read the block every step instead of caching a modified copy.
 
 ## Payout and unlocks
 
-A finished run reports what it earned without touching storage. `Payout(tier)` counts whole minutes survived, whole hundreds of kills, chests opened and a win at the rates in `data/progression.yaml`, multiplied by 1 + `tierBonus` for each Long Night tier above 1; until tiers exist the shell passes tier 1. `Unlocks()` lists the unlocks whose every condition (kills, elites defeated, a win) the run met. The shell adds both to the progression save and names only the unlocks that are new.
+A finished run reports what it earned without touching storage. `Payout()` counts whole minutes survived, whole hundreds of kills, chests opened and a win at the rates in `data/progression.yaml`, multiplied by 1 + `tierBonus` for each step the run's Long Night tier is above 1. `Unlocks()` lists the unlocks whose every condition (kills, elites defeated, a win) the run met. The shell adds both to the progression save and names only the unlocks that are new.
+
+## Long Night tiers
+
+`data/tiers.yaml` lists the rule each tier above 1 adds; tier 1 is the base run. `NewRun` folds the rules of tiers 2 to its tier into one `tierRules` once, so the step reads plain multipliers and lists instead of asking which tier it is, and a tier's numbers never live in code. The fold merges a tier's elites into the waves' in time order, multiplies the light (the ember pull), the sight (the snapshot's `Sight`, the spawn ring and the view the director stays outside), regeneration, foe speed, health and damage, keeps the fewest healing cards an offer may hold, and adds the seconds the Hollow King comes early. Shadow zones and the Hollow King's volley are the only state a tier adds; both live in `tiers.go`. An offer that runs out of upgrades on a tier that limits healing cards is shorter than three, so the shell counts the cards it shows.
+
+The rule numbers and the foe health and damage multipliers are set with the balance bot; [the design](../meta-progression.md) records the win rates they give.
 
 ## Events
 

@@ -79,6 +79,8 @@ func (r *Run) recomputeStats() {
 			next.xpMul += amount
 		}
 	}
+	next.regen *= r.rules.regen
+	next.pickupRadius *= r.rules.light
 	next.cooldownMul = math.Max(next.cooldownMul, 0.2)
 	r.stats = next
 }
@@ -112,7 +114,12 @@ func (r *Run) drawOffers() []offer {
 	out := make([]offer, 0, offerCount)
 	out = append(out, pool[:min(offerCount, len(pool))]...)
 	h := r.data.upgrades.Healing
-	for len(out) < offerCount {
+	// A tier that offers fewer healing cards leaves an offer short, but never empty.
+	want := offerCount
+	if limit := r.rules.healCards; limit > 0 {
+		want = max(1, min(offerCount, len(out)+limit))
+	}
+	for len(out) < want {
 		out = append(out, offer{
 			id:          h.ID,
 			name:        h.Name,

@@ -24,3 +24,4 @@
 - Redraw the title with an animated painted cover and a painted menu centred at the bottom, without Quit on phones, tablets and the web, draw settings in the painted HUD style, and paint the touch stick and a thumb-sized pause button (#39, #43 by @oneo-me).
 - Make the run harder after 4:30 and give the Hollow King more health, so a good run is no longer a sure win (#48 by @oneo-me).
 - Pay embers at the end of every run, won or lost, show them and the new balance on the results, and keep the balance and unlocks across restarts (#49, #56 by @oneo-me).
+- Add Long Night tiers 1 to 5, each adding one rule on top of the ones below, opened by winning the tier before and chosen on the title (#50, #57 by @oneo-me).

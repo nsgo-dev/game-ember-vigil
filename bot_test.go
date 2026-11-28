@@ -3,6 +3,7 @@ package main
 import (
 	"math"
 	"reflect"
+	"sync"
 	"testing"
 )
 
@@ -20,8 +21,8 @@ type botResult struct {
 }
 
 // playBot runs a deterministic kiting and upgrade-picking bot until Victory, Defeat, or maxMinutes. It steers afresh every react steps and holds its last heading in between, so a larger react plays a slower player.
-func playBot(seed uint64, maxMinutes, react int) (*Run, botResult) {
-	r := NewRun(seed)
+func playBot(seed uint64, tier, maxMinutes, react int) (*Run, botResult) {
+	r := NewRun(seed, tier)
 	res := botResult{
 		minHealthPct: 1,
 		seenEnemies:  map[string]bool{},
@@ -93,6 +94,16 @@ func botControls(s Snapshot) Controls {
 				weight *= 2.4
 			}
 			steer = steer.Add(d.Scale(weight / dist))
+		}
+	}
+
+	// Step out of the shadow zones dead elites leave on a Long Night tier.
+	for _, sh := range s.Shadows {
+		d := pos.Sub(sh.Pos)
+		dist := d.Len()
+		avoid := sh.Radius + 24
+		if dist < avoid && dist > 1e-6 {
+			steer = steer.Add(d.Scale(3 * (avoid - dist) / avoid / dist))
 		}
 	}
 
@@ -241,9 +252,9 @@ func TestTwelveMinuteBotBalanceAndDeterminism(t *testing.T) {
 	const seeds = 10
 	wins, slowWins := 0, 0
 	for seed := uint64(1); seed <= seeds; seed++ {
-		r, res := playBot(seed, 16, 1)
+		r, res := playBot(seed, 1, 16, 1)
 		t.Logf("seed=%d phase=%v time=%.1fs kills=%d level=%d minHP=%.0f%% boss=%v phases=%d events=%d enemies=%d embers=%d",
-			seed, res.phase, res.time, res.kills, res.level, res.minHealthPct*100, res.bossSpawned, res.bossPhases, res.eventCount, len(res.seenEnemies), r.Payout(1))
+			seed, res.phase, res.time, res.kills, res.level, res.minHealthPct*100, res.bossSpawned, res.bossPhases, res.eventCount, len(res.seenEnemies), r.Payout())
 		if res.phase == PhaseVictory {
 			wins++
 			if res.bossPhases != 2 {
@@ -256,7 +267,7 @@ func TestTwelveMinuteBotBalanceAndDeterminism(t *testing.T) {
 			}
 		}
 		// The same bot steering only three times a second stands in for a player who does not dodge well.
-		if _, slow := playBot(seed, 16, 20); slow.phase == PhaseVictory {
+		if _, slow := playBot(seed, 1, 16, 20); slow.phase == PhaseVictory {
 			slowWins++
 		}
 	}
@@ -268,7 +279,7 @@ func TestTwelveMinuteBotBalanceAndDeterminism(t *testing.T) {
 	}
 
 	// Confirm the run is not trivial: standing still with no movement loses well before 12:00.
-	afk := NewRun(7)
+	afk := NewRun(7, 1)
 	for range 12 * 60 * 60 {
 		if afk.Snapshot().Phase == PhaseLevelUp {
 			afk.Choose(0)
@@ -283,9 +294,51 @@ func TestTwelveMinuteBotBalanceAndDeterminism(t *testing.T) {
 	}
 
 	// Confirm full 12-minute determinism on a fixed seed.
-	r1, res1 := playBot(42, 16, 1)
-	r2, res2 := playBot(42, 16, 1)
-	if res1.eventCount != res2.eventCount || !reflect.DeepEqual(r1.Snapshot(), r2.Snapshot()) || r1.Payout(1) != r2.Payout(1) {
-		t.Fatalf("fixed seed 42 did not replay identically: events %d vs %d, embers %d vs %d", res1.eventCount, res2.eventCount, r1.Payout(1), r2.Payout(1))
+	r1, res1 := playBot(42, 1, 16, 1)
+	r2, res2 := playBot(42, 1, 16, 1)
+	if res1.eventCount != res2.eventCount || !reflect.DeepEqual(r1.Snapshot(), r2.Snapshot()) || r1.Payout() != r2.Payout() {
+		t.Fatalf("fixed seed 42 did not replay identically: events %d vs %d, embers %d vs %d", res1.eventCount, res2.eventCount, r1.Payout(), r2.Payout())
+	}
+}
+
+// TestLongNightTiersGetHarder verifies that the sharp bot's win rate falls with every Long Night tier, from about two thirds at tier 1 to a quarter or so at tier 5, as docs/meta-progression.md records, and that a seed, tier and controls replay the same run.
+func TestLongNightTiersGetHarder(t *testing.T) {
+	const seeds = 100
+	tiers := mustGameData().tiers.maxTier()
+	if tiers != 5 {
+		t.Fatalf("the data defines %d Long Night tiers, want 5", tiers)
+	}
+	wins := make([]int, tiers+1)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for tier := 1; tier <= tiers; tier++ {
+		for seed := uint64(1); seed <= seeds; seed++ {
+			wg.Go(func() {
+				if _, res := playBot(seed, tier, 16, 1); res.phase == PhaseVictory {
+					mu.Lock()
+					wins[tier]++
+					mu.Unlock()
+				}
+			})
+		}
+	}
+	wg.Wait()
+	t.Logf("sharp bot wins by tier over %d seeds: %v", seeds, wins[1:])
+	for tier := 2; tier <= tiers; tier++ {
+		if wins[tier] >= wins[tier-1] {
+			t.Fatalf("tier %d won %d/%d seeds, not fewer than tier %d's %d: every tier should be harder", tier, wins[tier], seeds, tier-1, wins[tier-1])
+		}
+	}
+	if wins[1] < seeds*55/100 || wins[1] > seeds*75/100 {
+		t.Fatalf("tier 1 won %d/%d seeds, want about 65%%", wins[1], seeds)
+	}
+	if wins[tiers] < seeds*15/100 || wins[tiers] > seeds*35/100 {
+		t.Fatalf("tier %d won %d/%d seeds, want 20 to 30%%", tiers, wins[tiers], seeds)
+	}
+
+	r1, res1 := playBot(42, tiers, 16, 1)
+	r2, res2 := playBot(42, tiers, 16, 1)
+	if res1.eventCount != res2.eventCount || !reflect.DeepEqual(r1.Snapshot(), r2.Snapshot()) || r1.Payout() != r2.Payout() {
+		t.Fatalf("seed 42 at tier %d did not replay identically: events %d vs %d", tiers, res1.eventCount, res2.eventCount)
 	}
 }

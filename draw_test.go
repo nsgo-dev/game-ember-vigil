@@ -996,7 +996,7 @@ func TestQualityLimitsParticlesAndGlowLights(t *testing.T) {
 
 // BenchmarkArenaFrame measures a whole frame of a crowded arena: step two hundred enemies that surround the keeper, copy them for drawing, and draw them with their effects.
 func BenchmarkArenaFrame(b *testing.B) {
-	r := NewRun(11)
+	r := NewRun(11, 1)
 	r.director.nextSpawn = math.Inf(1)
 	for i := range maxEnemies / 2 {
 		angle := float64(i) * 2 * math.Pi / float64(maxEnemies/2)
@@ -1023,7 +1023,7 @@ func BenchmarkArenaFrame(b *testing.B) {
 // kinds plus the Gloomwarden elite and Hollow King boss with an active telegraph, all four
 // weapons at level 5, enemy projectiles, embers, heal caches, hit flashes and full High quality.
 func BenchmarkWorstWave200Enemies(b *testing.B) {
-	r := NewRun(29)
+	r := NewRun(29, 1)
 	r.director.nextSpawn = math.Inf(1)
 	for i := range r.weaponLevels {
 		r.weaponLevels[i] = 5

@@ -452,8 +452,8 @@ func TestResultsScreenForDefeatAndVictory(t *testing.T) {
 		t.Fatalf("the run's phase with no health is %v, want PhaseDefeat", p)
 	}
 	app.Find("id:results")
-	if got := app.Find("id:results-outcome").Props.Label; got != "DEFEAT" {
-		t.Fatalf("defeat outcome = %q, want DEFEAT", got)
+	if got := app.Find("id:results-outcome").Props.Label; got != "DEFEAT  ·  Long Night 1" {
+		t.Fatalf("defeat outcome = %q, want DEFEAT at Long Night 1", got)
 	}
 	app.Find("id:results-time")
 	app.Find("id:results-kills")
@@ -492,8 +492,8 @@ func TestResultsScreenForDefeatAndVictory(t *testing.T) {
 		t.Fatalf("phase after killing boss = %v, want PhaseVictory", p)
 	}
 	app.Find("id:results")
-	if got := app.Find("id:results-outcome").Props.Label; got != "VICTORY" {
-		t.Fatalf("victory outcome = %q, want VICTORY", got)
+	if got := app.Find("id:results-outcome").Props.Label; got != "VICTORY  ·  Long Night 1" {
+		t.Fatalf("victory outcome = %q, want VICTORY at Long Night 1", got)
 	}
 
 	press(t, app, "role:button Title")
@@ -762,8 +762,8 @@ func TestLanguageSwitchUpdatesAllScreens(t *testing.T) {
 		be.hp = 0
 	}
 	app.Advance(8 * frame)
-	if got := app.Find("id:results-outcome").Props.Label; got != "胜利" {
-		t.Fatalf("zh-CN victory outcome = %q, want 胜利", got)
+	if got := app.Find("id:results-outcome").Props.Label; got != "胜利  ·  长夜 1" {
+		t.Fatalf("zh-CN victory outcome = %q, want 胜利 at 长夜 1", got)
 	}
 	if got := app.Find("id:results-record").Props.Label; got != "刷新记录！" {
 		t.Fatalf("zh-CN new record = %q, want 刷新记录！", got)
@@ -787,7 +787,7 @@ func TestRecordsUpdateOncePerRunAndPersist(t *testing.T) {
 	}
 
 	en := evstrings.For(evstrings.EN)
-	won := g.run.Payout(runTier)
+	won := g.run.Payout()
 	if won < 50 {
 		t.Fatalf("a won run pays %d embers, want at least the 50 for a win", won)
 	}
@@ -828,7 +828,7 @@ func TestRecordsUpdateOncePerRunAndPersist(t *testing.T) {
 	}
 
 	// The balance survived the restart, and the lost run added its own payout to it.
-	lost := g2.run.Payout(runTier)
+	lost := g2.run.Payout()
 	if g2.progress.Embers != won+lost || g2.progress.TierWon != 1 {
 		t.Fatalf("progression after a restart and a lost run = %+v, want %d embers and tier 1 won", g2.progress, won+lost)
 	}

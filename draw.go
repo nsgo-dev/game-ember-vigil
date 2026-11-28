@@ -227,7 +227,10 @@ type arenaRenderer struct {
 	halo       []actor
 	patches    []PatchView
 	pulses     []PulseView
+	shadows    []ShadowView
 	boss       BossView
+	// sight is how far the keeper sees through the fog, as a fraction of the base run's, which a Long Night tier shortens.
+	sight float64
 
 	// before holds where each id was last step so a frame between steps can blend; spare is the map the next step fills, swapped in when it is done.
 	before, spare map[uint64]prevState
@@ -302,6 +305,8 @@ func (r *arenaRenderer) startRun(seed uint64) {
 	r.halo = r.halo[:0]
 	r.patches = r.patches[:0]
 	r.pulses = r.pulses[:0]
+	r.shadows = r.shadows[:0]
+	r.sight = 1
 	r.boss = BossView{}
 	r.sheetSprites = r.sheetSprites[:0]
 	r.patchSprites = r.patchSprites[:0]
@@ -362,10 +367,15 @@ func (r *arenaRenderer) drawFog(d *core.Drawing, ox, oy, w, h float32) {
 	// The gradient runs past the farthest corner, so its last stop covers the whole frame however a canvas pads it.
 	outer := float32(math.Hypot(float64(w), float64(h)))
 	at := func(v float64) float32 { return float32(v) / outer }
+	sight := r.sight
+	if sight <= 0 {
+		sight = 1
+	}
+	clearAt, solidAt := visionClear*sight, visionSolid*sight
 	grad := core.CanvasRadial(x, y, 0, x, y, outer,
-		core.GradientStop{Offset: at(visionClear), Color: core.RGBA(fogRGB, 0)},
-		core.GradientStop{Offset: at((visionClear + visionSolid) / 2), Color: core.RGBA(fogRGB, 0.62)},
-		core.GradientStop{Offset: at(visionSolid), Color: fogColor},
+		core.GradientStop{Offset: at(clearAt), Color: core.RGBA(fogRGB, 0)},
+		core.GradientStop{Offset: at((clearAt + solidAt) / 2), Color: core.RGBA(fogRGB, 0.62)},
+		core.GradientStop{Offset: at(solidAt), Color: fogColor},
 		core.GradientStop{Offset: 1, Color: fogColor},
 	)
 	d.Save()
@@ -401,6 +411,8 @@ func (r *arenaRenderer) sync(s Snapshot, events []Event, dt float64) {
 	r.trackHalo(s)
 	r.patches = append(r.patches[:0], s.Patches...)
 	r.pulses = append(r.pulses[:0], s.Pulses...)
+	r.shadows = append(r.shadows[:0], s.Shadows...)
+	r.sight = s.Sight
 	r.boss = s.Boss
 	if s.Phase == PhasePlaying && dt > 0 {
 		stepDur := time.Duration(math.Round(dt * float64(time.Second)))
@@ -734,6 +746,7 @@ func (r *arenaRenderer) draw(d *core.Drawing, alpha float64, view core.Size) {
 	r.pulseSprites = r.pulseSprites[:0]
 	r.drawPatches(d, ox, oy)
 	d.SetImageSmoothing(false)
+	r.drawShadows(d, ox, oy)
 	r.drawEliteAuras(d, ox, oy)
 	r.drawBossTelegraph(d, ox, oy)
 
@@ -1044,6 +1057,17 @@ func (r *arenaRenderer) drawBossTelegraph(d *core.Drawing, ox, oy float32) {
 		d.SetStrokeColor(core.RGBA(0xfff1d6, pulse*flash)).
 			SetLineWidth(2.2).
 			BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Stroke()
+	case "volley":
+		// A fan opening toward the keeper, as wide as the bones will fly.
+		rad := float32(b.TelegraphLength) * (0.45 + 0.55*p)
+		aim := math.Atan2(b.TelegraphDir.Y, b.TelegraphDir.X)
+		half := b.TelegraphSpread / 2
+		from, to := float32(aim-half), float32(aim+half)
+		d.SetFillColor(core.RGBA(0xa3341a, 0.22*pulse)).
+			BeginPath().MoveTo(x, y).Arc(x, y, rad, from, to, false).ClosePath().Fill()
+		d.SetStrokeColor(core.RGBA(0xfff1d6, pulse*flash)).
+			SetLineWidth(2.2).
+			BeginPath().MoveTo(x, y).Arc(x, y, rad, from, to, false).ClosePath().Stroke()
 	case "summon":
 		rad := float32(b.TelegraphLength)
 		d.SetFillColor(core.RGBA(0x5b4a7f, 0.24*pulse)).
@@ -1067,6 +1091,29 @@ func (r *arenaRenderer) addHalo(ox, oy float32) {
 		} else {
 			r.add(r.art.frames.halo, r.halo[i], ox, oy, 1, 3)
 		}
+	}
+}
+
+// drawShadows paints the shadow zones dead elites leave on a Long Night tier: a dark pool with a violet rim that fades as it runs out.
+func (r *arenaRenderer) drawShadows(d *core.Drawing, ox, oy float32) {
+	cw, ch := r.cam.size()
+	vw, vh := float32(cw), float32(ch)
+	for i := range r.shadows {
+		s := &r.shadows[i]
+		x, y := toScreen(s.Pos, ox, oy)
+		rad := float32(s.Radius)
+		if x+rad < 0 || x-rad > vw || y+rad < 0 || y-rad > vh {
+			continue
+		}
+		fade := float32(math.Min(1, s.Life/0.8))
+		swell := float32(1 + 0.04*math.Sin(r.fx.time*3+float64(s.ID)))
+		d.SetFillColor(core.RGBA(0x120c1f, 0.62*fade)).
+			BeginPath().Arc(x, y, rad*swell, 0, 2*math.Pi, false).Fill()
+		d.SetFillColor(core.RGBA(0x2b1d45, 0.5*fade)).
+			BeginPath().Arc(x, y, rad*0.62*swell, 0, 2*math.Pi, false).Fill()
+		d.SetStrokeColor(core.RGBA(0x8a6cc4, 0.55*fade)).
+			SetLineWidth(1.5).
+			BeginPath().Arc(x, y, rad*swell, 0, 2*math.Pi, false).Stroke()
 	}
 }
 

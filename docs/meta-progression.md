@@ -1,6 +1,6 @@
 # Meta progression design
 
-Status: structure agreed with the user; the open questions below remain before implementation.
+Status: structure agreed with the user; the ember payout and the Long Night tiers are built, and the open questions below remain for the rest.
 
 ## Why
 
@@ -13,15 +13,18 @@ A run was too easy and left nothing behind: the balance bot won 9 of 10 seeds wi
   - **Unlocks.** In-run challenges unlock new content: weapons and evolution first, passives and keepers in later batches.
   - **Long Night tiers.** Each win opens the next tier, and each tier makes the run harder. This is the long-term goal and keeps permanent power from flattening the game.
   - **Ember shop.** Each run pays embers for a small shop of permanent bonuses with a low total cap (for example at most +15% damage), mainly to help weaker players; higher tiers weaken those bonuses.
-- Each Long Night tier adds one fixed rule on top of the tiers below it, so every tier brings a new kind of pressure, not only bigger numbers. The player picks a single tier number. Self-chosen rule mixes may come later, above tier 5. Draft rules, open to change:
+- Each Long Night tier adds one fixed rule on top of the tiers below it, so every tier brings a new kind of pressure, not only bigger numbers. The player picks a single tier number. Self-chosen rule mixes may come later, above tier 5. Built in `data/tiers.yaml`:
 
-  | Tier | Adds |
-  | --- | --- |
-  | 1 | The base run, made harder first (see below) |
-  | 2 | One more elite per run; a dead elite leaves a shadow zone behind |
-  | 3 | A smaller lantern light and a shorter view |
-  | 4 | Fewer healing cards and half regeneration |
-  | 5 | Faster enemies; the Hollow King arrives a minute early with one more attack |
+  | Tier | Adds | Numbers |
+  | --- | --- | --- |
+  | 1 | The base run, made harder first (see below) | — |
+  | 2 | One more elite per run; a dead elite leaves a shadow zone behind | A Gloomwarden at 6:50; a zone of radius 48 for 14 s, 12 damage every 0.5 s inside |
+  | 3 | A smaller lantern light and a shorter view | Embers drawn from 90% as far; sight, spawn ring and spawn view at 80% |
+  | 4 | Fewer healing cards and half regeneration | At most one healing card per level-up; regeneration ×0.5 |
+  | 5 | Faster enemies; the Hollow King arrives a minute early with one more attack | Foes ×1.1 speed and ×1.15 damage; the King at 11:00, adding a 13-bone fan 1 rad wide at ×1.4 bone speed |
+
+  Winning a tier opens the next, saved as the highest tier won; tier 1 is always open. The title offers a tier button once a second tier is open, defaulting to the highest; a win that opens a tier picks it for Play Again. The HUD and the results name the tier.
+- Over seeds 1–100 the sharp bot wins 67%, 53%, 43%, 26% and 22% from tier 1 to tier 5 (over 200 seeds 67%, 53%, 46%, 27% and 25%), and `bot_test.go` holds the fall. The rules alone barely moved the bot: the early Hollow King skips the last minute's hardest waves and clears the field, and faster foes die sooner on the halo and the trail, so tier 5 also raises foe damage. Tier 3's view alone changes nothing for a bot that reads every foe, which is why its light also shortens the ember pull.
 
 - The first unlocks are two new weapons and weapon evolution. A weapon at max level, held with its paired passive, evolves into a stronger form when the keeper opens a chest dropped by an elite. Evolution itself is unlocked, and each recipe joins a collection the first time it is made in a run. New keepers wait for a later batch.
 - The two new weapons fill the play styles the current four miss (single shots, orbit, ground fire, knockback pulse):
@@ -71,5 +74,5 @@ A run was too easy and left nothing behind: the balance bot won 9 of 10 seeds wi
 
 ## Open questions
 
-- Exact numbers of each tier rule, the new weapons and the evolutions.
-- Screens: where the shop, the tier choice and the collection live. The results show the embers a run earned, the new balance and what it unlocked.
+- Exact numbers of the new weapons and the evolutions.
+- Screens: where the shop and the collection live. The results show the embers a run earned, the new balance and what it unlocked.

@@ -51,7 +51,7 @@ func TestOfferPoolRespectsSlotCaps(t *testing.T) {
 func TestRunCanReachFullBuildAndOffersAllEightPassives(t *testing.T) {
 	seenPassives := map[string]bool{}
 	for seed := uint64(1); seed <= 25; seed++ {
-		r := NewRun(seed)
+		r := NewRun(seed, 1)
 		r.director.nextSpawn = math.Inf(1)
 		for range 40 {
 			r.xp = r.xpNeeded()

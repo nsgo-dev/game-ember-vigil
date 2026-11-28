@@ -70,6 +70,9 @@ type Progression struct {
 	Collection []string `json:"collection,omitempty"`
 }
 
+// openTier is the highest Long Night tier the player may choose, of the maxTier there are: the one after the highest won. Tier 1 is always open.
+func (p Progression) openTier(maxTier int) int { return max(1, min(maxTier, p.TierWon+1)) }
+
 // has reports whether id is unlocked.
 func (p Progression) has(id string) bool { return slices.Contains(p.Unlocked, id) }
 
@@ -319,19 +322,23 @@ func saveProgression(storage core.Storage, p Progression) error {
 	return storage.SetItem(progressionStorageKey, string(data))
 }
 
-// runReward is what a finished run added to the progression: its embers and the ids it newly unlocked.
+// runReward is what a finished run added to the progression: its embers, the ids it newly unlocked and the Long Night tier its win opened, 0 when none.
 type runReward struct {
-	embers  int
-	unlocks []string
+	embers     int
+	unlocks    []string
+	tierOpened int
 }
 
-// applyRunProgression adds a finished run's embers and unlocks to prev, raising the highest tier won when the run won at tier, and reports what it newly gave.
-func applyRunProgression(prev Progression, won bool, tier, embers int, unlocks []string) (Progression, runReward) {
+// applyRunProgression adds a finished run's embers and unlocks to prev, raising the highest tier won when the run won at tier, and reports what it newly gave. maxTier is the highest tier there is, which a win cannot open past.
+func applyRunProgression(prev Progression, won bool, tier, maxTier, embers int, unlocks []string) (Progression, runReward) {
 	next := normalizeProgression(prev)
 	reward := runReward{embers: max(0, embers)}
 	next.Embers += reward.embers
-	if won {
-		next.TierWon = max(next.TierWon, tier)
+	if won && tier > next.TierWon {
+		next.TierWon = tier
+		if tier < maxTier {
+			reward.tierOpened = tier + 1
+		}
 	}
 	for _, id := range unlocks {
 		if id != "" && !next.has(id) {
