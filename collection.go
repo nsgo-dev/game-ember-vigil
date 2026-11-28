@@ -182,7 +182,7 @@ func (p *overlayPainter) collectionSlot(r rect, e collectionEntry, u float32) {
 		frame = hudCollectionUnlocked
 	}
 	if img, ok := p.art.image(frame); ok {
-		p.d.DrawImageIn(img, r.x, r.y, r.w, r.h)
+		img.drawIn(p.d, r.x, r.y, r.w, r.h)
 	} else {
 		border := hudBronze
 		if e.made {
@@ -201,7 +201,7 @@ func (p *overlayPainter) collectionSlot(r rect, e collectionEntry, u float32) {
 	icon := collectionIcon * r.w / collectionSlot
 	cx, cy := r.center()
 	if img, ok := p.icons.cardIcon(e.id); ok {
-		p.d.DrawImageIn(img, cx-icon/2, cy-icon/2, icon, icon)
+		img.drawIn(p.d, cx-icon/2, cy-icon/2, icon, icon)
 		return
 	}
 	pulse := 0.85 + 0.15*float32(math.Sin(p.m.clock*3))

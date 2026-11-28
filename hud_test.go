@@ -12,7 +12,7 @@ import (
 )
 
 // drewImage reports whether ops draw img, the same decoded pixels.
-func drewImage(ops []core.DrawOp, img core.ImageSource) bool {
+func drewImage(ops []core.DrawOp, img kitImage) bool {
 	return len(imageOps(ops, img)) > 0
 }
 
@@ -22,19 +22,23 @@ func drewHUDPiece(ops []core.DrawOp, kit *hudArt, name string) bool {
 	return !ok || drewImage(ops, img)
 }
 
-// imageOps are the operations of ops that draw img.
-func imageOps(ops []core.DrawOp, img core.ImageSource) []core.DrawOp {
+// imageOps are the operations of ops that draw a part of img: its packed kit's image, from within img's place in it.
+func imageOps(ops []core.DrawOp, img kitImage) []core.DrawOp {
 	var out []core.DrawOp
-	if img.Pixels == nil {
+	if img.src.Pixels == nil {
 		return nil
 	}
-	want := img.Pixels
+	want := img.src.Pixels
 	for _, op := range ops {
 		if op.Kind != core.DrawImage || op.Image == nil || op.Image.Pixels == nil {
 			continue
 		}
 		// A test app hands back copies of the pixels it was given, so compare them by content.
-		if got := op.Image.Pixels; got == want || got.Rect == want.Rect && bytes.Equal(got.Pix, want.Pix) {
+		got := op.Image.Pixels
+		if got != want && (got.Rect != want.Rect || !bytes.Equal(got.Pix, want.Pix)) {
+			continue
+		}
+		if op.X1 >= img.x && op.Y1 >= img.y && op.X1+op.X2 <= img.x+img.w+1e-3 && op.Y1+op.Y2 <= img.y+img.h+1e-3 {
 			out = append(out, op)
 		}
 	}
@@ -89,20 +93,21 @@ func TestHUDDrawsTheKitsFillsAtTheirValues(t *testing.T) {
 	st := testHUDState()
 	ops := drawTestHUD(st, kit)
 
-	fill := imageOps(ops, kit.images[hudHealthFill])
+	healthFill := kit.images[hudHealthFill]
+	fill := imageOps(ops, healthFill)
 	if len(fill) != 1 {
 		t.Fatalf("health fill drawn %d times, want once", len(fill))
 	}
 	wantTop := healthFillTop + (healthFillBottom-healthFillTop)*0.6
-	if op := fill[0]; math.Abs(float64(op.Y1-float32(wantTop))) > 0.5 || math.Abs(float64(op.Y1+op.Y2-healthFillBottom)) > 0.5 {
-		t.Fatalf("health fill crops rows %v..%v, want %v..%v for 40%%", op.Y1, op.Y1+op.Y2, wantTop, healthFillBottom)
+	if op := fill[0]; math.Abs(float64(op.Y1-healthFill.y-float32(wantTop))) > 0.5 || math.Abs(float64(op.Y1-healthFill.y+op.Y2-healthFillBottom)) > 0.5 {
+		t.Fatalf("health fill crops rows %v..%v, want %v..%v for 40%%", op.Y1-healthFill.y, op.Y1-healthFill.y+op.Y2, wantTop, healthFillBottom)
 	}
 	xp := imageOps(ops, kit.images[hudXPFill])
-	if len(xp) != 1 || xp[0].X1 != xpFillLeft || math.Abs(float64(xp[0].X2-(xpFillRight-xpFillLeft)*0.5)) > 0.5 {
+	if len(xp) != 1 || xp[0].X1-kit.images[hudXPFill].x != xpFillLeft || math.Abs(float64(xp[0].X2-(xpFillRight-xpFillLeft)*0.5)) > 0.5 {
 		t.Fatalf("xp fill ops %+v, want one crop of half the trough from x %d", xp, xpFillLeft)
 	}
 	boss := imageOps(ops, kit.images[hudBossFill])
-	if len(boss) != 1 || boss[0].X1 != bossFillLeft || math.Abs(float64(boss[0].X2-(bossFillRight-bossFillLeft)*0.75)) > 0.5 {
+	if len(boss) != 1 || boss[0].X1-kit.images[hudBossFill].x != bossFillLeft || math.Abs(float64(boss[0].X2-(bossFillRight-bossFillLeft)*0.75)) > 0.5 {
 		t.Fatalf("boss fill ops %+v, want one crop of three quarters of the trough from x %d", boss, bossFillLeft)
 	}
 	if !drewImage(ops, kit.images[hudBossFrame]) {

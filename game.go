@@ -1197,7 +1197,7 @@ func drawStick(d *core.Drawing, s *input.VirtualStick, kit *hudArt, pad *input.V
 	bs, ks := stickBasePt*k, stickKnobPt*k
 	d.Save()
 	d.SetImageSmoothing(true)
-	d.DrawImageIn(base, float32(b.X)-bs/2, float32(b.Y)-bs/2, bs, bs)
-	d.DrawImageIn(knob, float32(n.X)-ks/2, float32(n.Y)-ks/2, ks, ks)
+	base.drawIn(d, float32(b.X)-bs/2, float32(b.Y)-bs/2, bs, bs)
+	knob.drawIn(d, float32(n.X)-ks/2, float32(n.Y)-ks/2, ks, ks)
 	d.Restore()
 }

@@ -332,8 +332,8 @@ func (p *overlayPainter) scrim(alpha float32) {
 }
 
 // nineSlice draws the kit image img into r, keeping its insets (in the kit's pixels) at inset points each and stretching the middle.
-func (p *overlayPainter) nineSlice(img core.ImageSource, insets [4]float32, r rect, inset float32) {
-	p.nineSliceFrom(img, 0, 0, float32(img.Size.Width), float32(img.Size.Height), insets, r, inset)
+func (p *overlayPainter) nineSlice(img kitImage, insets [4]float32, r rect, inset float32) {
+	p.nineSliceFrom(img.src, img.x, img.y, img.w, img.h, insets, r, inset)
 }
 
 // nineSliceFrom is nineSlice of the part ox, oy, iw, ih of img, such as a frame packed in an atlas.
@@ -532,13 +532,13 @@ func drawResults(p *overlayPainter, l panelLayout, st hudState, txt resultsText,
 		case 1:
 			side := 30 * u
 			if img, ok := p.art.image(hudKillEmblem); ok {
-				p.d.DrawImageIn(img, mx-side-6*u, my-side/2, side, side)
+				img.drawIn(p.d, mx-side-6*u, my-side/2, side, side)
 			}
 			hp.drawNumber(strconv.Itoa(st.kills), mx-4*u, my, numH*0.85, core.TextAlignLeft, true)
 		case 2:
 			side := 44 * u
 			if img, ok := p.art.image(hudLevelBadge); ok {
-				p.d.DrawImageIn(img, mx-side/2, my-side/2, side, side)
+				img.drawIn(p.d, mx-side/2, my-side/2, side, side)
 			} else {
 				p.d.SetFillColor(hudBronze).BeginPath().MoveTo(mx, my-side/2).LineTo(mx+side/2, my).LineTo(mx, my+side/2).LineTo(mx-side/2, my).ClosePath().Fill()
 			}
@@ -649,7 +649,7 @@ func (p *overlayPainter) cardFace(r rect, c hudCard, i int, focused bool) {
 		p.d.SetShadow(core.RGBA(0xffb347, 0.9*pulse), 0, 0, 22*u)
 	}
 	if img, ok := p.art.image(frameName); ok {
-		p.d.DrawImageIn(img, r.x, r.y, r.w, r.h)
+		img.drawIn(p.d, r.x, r.y, r.w, r.h)
 	} else {
 		border := hudBronze
 		if focused {
@@ -680,7 +680,7 @@ func (p *overlayPainter) cardFace(r rect, c hudCard, i int, focused bool) {
 
 	icon := 48 * u
 	if img, ok := p.icons.cardIcon(c.id); ok {
-		p.d.DrawImageIn(img, mid-icon/2, y, icon, icon)
+		img.drawIn(p.d, mid-icon/2, y, icon, icon)
 	} else {
 		p.d.SetFillColor(cardAccent(c.id, c.kind)).BeginPath().RoundRect(mid-icon/2, y, icon, icon, 10*u).Fill()
 		p.text(cardGlyph(c.id), mid, y+icon/2, 16*u, true, hudIvory, core.TextAlignCenter)
@@ -727,9 +727,9 @@ func (p *overlayPainter) cardPips(cx, cy, u float32, next, maxLevel int) {
 		}
 		switch {
 		case on && okLit:
-			p.d.DrawImageIn(lit, px, cy-side/2, side, side)
+			lit.drawIn(p.d, px, cy-side/2, side, side)
 		case !on && okUnlit:
-			p.d.DrawImageIn(unlit, px, cy-side/2, side, side)
+			unlit.drawIn(p.d, px, cy-side/2, side, side)
 		default:
 			c := pipEmpty
 			if on {

@@ -27,7 +27,7 @@ func drawTestTitle(kit *titleArt, t float64, embers int, focus int) []core.DrawO
 // pieceOps are the operations of ops that draw p's part of its image.
 func pieceOps(ops []core.DrawOp, p piece) []core.DrawOp {
 	var out []core.DrawOp
-	for _, op := range imageOps(ops, p.img) {
+	for _, op := range imageOps(ops, kitImage{src: p.img, x: p.sx, y: p.sy, w: p.sw, h: p.sh}) {
 		if op.X1 == p.sx && op.Y1 == p.sy && op.X2 == p.sw && op.Y2 == p.sh {
 			out = append(out, op)
 		}
@@ -53,7 +53,7 @@ func TestTitleDrawsTheKitsLayersAndButtons(t *testing.T) {
 	slices := func(name string) int {
 		f, _ := kit.piece(name)
 		n := 0
-		for _, op := range imageOps(ops, f.img) {
+		for _, op := range imageOps(ops, kitImage{src: f.img, x: f.sx, y: f.sy, w: f.sw, h: f.sh}) {
 			if op.X1 >= f.sx && op.X1 < f.sx+f.sw && op.Y1 >= f.sy && op.Y1 < f.sy+f.sh {
 				n++
 			}
@@ -125,7 +125,7 @@ func TestTitleFallsBackToAStillCover(t *testing.T) {
 	}
 	for _, op := range a {
 		if op.Kind == core.DrawImage && op.Image != nil && op.Image.Pixels != nil {
-			if img, ok := newHUDArt(embeddedHUD).image(hudPanel); !ok || op.Image.Pixels.Rect != img.Pixels.Rect {
+			if img, ok := newHUDArt(embeddedHUD).image(hudPanel); !ok || len(imageOps([]core.DrawOp{op}, img)) == 0 {
 				t.Fatalf("the fallback title draws an image that is not the HUD's panel: %v", op.Image.Pixels.Rect)
 			}
 		}

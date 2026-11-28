@@ -272,8 +272,6 @@ type arenaRenderer struct {
 	pixelSprites []*sprite.Sprite
 	pool         []*sprite.Sprite
 	used         int
-	flash        []sprite.Effect
-	flashing     int
 	scene        lights2d.Scene
 	lights       []*lights2d.Light
 	glows        []*lights2d.Light
@@ -365,13 +363,45 @@ func (r *arenaRenderer) paintGround() {
 	}
 }
 
+// fogCrop returns the part of the frame, in its coordinates, where the fog mask is not clear: the bounds of the frame
+// outside the field's clear inside, or false when the frame lies wholly within it. Drawing the clear mask cost a whole
+// frame's image draw on Core Graphics while the keeper roams the middle of the arena.
+func (r *arenaRenderer) fogCrop(ox, oy, w, h float32) (x, y, cw, ch float32, ok bool) {
+	// The mask is clear past its ragged rim (see newFogMask), and smooth sampling reaches a mask pixel further.
+	in := float32(r.fogMargin*(1+fogRagged)) + 2*fogScale
+	cx0, cy0 := in, in
+	cx1, cy1 := float32(r.arena.X)-in, float32(r.arena.Y)-in
+	x0, y0, x1, y1 := ox, oy, ox+w, oy+h
+	if x0 >= cx0 && y0 >= cy0 && x1 <= cx1 && y1 <= cy1 {
+		return 0, 0, 0, 0, false
+	}
+	// The bounds of the frame less the clear inside: each side past it contributes its strip.
+	bx0, by0, bx1, by1 := x1, y1, x0, y0
+	grow := func(ax0, ay0, ax1, ay1 float32) {
+		if ax1 <= ax0 || ay1 <= ay0 {
+			return
+		}
+		bx0, by0, bx1, by1 = min(bx0, ax0), min(by0, ay0), max(bx1, ax1), max(by1, ay1)
+	}
+	grow(x0, y0, min(x1, cx0), y1)
+	grow(max(x0, cx1), y0, x1, y1)
+	grow(x0, y0, x1, min(y1, cy0))
+	grow(x0, max(y0, cy1), x1, y1)
+	if bx1 <= bx0 || by1 <= by0 {
+		return 0, 0, 0, 0, false
+	}
+	return bx0 - ox, by0 - oy, bx1 - bx0, by1 - by0, true
+}
+
 // drawFog lays the fog of war over the frame: the crop of the arena edges' coarse mask, scaled up smoothly, and the
 // darkness past the keeper's sight, so whatever roams beyond either stays hidden until it comes close.
 func (r *arenaRenderer) drawFog(d *core.Drawing, ox, oy, w, h float32) {
 	if r.fog != nil {
-		d.SetImageSmoothing(true)
-		d.DrawImageFrom(r.fogSource, ox/fogScale, oy/fogScale, w/fogScale, h/fogScale, 0, 0, w, h)
-		d.SetImageSmoothing(false)
+		if x, y, cw, ch, ok := r.fogCrop(ox, oy, w, h); ok {
+			d.SetImageSmoothing(true)
+			d.DrawImageFrom(r.fogSource, (ox+x)/fogScale, (oy+y)/fogScale, cw/fogScale, ch/fogScale, x, y, cw, ch)
+			d.SetImageSmoothing(false)
+		}
 	}
 	if !r.seenKeeper {
 		return
@@ -787,14 +817,17 @@ func (r *arenaRenderer) draw(d *core.Drawing, alpha float64, view core.Size) {
 	vw, vh := r.cam.size()
 	w, h := float32(vw), float32(vh)
 	d.SetImageSmoothing(false)
-	d.SetFillColor(arenaColor).FillRect(0, 0, w, h)
+	ox, oy := r.origin()
+	// The opaque ground hides the backdrop wherever it reaches, so the backdrop is filled only where a view outgrows the arena: each full-frame fill costs Core Graphics a frame's pixels.
+	if r.ground == nil || ox < 0 || oy < 0 || ox+w > float32(r.arena.X) || oy+h > float32(r.arena.Y) {
+		d.SetFillColor(arenaColor).FillRect(0, 0, w, h)
+	}
 	if r.ground == nil {
 		return
 	}
-	ox, oy := r.origin()
 	d.SetImageSmoothing(r.art.hasPaintedGround())
 	d.DrawImageFrom(r.groundSource, ox, oy, w, h, 0, 0, w, h)
-	r.used, r.flashing = 0, 0
+	r.used = 0
 	r.patchSprites = r.patchSprites[:0]
 	r.pulseSprites = r.pulseSprites[:0]
 	r.drawPatches(d, ox, oy)
@@ -1004,7 +1037,7 @@ func (r *arenaRenderer) addEnemies(ox, oy float32) {
 			s.Y += float32(math.Round(math.Sin(r.fx.time*6 + float64(e.id))))
 		}
 		if left, ok := r.fx.flash[e.id]; ok {
-			s.Effect = r.flasher(left)
+			r.addFlash(s, sa.loaded, float32(left/flashSeconds))
 		}
 	}
 }
@@ -1520,15 +1553,19 @@ func (r *arenaRenderer) next(f sprite.Frame) *sprite.Sprite {
 	return s
 }
 
-// flasher returns a flash effect for an enemy struck left seconds ago, from the renderer's pool so a frame allocates none.
-func (r *arenaRenderer) flasher(left float64) *sprite.Effect {
-	if r.flashing == len(r.flash) {
-		r.flash = append(r.flash, sprite.Effect{})
+// addFlash lays a struck sprite's silhouette over it at strength, from the same atlas and in the same batch right after
+// it, so the flash costs one more sprite and no image of its own.
+func (r *arenaRenderer) addFlash(s *sprite.Sprite, sheet bool, strength float32) {
+	f := r.next(s.Frame)
+	*f = *s
+	f.Alpha = s.Alpha * min(max(strength, 0), 1)
+	if sheet {
+		f.Frame.Y += r.art.sheetFlashY
+		r.sheetSprites = append(r.sheetSprites, f)
+		return
 	}
-	e := &r.flash[r.flashing]
-	r.flashing++
-	e.Flash = sprite.Flash{Color: hitColor, Strength: float32(left / flashSeconds)}
-	return e
+	f.Frame.Y += r.art.atlasFlashY
+	r.pixelSprites = append(r.pixelSprites, f)
 }
 
 // drawLevelFlourish paints an expanding golden ring around the keeper on level-up.

@@ -674,7 +674,37 @@ type art struct {
 	sheetAtlas *sprite.Atlas
 	sheets     sheetFrames
 	env        envArt
-	icons      map[string]core.ImageSource
+	icons      map[string]kitImage
+	// atlasFlashY and sheetFlashY are how far below a frame of atlas and sheetAtlas its hit-flash silhouette lies (withFlash).
+	atlasFlashY, sheetFlashY float32
+}
+
+// flashGap is the clear pixels between an atlas and its silhouettes, so smooth sampling of one never reaches the other.
+const flashGap = 2
+
+// withFlash returns img with a silhouette of every picture in it, filled with c, stacked below it, and how far below.
+// A struck sprite draws its silhouette over itself from the same atlas, in the same batch: a per-sprite pixel effect
+// made a new image each frame, and a crowd's flashes pushed the ground out of the Apple canvas's few kept images, so
+// every frame converted the whole arena again.
+func withFlash(img *image.RGBA, c core.Color) (*image.RGBA, float32) {
+	b := img.Bounds()
+	h := b.Dy()
+	out := image.NewRGBA(image.Rect(0, 0, b.Dx(), 2*h+flashGap))
+	cr, cg, cb, _ := c.Components()
+	for y := range h {
+		for x := range b.Dx() {
+			i := img.PixOffset(b.Min.X+x, b.Min.Y+y)
+			j := out.PixOffset(x, y)
+			copy(out.Pix[j:j+4], img.Pix[i:i+4])
+			a := float64(img.Pix[i+3])
+			k := out.PixOffset(x, y+h+flashGap)
+			out.Pix[k+0] = uint8(cr*a + 0.5)
+			out.Pix[k+1] = uint8(cg*a + 0.5)
+			out.Pix[k+2] = uint8(cb*a + 0.5)
+			out.Pix[k+3] = img.Pix[i+3]
+		}
+	}
+	return out, float32(h + flashGap)
 }
 
 // newArt builds the procedural fallback atlas and loads all embedded sprite sheets, environment art and upgrade card icons.
@@ -702,10 +732,12 @@ func newArtFromAllFS(spriteFS, iconFS, envFS fs.FS) *art {
 		ras[i].drawInto(img, int(f[i].X), int(f[i].Y))
 	}
 
+	img, flashY := withFlash(img, hitColor)
 	a := &art{
-		atlas:  &sprite.Atlas{Image: core.ImageSource{Pixels: img, Version: 1}, Frames: map[string]sprite.Frame{}},
-		pixels: make(map[string]*pixels, len(pictures)),
-		icons:  map[string]core.ImageSource{},
+		atlas:       &sprite.Atlas{Image: core.ImageSource{Pixels: img, Version: 1}, Frames: map[string]sprite.Frame{}},
+		atlasFlashY: flashY,
+		pixels:      make(map[string]*pixels, len(pictures)),
+		icons:       map[string]kitImage{},
 	}
 	for i, p := range pictures {
 		a.atlas.Frames[p.name] = f[i]
@@ -724,9 +756,9 @@ func (a *art) hasPaintedGround() bool {
 }
 
 // cardIcon returns the embedded PNG icon for an upgrade card id (converting hyphens to underscores), or false when absent.
-func (a *art) cardIcon(id string) (core.ImageSource, bool) {
+func (a *art) cardIcon(id string) (kitImage, bool) {
 	if a == nil || len(a.icons) == 0 {
-		return core.ImageSource{}, false
+		return kitImage{}, false
 	}
 	src, ok := a.icons[strings.ReplaceAll(id, "-", "_")]
 	return src, ok
@@ -800,7 +832,6 @@ func (a *art) loadSheets(fsys fs.FS) {
 
 	packed := image.NewRGBA(image.Rect(0, 0, atlasW, atlasH))
 	atlas := &sprite.Atlas{
-		Image:      core.ImageSource{Pixels: packed, Version: 1},
 		Frames:     make(map[string]sprite.Frame, len(places)),
 		Animations: make(map[string]sprite.Animation, len(loaded)*2),
 	}
@@ -835,6 +866,9 @@ func (a *art) loadSheets(fsys fs.FS) {
 		gridFrames[pl.sheetIdx][pl.row][pl.col] = fr
 	}
 
+	flashed, flashY := withFlash(packed, hitColor)
+	atlas.Image = core.ImageSource{Pixels: flashed, Version: 1}
+	a.sheetFlashY = flashY
 	for si, ds := range loaded {
 		spec := ds.spec
 		actor := sheetActor{
@@ -890,6 +924,7 @@ func (a *art) loadIcons(fsys fs.FS) {
 	if err != nil {
 		return
 	}
+	pictures := map[string]*image.RGBA{}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".png") {
 			continue
@@ -902,14 +937,9 @@ func (a *art) loadIcons(fsys fs.FS) {
 		if err != nil {
 			continue
 		}
-		b := rgba.Bounds()
-		stem := strings.TrimSuffix(e.Name(), ".png")
-		a.icons[stem] = core.ImageSource{
-			Pixels:  rgba,
-			Version: 1,
-			Size:    core.Size{Width: core.Points(b.Dx()), Height: core.Points(b.Dy())},
-		}
+		pictures[strings.TrimSuffix(e.Name(), ".png")] = rgba
 	}
+	a.icons = packKit(pictures)
 }
 
 // loadEnvironment decodes the hand-painted forest floor tiles, props and border canopy from assets/environment/.
@@ -1457,6 +1487,9 @@ const fogRGB = 0x05070d
 
 var fogColor = core.RGB(fogRGB)
 
+// fogRagged is how far, as a share of the fog band, the fog mask's ragged rim reaches either side of the field's edge.
+const fogRagged = 0.15
+
 // newFogMask paints the fog of war over a width×height arena: clear inside the field fog world units from every edge,
 // thickening through a ragged, cloudy rim into solid darkness at the arena's border. It derives from seed alone.
 func newFogMask(seed uint64, width, height int, fog float64) *image.RGBA {
@@ -1471,7 +1504,7 @@ func newFogMask(seed uint64, width, height int, fog float64) *image.RGBA {
 	w, h := float64(width), float64(height)
 	// The rim starts at the field's edge and turns solid well before the arena's, so the border is never seen.
 	depth := fog * 0.45
-	ragged := fog * 0.15
+	ragged := fog * fogRagged
 	for my := range mh {
 		y := min(my*fogScale+fogScale/2, height-1)
 		for mx := range mw {

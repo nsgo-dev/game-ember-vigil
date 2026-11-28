@@ -1,9 +1,13 @@
 package main
 
 import (
+	"cmp"
 	"embed"
+	"image"
+	"image/draw"
 	"io/fs"
 	"math"
+	"slices"
 	"strconv"
 
 	"github.com/nsgo-dev/nsgo/core"
@@ -88,10 +92,10 @@ var (
 
 // hudArt is the decoded HUD kit; a missing piece is drawn procedurally.
 type hudArt struct {
-	images map[string]core.ImageSource
-	digits [10]core.ImageSource
-	colon  core.ImageSource
-	times  core.ImageSource
+	images map[string]kitImage
+	digits [10]kitImage
+	colon  kitImage
+	times  kitImage
 	// numerals is whether every digit, the colon and the times sign loaded, so a number never mixes painted and system glyphs.
 	numerals bool
 }
@@ -115,11 +119,16 @@ func newHUDArt(fsys fs.FS) *hudArt {
 	return a
 }
 
-// loadKit decodes every PNG in dir of fsys by its name without the extension, skipping what is missing or unreadable.
-func loadKit(fsys fs.FS, dir string) map[string]core.ImageSource {
-	images := map[string]core.ImageSource{}
+// loadKit decodes every PNG in dir of fsys and packs them into one image (packKit).
+func loadKit(fsys fs.FS, dir string) map[string]kitImage {
+	return packKit(decodeKit(fsys, dir))
+}
+
+// decodeKit decodes every PNG in dir of fsys by its name without the extension, skipping what is missing or unreadable.
+func decodeKit(fsys fs.FS, dir string) map[string]*image.RGBA {
+	pictures := map[string]*image.RGBA{}
 	if fsys == nil {
-		return images
+		return pictures
 	}
 	entries, _ := fs.ReadDir(fsys, dir)
 	for _, e := range entries {
@@ -135,23 +144,80 @@ func loadKit(fsys fs.FS, dir string) map[string]core.ImageSource {
 		if err != nil {
 			continue
 		}
-		b := rgba.Bounds()
-		images[name[:len(name)-4]] = core.ImageSource{
-			Pixels:  rgba,
-			Version: 1,
-			Size:    core.Size{Width: core.Points(b.Dx()), Height: core.Points(b.Dy())},
-		}
+		pictures[name[:len(name)-4]] = rgba
 	}
-	return images
+	return pictures
 }
 
 // image returns the named piece, or false when the kit lacks it.
-func (a *hudArt) image(name string) (core.ImageSource, bool) {
+func (a *hudArt) image(name string) (kitImage, bool) {
 	if a == nil {
-		return core.ImageSource{}, false
+		return kitImage{}, false
 	}
 	img, ok := a.images[name]
 	return img, ok
+}
+
+// kitImage is one picture of a kit, a part of the image its kit is packed into.
+type kitImage struct {
+	src        core.ImageSource
+	x, y, w, h float32
+}
+
+// drawIn draws the whole picture into x, y, w, h.
+func (k kitImage) drawIn(d *core.Drawing, x, y, w, h float32) {
+	d.DrawImageFrom(k.src, k.x, k.y, k.w, k.h, x, y, w, h)
+}
+
+// drawFrom draws the part sx, sy, sw, sh of the picture, in its own pixels, into x, y, w, h.
+func (k kitImage) drawFrom(d *core.Drawing, sx, sy, sw, sh, x, y, w, h float32) {
+	d.DrawImageFrom(k.src, k.x+sx, k.y+sy, sw, sh, x, y, w, h)
+}
+
+// kitGap is the clear pixels between two pictures of a packed kit, so smooth sampling of one never reaches another.
+const kitGap = 2
+
+// kitWidth is the most pixels a packed kit's rows run before the next begins.
+const kitWidth = 1024
+
+// packKit packs pictures into one image, in rows of the tallest first, and returns each as its part of it. Apple's canvas
+// keeps only eight images made from pixels, and a frame drew more once every piece and icon was an image of its own:
+// it then made every image again on every frame, the arena's ground among them, and a full HUD held a 120 Hz phone near
+// 80 frames a second.
+func packKit(pictures map[string]*image.RGBA) map[string]kitImage {
+	out := make(map[string]kitImage, len(pictures))
+	if len(pictures) == 0 {
+		return out
+	}
+	names := make([]string, 0, len(pictures))
+	for name := range pictures {
+		names = append(names, name)
+	}
+	slices.SortFunc(names, func(a, b string) int {
+		return cmp.Or(cmp.Compare(pictures[b].Bounds().Dy(), pictures[a].Bounds().Dy()), cmp.Compare(a, b))
+	})
+	type place struct{ x, y int }
+	at := make(map[string]place, len(names))
+	x, y, shelf, width, height := 0, 0, 0, 0, 0
+	for _, name := range names {
+		b := pictures[name].Bounds()
+		if x > 0 && x+b.Dx() > kitWidth {
+			x, y, shelf = 0, y+shelf+kitGap, 0
+		}
+		at[name] = place{x, y}
+		x += b.Dx() + kitGap
+		shelf = max(shelf, b.Dy())
+		width, height = max(width, x-kitGap), max(height, y+shelf)
+	}
+	packed := image.NewRGBA(image.Rect(0, 0, width, height))
+	src := core.ImageSource{Pixels: packed, Version: 1, Size: core.Size{Width: core.Points(width), Height: core.Points(height)}}
+	for _, name := range names {
+		img, p := pictures[name], at[name]
+		b := img.Bounds()
+		draw.Draw(packed, image.Rect(p.x, p.y, p.x+b.Dx(), p.y+b.Dy()), img, b.Min, draw.Src)
+		out[name] = kitImage{src: src, x: float32(p.x), y: float32(p.y), w: float32(b.Dx()), h: float32(b.Dy())}
+	}
+	return out
 }
 
 // rect is a rectangle in the canvas's points.
@@ -375,7 +441,7 @@ func (p *hudPainter) drawHealth() {
 		p.drawHealthFallback(r, frac, bright)
 		return
 	}
-	sy := float32(fill.Size.Height) / r.h
+	sy := fill.h / r.h
 	// The oil's glow behind the glass, which gutters when health runs low.
 	cx, cy := r.center()
 	glow := core.CanvasRadial(cx, cy, 0, cx, cy, r.w,
@@ -388,14 +454,14 @@ func (p *hudPainter) drawHealth() {
 	cut := healthFillTop + (healthFillBottom-healthFillTop)*(1-frac)
 	if frac > 0 {
 		p.d.SetAlpha(0.55 + 0.45*bright)
-		p.d.DrawImageFrom(fill, 0, cut, float32(fill.Size.Width), healthFillBottom-cut, r.x, r.y+cut/sy, r.w, (healthFillBottom-cut)/sy)
+		fill.drawFrom(p.d, 0, cut, fill.w, healthFillBottom-cut, r.x, r.y+cut/sy, r.w, (healthFillBottom-cut)/sy)
 		p.d.SetAlpha(1)
 	}
-	p.d.DrawImageIn(frame, r.x, r.y, r.w, r.h)
+	frame.drawIn(p.d, r.x, r.y, r.w, r.h)
 	if p.m.flash > 0 {
 		p.d.Save()
 		p.d.SetComposite(core.CompositeLighter).SetAlpha(float32(p.m.flash) * 0.8)
-		p.d.DrawImageIn(frame, r.x, r.y, r.w, r.h)
+		frame.drawIn(p.d, r.x, r.y, r.w, r.h)
 		p.d.Restore()
 	}
 }
@@ -434,17 +500,17 @@ func (p *hudPainter) drawXP() {
 		}
 		return
 	}
-	sx := float32(fill.Size.Width) / r.w
-	p.d.DrawImageIn(frame, r.x, r.y, r.w, r.h)
+	sx := fill.w / r.w
+	frame.drawIn(p.d, r.x, r.y, r.w, r.h)
 	if frac > 0 {
 		sw := (xpFillRight - xpFillLeft) * frac
-		p.d.DrawImageFrom(fill, xpFillLeft, 0, sw, float32(fill.Size.Height), r.x+xpFillLeft/sx, r.y, sw/sx, r.h)
+		fill.drawFrom(p.d, xpFillLeft, 0, sw, fill.h, r.x+xpFillLeft/sx, r.y, sw/sx, r.h)
 	}
 	if glow > 0 {
 		p.d.Save()
 		p.d.SetComposite(core.CompositeLighter).SetAlpha(glow)
 		p.d.SetShadow(core.RGBA(0xffb347, 0.9), 0, 0, 12*p.l.scale)
-		p.d.DrawImageFrom(fill, xpFillLeft, 0, xpFillRight-xpFillLeft, float32(fill.Size.Height), r.x+xpFillLeft/sx, r.y, (xpFillRight-xpFillLeft)/sx, r.h)
+		fill.drawFrom(p.d, xpFillLeft, 0, xpFillRight-xpFillLeft, fill.h, r.x+xpFillLeft/sx, r.y, (xpFillRight-xpFillLeft)/sx, r.h)
 		p.d.Restore()
 	}
 }
@@ -452,7 +518,7 @@ func (p *hudPainter) drawXP() {
 func (p *hudPainter) drawBadge() {
 	r := p.l.badge
 	if img, ok := p.art.image(hudLevelBadge); ok {
-		p.d.DrawImageIn(img, r.x, r.y, r.w, r.h)
+		img.drawIn(p.d, r.x, r.y, r.w, r.h)
 	} else {
 		cx, cy := r.center()
 		p.d.SetFillColor(hudBronze).BeginPath().MoveTo(cx, r.y).LineTo(r.x+r.w, cy).LineTo(cx, r.y+r.h).LineTo(r.x, cy).ClosePath().Fill()
@@ -464,7 +530,7 @@ func (p *hudPainter) drawBadge() {
 func (p *hudPainter) drawKills() {
 	r := p.l.emblem
 	if img, ok := p.art.image(hudKillEmblem); ok {
-		p.d.DrawImageIn(img, r.x, r.y, r.w, r.h)
+		img.drawIn(p.d, r.x, r.y, r.w, r.h)
 	} else {
 		cx, cy := r.center()
 		p.d.SetFillColor(hudIron).BeginPath().Ellipse(cx, cy, r.w/2.4, r.h/2.4).Fill()
@@ -498,7 +564,7 @@ func (p *hudPainter) drawSlots() {
 			p.d.SetFillColor(core.RGBA(0xffd166, 0.35*pulse)).BeginPath().Ellipse(cx, cy, r.w*0.62, r.h*0.62).Fill()
 		}
 		if img, ok := p.art.image(frameName); ok {
-			p.d.DrawImageIn(img, r.x, r.y, r.w, r.h)
+			img.drawIn(p.d, r.x, r.y, r.w, r.h)
 		} else {
 			color := hudIron
 			if frameName == hudSlotMaxed {
@@ -513,7 +579,7 @@ func (p *hudPainter) drawSlots() {
 		icon := slotIconSide * r.w / slotSide
 		cx, cy := r.center()
 		if img, ok := p.icons.cardIcon(slot.id); ok {
-			p.d.DrawImageIn(img, cx-icon/2, cy-icon/2, icon, icon)
+			img.drawIn(p.d, cx-icon/2, cy-icon/2, icon, icon)
 		} else {
 			p.d.SetFillColor(cardAccent(slot.id, offerWeapon)).BeginPath().Ellipse(cx, cy, icon/2.5, icon/2.5).Fill()
 		}
@@ -536,9 +602,9 @@ func (p *hudPainter) drawPips(r rect, level, maxLevel int) {
 		px := x + float32(i)*side
 		switch {
 		case on && okLit:
-			p.d.DrawImageIn(lit, px, y, side, side)
+			lit.drawIn(p.d, px, y, side, side)
 		case !on && okUnlit:
-			p.d.DrawImageIn(unlit, px, y, side, side)
+			unlit.drawIn(p.d, px, y, side, side)
 		default:
 			c := pipEmpty
 			if on {
@@ -553,7 +619,7 @@ func (p *hudPainter) drawPips(r rect, level, maxLevel int) {
 func (p *hudPainter) drawTimer() {
 	r := p.l.timer
 	if img, ok := p.art.image(hudTimer); ok {
-		p.d.DrawImageIn(img, r.x, r.y, r.w, r.h)
+		img.drawIn(p.d, r.x, r.y, r.w, r.h)
 	} else {
 		p.d.SetFillColor(hudIron).BeginPath().RoundRect(r.x, r.y, r.w, r.h, 8*p.l.scale).Fill()
 		p.d.SetStrokeColor(hudBronze).SetLineWidth(2*p.l.scale).BeginPath().RoundRect(r.x, r.y, r.w, r.h, 8*p.l.scale).Stroke()
@@ -585,11 +651,11 @@ func (p *hudPainter) drawBoss() {
 	fill, okFill := p.art.image(hudBossFill)
 	frame, okFrame := p.art.image(hudBossFrame)
 	if okFill && okFrame {
-		sx := float32(fill.Size.Width) / r.w
-		p.d.DrawImageIn(frame, r.x, r.y, r.w, r.h)
+		sx := fill.w / r.w
+		frame.drawIn(p.d, r.x, r.y, r.w, r.h)
 		if frac > 0 {
 			sw := (bossFillRight - bossFillLeft) * frac
-			p.d.DrawImageFrom(fill, bossFillLeft, 0, sw, float32(fill.Size.Height), r.x+bossFillLeft/sx, r.y, sw/sx, r.h)
+			fill.drawFrom(p.d, bossFillLeft, 0, sw, fill.h, r.x+bossFillLeft/sx, r.y, sw/sx, r.h)
 		}
 	} else {
 		trough := rect{r.x + r.w*0.12, r.y + r.h*0.36, r.w * 0.76, r.h * 0.3}
@@ -611,7 +677,7 @@ func (p *hudPainter) drawPause() {
 		name = hudPausePushed
 	}
 	if img, ok := p.art.image(name); ok {
-		p.d.DrawImageIn(img, r.x, r.y, r.w, r.h)
+		img.drawIn(p.d, r.x, r.y, r.w, r.h)
 		return
 	}
 	s := p.l.scale
@@ -670,16 +736,16 @@ func (p *hudPainter) drawNumber(text string, x, y, h float32, align core.TextAli
 	}
 	top := y - h/2
 	if times {
-		p.d.DrawImageIn(p.art.times, x, top, digitW*k, h)
+		p.art.times.drawIn(p.d, x, top, digitW*k, h)
 		x += digitW * k
 	}
 	for _, c := range text {
 		switch {
 		case c == ':':
-			p.d.DrawImageIn(p.art.colon, x, top, colonW*k, h)
+			p.art.colon.drawIn(p.d, x, top, colonW*k, h)
 			x += colonW * k
 		case c >= '0' && c <= '9':
-			p.d.DrawImageIn(p.art.digits[c-'0'], x, top, digitW*k, h)
+			p.art.digits[c-'0'].drawIn(p.d, x, top, digitW*k, h)
 			x += digitW * k
 		}
 	}

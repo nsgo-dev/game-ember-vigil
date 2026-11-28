@@ -168,6 +168,11 @@ type audioController struct {
 	sounds   map[string]*audio.Sound
 	effects  [cueCount]*sound.Effect
 	lastPlay [cueCount]time.Time
+
+	// sfx mixes the effects into one PCM output where native playbacks cost the frame (usePCMEffects), from clips decoded per cue; nil elsewhere.
+	sfx    *sfxMixer
+	clips  [cueCount]*pcmClip
+	paused bool
 }
 
 // newAudioController builds the mixer, wires bus defaults and asynchronously preloads
@@ -192,7 +197,13 @@ func newAudioController(cx *core.Scope, initial Settings) *audioController {
 		ac.musicReady = true
 	}
 
-	if ac.available {
+	if ac.available && usePCMEffects() {
+		ac.sfx = newSFXMixer(cx)
+	}
+	if ac.sfx != nil {
+		ac.decodeCues()
+		cx.Effect(func() { ac.sfx.setMuted(cx.Env().Lifecycle() == core.LifecycleBackground) })
+	} else if ac.available {
 		ac.preloadCues()
 	}
 
@@ -238,6 +249,22 @@ func (a *audioController) preloadCues() {
 	}
 }
 
+// decodeCues decodes each cue's WAV from the CC0 placeholder pack once for the software mixer.
+func (a *audioController) decodeCues() {
+	byAsset := map[string]*pcmClip{}
+	for c := cueNone + 1; c < cueCount; c++ {
+		asset := cueSpecs[c].asset
+		clip, ok := byAsset[asset]
+		if !ok {
+			if src, err := placeholder.Sound(asset); err == nil {
+				clip, _ = decodeWAV(src.Data)
+			}
+			byAsset[asset] = clip
+		}
+		a.clips[c] = clip
+	}
+}
+
 // applySettings synchronizes master, music and SFX (including UI) bus volumes immediately.
 func (a *audioController) applySettings(s Settings) {
 	if a == nil || a.mixer == nil {
@@ -256,6 +283,10 @@ func (a *audioController) setPaused(paused bool) {
 		return
 	}
 	a.mixer.SetPaused(paused)
+	a.paused = paused
+	if a.sfx != nil {
+		a.sfx.setPaused(paused)
+	}
 }
 
 // ensureMusic starts the looping ambient background track on the first user-initiated
@@ -283,7 +314,7 @@ func (a *audioController) playCue(c soundCue) {
 		return
 	}
 	eff := a.effects[c]
-	if eff == nil {
+	if eff == nil && a.clips[c] == nil {
 		return
 	}
 	spec := cueSpecs[c]
@@ -292,6 +323,16 @@ func (a *audioController) playCue(c soundCue) {
 		return
 	}
 	a.lastPlay[c] = now
+	if a.sfx != nil {
+		// Gameplay effects wait out a pause; the UI's keep playing under the pause menu, as the mixer's exempt group does.
+		pausable := spec.group != audioGroupUI
+		if pausable && a.paused {
+			return
+		}
+		gain := core.Untracked(a.cx, func() float32 { return a.mixer.Master() * a.mixer.Volume(spec.group) })
+		a.sfx.play(a.clips[c], c, spec.limit, spec.volume*gain, spec.rate, pausable)
+		return
+	}
 	eff.Play(audio.Voice{
 		Volume: spec.volume,
 		Rate:   spec.rate,
