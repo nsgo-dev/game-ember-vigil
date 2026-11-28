@@ -25,7 +25,15 @@ type botResult struct {
 
 // playBot runs a deterministic kiting and upgrade-picking bot until Victory, Defeat, or maxMinutes. It steers afresh every react steps and holds its last heading in between, so a larger react plays a slower player; veteran plays a player who has won once and unlocked evolution and every weapon.
 func playBot(seed uint64, tier, maxMinutes, react int, veteran bool) (*Run, botResult) {
+	return playBotShop(seed, tier, maxMinutes, react, veteran, false)
+}
+
+// playBotShop is playBot for a player who has also bought every level of the ember shop when shop is set.
+func playBotShop(seed uint64, tier, maxMinutes, react int, veteran, shop bool) (*Run, botResult) {
 	r := NewRun(seed, tier)
+	if shop {
+		r.SetShop(fullShop())
+	}
 	if veteran {
 		r.EnableEvolution()
 		var all []string
@@ -290,7 +298,7 @@ func botChoose(s Snapshot) int {
 	return best
 }
 
-// TestTwelveMinuteBotBalanceAndDeterminism verifies that sharp movement wins most runs but not all and sees every enemy and boss phase, that evolution kills the Hollow King faster without winning more than that, that slow movement loses most of the same runs, that standing still loses, and that a run replays deterministically.
+// TestTwelveMinuteBotBalanceAndDeterminism verifies that sharp movement wins only some runs, with the seed deciding which, and sees every enemy and boss phase in those, that evolution kills the Hollow King faster and wins a little more, that slow movement loses most of the same runs, that standing still loses, and that a run replays deterministically.
 func TestTwelveMinuteBotBalanceAndDeterminism(t *testing.T) {
 	const seeds = 10
 	wins, slowWins, evolvedWins := 0, 0, 0
@@ -325,11 +333,11 @@ func TestTwelveMinuteBotBalanceAndDeterminism(t *testing.T) {
 			slowWins++
 		}
 	}
-	if wins < 6 || wins > 8 {
-		t.Fatalf("sharp bot won %d/%d seeds, want 6 to 8: good movement should usually win, but not always", wins, seeds)
+	if wins < 2 || wins > 5 {
+		t.Fatalf("sharp bot won %d/%d seeds, want 2 to 5: good movement should win only with a good seed", wins, seeds)
 	}
-	if evolvedWins < 6 || evolvedWins > 8 {
-		t.Fatalf("sharp bot with evolution won %d/%d seeds, want 6 to 8: evolution should not lift the win rate", evolvedWins, seeds)
+	if evolvedWins < wins || evolvedWins > 7 {
+		t.Fatalf("sharp bot with evolution won %d/%d seeds, want %d to 7: evolution should help a little, not carry the run", evolvedWins, seeds, wins)
 	}
 	if evolvedBossTime >= bossTime*0.9 {
 		t.Fatalf("on the seeds both won, evolved runs fought the Hollow King %.1fs in all and plain runs %.1fs; evolution should clear at least 10%% faster", evolvedBossTime, bossTime)
@@ -361,7 +369,7 @@ func TestTwelveMinuteBotBalanceAndDeterminism(t *testing.T) {
 	}
 }
 
-// TestLongNightTiersGetHarder verifies that the sharp bot's win rate falls with every Long Night tier, from about two thirds at tier 1 to a quarter or so at tier 5, as docs/meta-progression.md records, and that a seed, tier and controls replay the same run.
+// TestLongNightTiersGetHarder verifies that the sharp bot with every unlock and a full shop wins fewer runs on every Long Night tier, from nearly all at tier 1 to about one in seven at tier 5, as docs/meta-progression.md records, and that a seed, tier and controls replay the same run.
 func TestLongNightTiersGetHarder(t *testing.T) {
 	const seeds = 100
 	tiers := mustGameData().tiers.maxTier()
@@ -374,7 +382,7 @@ func TestLongNightTiersGetHarder(t *testing.T) {
 	for tier := 1; tier <= tiers; tier++ {
 		for seed := uint64(1); seed <= seeds; seed++ {
 			wg.Go(func() {
-				if _, res := playBot(seed, tier, 16, 1, false); res.phase == PhaseVictory {
+				if _, res := playBotShop(seed, tier, 16, 1, true, true); res.phase == PhaseVictory {
 					mu.Lock()
 					wins[tier]++
 					mu.Unlock()
@@ -383,17 +391,17 @@ func TestLongNightTiersGetHarder(t *testing.T) {
 		}
 	}
 	wg.Wait()
-	t.Logf("sharp bot wins by tier over %d seeds: %v", seeds, wins[1:])
+	t.Logf("sharp bot with everything unlocked and bought wins by tier over %d seeds: %v", seeds, wins[1:])
 	for tier := 2; tier <= tiers; tier++ {
 		if wins[tier] >= wins[tier-1] {
 			t.Fatalf("tier %d won %d/%d seeds, not fewer than tier %d's %d: every tier should be harder", tier, wins[tier], seeds, tier-1, wins[tier-1])
 		}
 	}
-	if wins[1] < seeds*55/100 || wins[1] > seeds*75/100 {
-		t.Fatalf("tier 1 won %d/%d seeds, want about 65%%", wins[1], seeds)
+	if wins[1] < seeds*90/100 {
+		t.Fatalf("tier 1 won %d/%d seeds, want at least 90%%: a full shop should master the base run", wins[1], seeds)
 	}
-	if wins[tiers] < seeds*15/100 || wins[tiers] > seeds*35/100 {
-		t.Fatalf("tier %d won %d/%d seeds, want 20 to 30%%", tiers, wins[tiers], seeds)
+	if wins[tiers] < seeds*5/100 || wins[tiers] > seeds*25/100 {
+		t.Fatalf("tier %d won %d/%d seeds, want 5 to 25%%: even full power needs a good seed there", tiers, wins[tiers], seeds)
 	}
 
 	r1, res1 := playBot(42, tiers, 16, 1, false)
