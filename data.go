@@ -20,16 +20,18 @@ var dataFS embed.FS
 
 // The schema version each data file must declare, which its loader accepts and its encoder writes.
 const (
-	runVersion     = 1
-	weaponVersion  = 1
-	upgradeVersion = 1
-	enemyVersion   = 1
-	waveVersion    = 1
-	fileRun        = "data/run.yaml"
-	fileWeapons    = "data/weapons.yaml"
-	fileUpgrades   = "data/upgrades.yaml"
-	fileEnemies    = "data/enemies.yaml"
-	fileWaves      = "data/waves.yaml"
+	runVersion         = 1
+	weaponVersion      = 1
+	upgradeVersion     = 1
+	enemyVersion       = 1
+	waveVersion        = 1
+	progressionVersion = 1
+	fileRun            = "data/run.yaml"
+	fileWeapons        = "data/weapons.yaml"
+	fileUpgrades       = "data/upgrades.yaml"
+	fileEnemies        = "data/enemies.yaml"
+	fileWaves          = "data/waves.yaml"
+	fileProgression    = "data/progression.yaml"
 )
 
 // Weapon kinds as data/weapons.yaml names them.
@@ -71,6 +73,7 @@ type gameData struct {
 	upgrades      upgradeFile
 	enemies       enemyFile
 	waves         waveFile
+	progression   progressionFile
 	starterWeapon int
 }
 
@@ -325,6 +328,31 @@ type mixDef struct {
 	Weight float64 `yaml:"weight"`
 }
 
+// progressionFile is data/progression.yaml: what a run pays in embers and the conditions that unlock content between runs.
+type progressionFile struct {
+	Version int         `yaml:"version"`
+	Payout  payoutDef   `yaml:"payout"`
+	Unlocks []unlockDef `yaml:"unlocks"`
+}
+
+// payoutDef is how many embers a finished run earns, multiplied by 1 + TierBonus for each Long Night tier above 1.
+type payoutDef struct {
+	PerMinute       int     `yaml:"perMinute"`
+	PerHundredKills int     `yaml:"perHundredKills"`
+	PerChest        int     `yaml:"perChest"`
+	Win             int     `yaml:"win"`
+	TierBonus       float64 `yaml:"tierBonus"`
+}
+
+// unlockDef is content a single run unlocks by meeting every condition it sets: at least Kills kills, at least Elites elites defeated, and a win when Win is set.
+type unlockDef struct {
+	ID     string `yaml:"id"`
+	Name   string `yaml:"name"`
+	Kills  int    `yaml:"kills,omitempty"`
+	Elites int    `yaml:"elites,omitempty"`
+	Win    bool   `yaml:"win,omitempty"`
+}
+
 // loadGameData reads, decodes and cross-checks the tuning files.
 func loadGameData(fsys fs.FS) (*gameData, error) {
 	runBytes, err := fs.ReadFile(fsys, fileRun)
@@ -367,7 +395,15 @@ func loadGameData(fsys fs.FS) (*gameData, error) {
 	if err != nil {
 		return nil, err
 	}
-	d := &gameData{run: *run, weapons: *weapons, upgrades: *upgrades, enemies: *enemies, waves: *waves}
+	progressionBytes, err := fs.ReadFile(fsys, fileProgression)
+	if err != nil {
+		return nil, err
+	}
+	progression, err := parseProgressionFile(fileProgression, progressionBytes)
+	if err != nil {
+		return nil, err
+	}
+	d := &gameData{run: *run, weapons: *weapons, upgrades: *upgrades, enemies: *enemies, waves: *waves, progression: *progression}
 	if err := d.check(); err != nil {
 		return nil, err
 	}
@@ -498,6 +534,18 @@ func parseEnemyFile(file string, data []byte) (*enemyFile, error) {
 // parseWaveFile decodes and validates data/waves.yaml.
 func parseWaveFile(file string, data []byte) (*waveFile, error) {
 	var f waveFile
+	if err := decodeStrict(file, data, &f); err != nil {
+		return nil, err
+	}
+	if err := f.validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", file, err)
+	}
+	return &f, nil
+}
+
+// parseProgressionFile decodes and validates data/progression.yaml.
+func parseProgressionFile(file string, data []byte) (*progressionFile, error) {
+	var f progressionFile
 	if err := decodeStrict(file, data, &f); err != nil {
 		return nil, err
 	}
@@ -1084,6 +1132,37 @@ func (s *spanDef) validate() error {
 		}
 		if !positive(m.Weight) {
 			return fmt.Errorf("%s: weight %v is not above 0", m.Name, m.Weight)
+		}
+	}
+	return nil
+}
+
+func (f *progressionFile) validate() error {
+	p := f.Payout
+	switch {
+	case f.Version != progressionVersion:
+		return fmt.Errorf("version %d, want %d", f.Version, progressionVersion)
+	case p.PerMinute < 0 || p.PerHundredKills < 0 || p.PerChest < 0 || p.Win < 0:
+		return fmt.Errorf("payout %+v pays a negative amount", p)
+	case !finite(p.TierBonus) || p.TierBonus < 0:
+		return fmt.Errorf("payout tierBonus %v is negative", p.TierBonus)
+	}
+	for i := range f.Unlocks {
+		u := &f.Unlocks[i]
+		switch {
+		case u.ID == "":
+			return fmt.Errorf("unlock %d has no id", i)
+		case u.Name == "":
+			return fmt.Errorf("unlock %q has no name", u.ID)
+		case u.Kills < 0 || u.Elites < 0:
+			return fmt.Errorf("unlock %q asks for a negative count", u.ID)
+		case u.Kills == 0 && u.Elites == 0 && !u.Win:
+			return fmt.Errorf("unlock %q sets no condition", u.ID)
+		}
+		for _, other := range f.Unlocks[:i] {
+			if other.ID == u.ID {
+				return fmt.Errorf("unlock %q is defined twice", u.ID)
+			}
 		}
 	}
 	return nil

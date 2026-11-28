@@ -72,4 +72,4 @@ A run was too easy and left nothing behind: the balance bot won 9 of 10 seeds wi
 ## Open questions
 
 - Exact numbers of each tier rule, the new weapons and the evolutions.
-- Screens: where the shop, the tier choice and the collection live, and how results show the embers earned.
+- Screens: where the shop, the tier choice and the collection live. The results show the embers a run earned, the new balance and what it unlocked.

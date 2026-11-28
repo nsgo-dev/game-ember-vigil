@@ -301,6 +301,9 @@ type Run struct {
 	level  int
 	kills  int
 	nextID uint64
+	// elites counts the elites defeated and chests the chests opened, which the ember payout and the unlocks read.
+	elites int
+	chests int
 
 	events []Event
 	snap   Snapshot
@@ -1047,6 +1050,9 @@ func (r *Run) reap() {
 			r.victory(dead.pos)
 			return
 		}
+		if dead.elite {
+			r.elites++
+		}
 		r.dropEmbers(&dead)
 		if dead.healDrop > 0 && len(r.pickups) < maxPickups {
 			r.pickups = append(r.pickups, pickup{
@@ -1174,6 +1180,27 @@ func (r *Run) defeat() {
 	r.phase = PhaseDefeat
 	r.offersNow = r.offersNow[:0]
 	r.emit(Event{Kind: EventDefeat, Pos: r.keeper.pos})
+}
+
+// Payout is how many embers the run has earned at Long Night tier, which counts as 1 when below it: whole minutes survived, whole hundreds of kills, chests and a win, times the tier's multiplier.
+func (r *Run) Payout(tier int) int {
+	p := r.data.progression.Payout
+	base := p.PerMinute*int(r.time/60) + p.PerHundredKills*(r.kills/100) + p.PerChest*r.chests
+	if r.phase == PhaseVictory {
+		base += p.Win
+	}
+	return int(math.Round(float64(base) * (1 + p.TierBonus*float64(max(tier, 1)-1))))
+}
+
+// Unlocks returns the ids of the unlocks whose conditions the run has met, in the order data/progression.yaml lists them.
+func (r *Run) Unlocks() []string {
+	var ids []string
+	for _, u := range r.data.progression.Unlocks {
+		if r.kills >= u.Kills && r.elites >= u.Elites && (!u.Win || r.phase == PhaseVictory) {
+			ids = append(ids, u.ID)
+		}
+	}
+	return ids
 }
 
 // xpNeeded is how much XP the next level costs.

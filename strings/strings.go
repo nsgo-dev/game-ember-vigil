@@ -1,7 +1,10 @@
 // Package strings holds Ember Vigil's English and Simplified Chinese interface tables.
 package strings
 
-import "strconv"
+import (
+	"strconv"
+	"strings"
+)
 
 // Lang identifies a supported interface language.
 type Lang string
@@ -102,8 +105,15 @@ type Table struct {
 	TimePrefix   string
 	NewRecord    string
 	NoNewRecord  string
-	PlayAgain    string
-	TitleButton  string
+	// EmbersEarnedFmt, EmberBalanceFmt and UnlockedPrefix lead the embers a run earned, the balance after it and what it unlocked.
+	EmbersEarnedFmt string
+	EmberBalanceFmt string
+	UnlockedPrefix  string
+	UnlockSeparator string
+	// Unlocks holds each unlock's localized name by its id in data/progression.yaml.
+	Unlocks     map[string]string
+	PlayAgain   string
+	TitleButton string
 }
 
 // For returns the localized string table for lang, falling back to English.
@@ -139,6 +149,17 @@ func (t Table) BestLevel(n int) string { return t.BestLevelFmt + strconv.Itoa(n)
 
 // Wins formats the total wins record line.
 func (t Table) Wins(n int) string { return t.WinsFmt + strconv.Itoa(n) }
+
+// EmbersEarned formats the embers a run earned, such as "Embers +42".
+func (t Table) EmbersEarned(n int) string { return t.EmbersEarnedFmt + strconv.Itoa(n) }
+
+// EmberBalance formats the ember balance after a run.
+func (t Table) EmberBalance(n int) string { return t.EmberBalanceFmt + strconv.Itoa(n) }
+
+// UnlockedList formats the names of what a run unlocked.
+func (t Table) UnlockedList(names []string) string {
+	return t.UnlockedPrefix + strings.Join(names, t.UnlockSeparator)
+}
 
 // BossPhaseLabel returns the localized phase tag for boss phases 1-3.
 func (t Table) BossPhaseLabel(phase int) string {

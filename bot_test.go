@@ -241,9 +241,9 @@ func TestTwelveMinuteBotBalanceAndDeterminism(t *testing.T) {
 	const seeds = 10
 	wins, slowWins := 0, 0
 	for seed := uint64(1); seed <= seeds; seed++ {
-		_, res := playBot(seed, 16, 1)
-		t.Logf("seed=%d phase=%v time=%.1fs kills=%d level=%d minHP=%.0f%% boss=%v phases=%d events=%d enemies=%d",
-			seed, res.phase, res.time, res.kills, res.level, res.minHealthPct*100, res.bossSpawned, res.bossPhases, res.eventCount, len(res.seenEnemies))
+		r, res := playBot(seed, 16, 1)
+		t.Logf("seed=%d phase=%v time=%.1fs kills=%d level=%d minHP=%.0f%% boss=%v phases=%d events=%d enemies=%d embers=%d",
+			seed, res.phase, res.time, res.kills, res.level, res.minHealthPct*100, res.bossSpawned, res.bossPhases, res.eventCount, len(res.seenEnemies), r.Payout(1))
 		if res.phase == PhaseVictory {
 			wins++
 			if res.bossPhases != 2 {
@@ -285,7 +285,7 @@ func TestTwelveMinuteBotBalanceAndDeterminism(t *testing.T) {
 	// Confirm full 12-minute determinism on a fixed seed.
 	r1, res1 := playBot(42, 16, 1)
 	r2, res2 := playBot(42, 16, 1)
-	if res1.eventCount != res2.eventCount || !reflect.DeepEqual(r1.Snapshot(), r2.Snapshot()) {
-		t.Fatalf("fixed seed 42 did not replay identically: events %d vs %d", res1.eventCount, res2.eventCount)
+	if res1.eventCount != res2.eventCount || !reflect.DeepEqual(r1.Snapshot(), r2.Snapshot()) || r1.Payout(1) != r2.Payout(1) {
+		t.Fatalf("fixed seed 42 did not replay identically: events %d vs %d, embers %d vs %d", res1.eventCount, res2.eventCount, r1.Payout(1), r2.Payout(1))
 	}
 }

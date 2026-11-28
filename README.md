@@ -27,7 +27,7 @@
 - Six enemy kinds, the Gloomwarden elite and a three-phase boss.
 - Stylized 2D animated sprites and hand-painted forest environment in a lantern-lit ash grove.
 - Keyboard, gamepad and touch controls, with English and Simplified Chinese interface.
-- Best records and settings kept between sessions.
+- Embers paid by every run, best records and settings kept between sessions.
 - Builds for macOS, Windows, Linux and the web.
 
 The first version is complete; see the [roadmap](docs/roadmap.md) for what each milestone delivered and what comes later.

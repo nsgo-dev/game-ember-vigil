@@ -3,18 +3,21 @@ package main
 import (
 	"encoding/json"
 	"math"
+	"slices"
 
 	"github.com/nsgo-dev/nsgo/core"
 	evstrings "me.oneo/embervigil/strings"
 )
 
-// Storage keys and schema versions for the two persisted save slots.
+// Storage keys and schema versions for the persisted save slots.
 const (
-	settingsStorageKey = "settings"
-	recordsStorageKey  = "records"
+	settingsStorageKey    = "settings"
+	recordsStorageKey     = "records"
+	progressionStorageKey = "progression"
 
-	settingsVersion = 1
-	recordsVersion  = 1
+	settingsVersion        = 1
+	recordsVersion         = 1
+	progressionSaveVersion = 1
 )
 
 // Quality is the graphics quality tier stored in settings and consumed by the renderer.
@@ -53,6 +56,23 @@ type Records struct {
 	Wins      int     `json:"wins"`
 }
 
+// Progression is what the player has earned and unlocked across runs.
+type Progression struct {
+	Version int `json:"version"`
+	// Embers is the balance the shop spends.
+	Embers int `json:"embers"`
+	// Shop holds each bought shop item's level by item id.
+	Shop map[string]int `json:"shop,omitempty"`
+	// TierWon is the highest Long Night tier won, 0 before the first win.
+	TierWon int `json:"tierWon"`
+	// Unlocked and Collection are the ids of unlocked content and of evolution recipes made, in the order they were earned.
+	Unlocked   []string `json:"unlocked,omitempty"`
+	Collection []string `json:"collection,omitempty"`
+}
+
+// has reports whether id is unlocked.
+func (p Progression) has(id string) bool { return slices.Contains(p.Unlocked, id) }
+
 // defaultSettings returns the initial preferences before any user edits are saved.
 func defaultSettings() Settings {
 	return Settings{
@@ -70,6 +90,42 @@ func defaultSettings() Settings {
 // defaultRecords returns an empty lifetime record set at the current schema version.
 func defaultRecords() Records {
 	return Records{Version: recordsVersion}
+}
+
+// defaultProgression returns an empty progression at the current schema version.
+func defaultProgression() Progression {
+	return Progression{Version: progressionSaveVersion}
+}
+
+// normalizeProgression drops negative amounts, empty and repeated ids, and stamps the current schema version.
+func normalizeProgression(p Progression) Progression {
+	p.Version = progressionSaveVersion
+	p.Embers = max(0, p.Embers)
+	p.TierWon = max(0, p.TierWon)
+	var shop map[string]int
+	for id, level := range p.Shop {
+		if id != "" && level > 0 {
+			if shop == nil {
+				shop = map[string]int{}
+			}
+			shop[id] = level
+		}
+	}
+	p.Shop = shop
+	p.Unlocked = uniqueIDs(p.Unlocked)
+	p.Collection = uniqueIDs(p.Collection)
+	return p
+}
+
+// uniqueIDs returns ids without empty or repeated entries, keeping the first of each in order.
+func uniqueIDs(ids []string) []string {
+	var out []string
+	for _, id := range ids {
+		if id != "" && !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // normalizeSettings clamps volumes and coerces unknown quality or language values to valid defaults.
@@ -233,4 +289,55 @@ func applyRunRecords(prev Records, s Snapshot) (Records, bool) {
 	}
 	next.HasRecord = true
 	return next, isNew
+}
+
+// loadProgression reads and validates the progression slot from storage; a save without one, or a corrupt or future one, starts empty.
+func loadProgression(storage core.Storage) Progression {
+	raw, ok := storage.GetItem(progressionStorageKey)
+	if !ok || raw == "" {
+		return defaultProgression()
+	}
+	var envelope struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal([]byte(raw), &envelope); err != nil || envelope.Version < 1 || envelope.Version > progressionSaveVersion {
+		return defaultProgression()
+	}
+	var p Progression
+	if err := json.Unmarshal([]byte(raw), &p); err != nil {
+		return defaultProgression()
+	}
+	return normalizeProgression(p)
+}
+
+// saveProgression writes normalized progression to storage under the versioned progression slot.
+func saveProgression(storage core.Storage, p Progression) error {
+	data, err := json.Marshal(normalizeProgression(p))
+	if err != nil {
+		return err
+	}
+	return storage.SetItem(progressionStorageKey, string(data))
+}
+
+// runReward is what a finished run added to the progression: its embers and the ids it newly unlocked.
+type runReward struct {
+	embers  int
+	unlocks []string
+}
+
+// applyRunProgression adds a finished run's embers and unlocks to prev, raising the highest tier won when the run won at tier, and reports what it newly gave.
+func applyRunProgression(prev Progression, won bool, tier, embers int, unlocks []string) (Progression, runReward) {
+	next := normalizeProgression(prev)
+	reward := runReward{embers: max(0, embers)}
+	next.Embers += reward.embers
+	if won {
+		next.TierWon = max(next.TierWon, tier)
+	}
+	for _, id := range unlocks {
+		if id != "" && !next.has(id) {
+			next.Unlocked = append(next.Unlocked, id)
+			reward.unlocks = append(reward.unlocks, id)
+		}
+	}
+	return next, reward
 }

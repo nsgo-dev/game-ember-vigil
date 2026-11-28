@@ -211,22 +211,29 @@ func cardGlyph(id string) string {
 	}
 }
 
-// resultsOverlay is the native layer over the canvas's results: the outcome, the run's time, kills and level and the records for assistive technology, and the Play Again and Title buttons.
+// resultsOverlay is the native layer over the canvas's results: the outcome, the run's time, kills and level, its embers and unlocks and the records for assistive technology, and the Play Again and Title buttons.
 func (g *emberVigil) resultsOverlay() core.Node {
 	st := g.hud.Get()
 	tr := g.tr()
-	txt := resultsTextOf(tr, st, g.records.Get())
-	l := layoutResults(g.viewSize.Get(), g.cx.Env().SafeArea())
-	return overlayLayer("results", txt.title,
+	txt := resultsTextOf(tr, st, g.records.Get(), g.lastReward, g.progress.Embers)
+	l := layoutResults(g.viewSize.Get(), g.cx.Env().SafeArea(), txt.unlocked != "")
+	children := []core.Node{
 		infoView("results-outcome", txt.outcome, l.outcome),
 		infoView("results-time", txt.time, l.stats[0]),
 		infoView("results-kills", txt.kills, l.stats[1]),
 		infoView("results-level", txt.level, l.stats[2]),
 		infoView("results-record", txt.record, l.record),
+		infoView("results-embers", txt.embers, l.embers),
+	}
+	if txt.unlocked != "" {
+		children = append(children, infoView("results-unlocked", txt.unlocked, l.unlocked))
+	}
+	children = append(children,
 		infoView("results-best-records", txt.best, l.best),
 		g.hitButton("results-play-again", tr.PlayAgain, "", l.buttons[0], g.start, func() { g.hoverMenu(0) }),
 		g.hitButton("results-title", tr.TitleButton, "", l.buttons[1], g.quitRun, func() { g.hoverMenu(1) }),
 	)
+	return overlayLayer("results", txt.title, children...)
 }
 
 // title is the native layer over the canvas's title: what the cover, the wordmark and the records show for assistive technology, and one invisible button over each painted menu button.

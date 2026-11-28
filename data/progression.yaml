@@ -1,0 +1,8 @@
+version: 1
+payout:
+  perMinute: 5
+  perHundredKills: 2
+  perChest: 15
+  win: 50
+  tierBonus: 0.25
+unlocks: []

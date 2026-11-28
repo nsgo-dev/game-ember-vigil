@@ -98,7 +98,7 @@ func TestOverlayLayoutsFitTheSafeArea(t *testing.T) {
 				t.Fatalf("%s: card %d overlaps card %d", c.name, i, i-1)
 			}
 		}
-		for _, l := range []panelLayout{layoutPause(c.size, c.safe, false), layoutPause(c.size, c.safe, true), layoutResults(c.size, c.safe)} {
+		for _, l := range []panelLayout{layoutPause(c.size, c.safe, false), layoutPause(c.size, c.safe, true), layoutResults(c.size, c.safe, false), layoutResults(c.size, c.safe, true)} {
 			inside("panel", l.panel)
 			for _, b := range l.buttons {
 				inside("button", b)
@@ -139,10 +139,16 @@ func TestOverlaysDrawTheKitAndFallBack(t *testing.T) {
 		d = &core.Drawing{}
 		st := testHUDState()
 		st.phase = PhaseVictory
-		txt := resultsTextOf(tr, st, Records{})
-		drawResults(testPainter(d, size, kit, settled(0), lang), layoutResults(size, core.Edges{}), st, txt, 0)
+		txt := resultsTextOf(tr, st, Records{}, runReward{embers: 215, unlocks: []string{"test-unlock"}}, 1240)
+		drawResults(testPainter(d, size, kit, settled(0), lang), layoutResults(size, core.Edges{}, txt.unlocked != ""), st, txt, 0)
 		if !drewHUDPiece(d.Ops, kit, hudPanel) || !drewText(d.Ops, tr.VictoryTitle) || !drewText(d.Ops, tr.PlayAgain) {
 			t.Fatalf("%s: the results lack their frame, title or buttons", lang)
+		}
+		if want := tr.EmbersEarned(215) + "  ·  " + tr.EmberBalance(1240); !drewText(d.Ops, want) {
+			t.Fatalf("%s: the results did not write %q", lang, want)
+		}
+		if want := tr.UnlockedList([]string{"test-unlock"}); !drewText(d.Ops, want) {
+			t.Fatalf("%s: the results did not write %q", lang, want)
 		}
 		if kit.numeralsReady() && (!drewImage(d.Ops, kit.digits[3]) || !drewImage(d.Ops, kit.colon) || !drewImage(d.Ops, kit.times)) {
 			t.Fatalf("%s: the results did not write the time and kills in the painted numerals", lang)
@@ -155,7 +161,7 @@ func TestOverlaysDrawTheKitAndFallBack(t *testing.T) {
 	drawCards(testPainter(d, size, empty, settled(0), evstrings.EN), layoutCards(size, core.Edges{}, offerCount), st, 0)
 	drawPause(testPainter(d, size, empty, settled(0), evstrings.EN), layoutPause(size, core.Edges{}, true), true, 0)
 	st.phase = PhaseDefeat
-	drawResults(testPainter(d, size, empty, settled(0), evstrings.EN), layoutResults(size, core.Edges{}), st, resultsTextOf(evstrings.For(evstrings.EN), st, Records{}), 0)
+	drawResults(testPainter(d, size, empty, settled(0), evstrings.EN), layoutResults(size, core.Edges{}, false), st, resultsTextOf(evstrings.For(evstrings.EN), st, Records{}, runReward{}, 0), 0)
 	for _, want := range []string{"Ember Bolt", "Return to Title?", "DEFEAT", "Play Again", "127"} {
 		if !drewText(d.Ops, want) {
 			t.Fatalf("without the kit the overlays did not write %q", want)
