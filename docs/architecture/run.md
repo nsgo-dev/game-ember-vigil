@@ -2,7 +2,7 @@
 
 `run.go` simulates one run without NSGo: no views, devices, sound, storage or wall clock. The shell steps it at 60 Hz with one `Controls` value and reads back the step's events and a snapshot. Tests step it the same way, so every rule is testable headlessly and a seed plus a list of controls replays a run.
 
-Today the model runs the complete twelve-minute run: the keeper, all four weapons (Ember Bolt, Lantern Halo, Cinder Trail, Bell Toll), all eight passives with four weapon and four passive slots, all six regular enemies (Ash Mite, Moth, Husk, Thornling, Wisp, Shade), the Gloomwarden elite with healing caches, surges, and the three-phase Hollow King boss at 12:00.
+Today the model runs the complete twelve-minute run: the keeper, all four weapons (Ember Bolt, Lantern Halo, Cinder Trail, Bell Toll) and their evolutions, all eight passives with four weapon and four passive slots, all six regular enemies (Ash Mite, Moth, Husk, Thornling, Wisp, Shade), the Gloomwarden elite with healing caches and chests, surges, and the three-phase Hollow King boss at 12:00.
 
 ## Time
 
@@ -60,6 +60,14 @@ At 12:00 the director stops normal spawns, clears space and spawns the Hollow Ki
 
 Three distinct cards are drawn from the pool on the offer stream. If fewer than three remain, the rest are healing cards, up to the limit the run's tier sets. There is no reroll in the first version. Applying a card raises a level and recomputes one derived stat block: damage, cooldown, area, move speed, max health, regeneration, pickup radius and XP gain. Weapons read the block every step instead of caching a modified copy.
 
+## Chests and evolution
+
+An enemy marked `chest` in `data/enemies.yaml` (the Gloomwarden) drops a chest inside the field. Walking over one opens it and moves the run to `PhaseChest`, which holds the world still for the chest's `hold` in `data/run.yaml` while the shell plays the flourish; the run clock stops as it does for cards. The chest evolves the first weapon, in data order, that is at its last level, held with the passive its `evolution` names and not yet evolved, but only after the shell calls `EnableEvolution`, which it does once the first win has unlocked `evolution`; a replay must call it the same way. Otherwise the hold ends in a free level-up card that spends no XP. Every chest pays its embers.
+
+An evolution keeps the weapon's last level and adds its own behaviour from `data/weapons.yaml`: Starfall Volley splits each bolt into small shots on hit, Sun Ring burns a whole band at the halo's orbit, Wildfire Path drops patches to the sides and merges wild patches that touch while the circle around both stays within `maxRadius`, and Dawn Bell stuns struck foes (never the Hollow King) and heals the keeper. `Evolutions()` lists the recipes a run made; the shell records each one in the collection as `EventEvolve` reports it.
+
+The balance bot plays tier 1 with and without evolution. Over 120 seeds the sharp bot wins about 73% without it and 82% with it, and evolution shortens the Hollow King fight by about 15%; `bot_test.go` holds both within 6 to 8 wins on seeds 1–10 and evolved fights at least 10% shorter on the seeds both won.
+
 ## Payout and unlocks
 
 A finished run reports what it earned without touching storage. `Payout()` counts whole minutes survived, whole hundreds of kills, chests opened and a win at the rates in `data/progression.yaml`, multiplied by 1 + `tierBonus` for each step the run's Long Night tier is above 1. `Unlocks()` lists the unlocks whose every condition (kills, elites defeated, a win) the run met. The shell adds both to the progression save and names only the unlocks that are new.
@@ -72,7 +80,7 @@ The rule numbers and the foe health and damage multipliers are set with the bala
 
 ## Events
 
-Each step returns a bounded list of events: `Shot`, `Hit`, `Kill`, `Ember`, `LevelUp`, `BossSpawn`, `BossPhase`, `Victory` and `Defeat`. The shell maps them to sounds, flashes, shake and screen changes. Events carry ids and positions, never pointers into run slices.
+Each step returns a bounded list of events: `Shot`, `Hit`, `Kill`, `Ember`, `LevelUp`, `BossSpawn`, `BossPhase`, `Victory`, `Defeat`, `Chest` and `Evolve`. The shell maps them to sounds, flashes, shake and screen changes. Events carry ids and positions, never pointers into run slices.
 
 ## Invariants
 

@@ -212,6 +212,7 @@ func (r *Run) addEnemy(kind int, pos Vec2, healthMul, damageMul float64) {
 		splitKind:       splitKind,
 		splitCount:      def.Split.Count,
 		healDrop:        def.HealDrop,
+		chest:           def.Chest,
 		knockbackResist: def.KnockbackResist,
 		embers:          def.Embers,
 	})

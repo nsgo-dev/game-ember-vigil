@@ -6,6 +6,7 @@ var zhCNTable = Table{
 	ArenaLabel:    "余烬守望竞技场",
 	Start:         "开始",
 	Settings:      "设置",
+	Collection:    "图鉴",
 	Quit:          "退出",
 	BestRecords:   "最佳记录",
 	NoRecordsYet:  "尚无游玩记录",
@@ -42,6 +43,19 @@ var zhCNTable = Table{
 		"gathering":    {Name: "聚烬", Description: "每级余烬拾取半径 +14。"},
 		"glow":         {Name: "微光", Description: "每级余烬经验获取 +15%。"},
 		"ember-heal":   {Name: "余烬", Description: "恢复 35% 最大生命。"},
+	},
+
+	Evolved:           "进化",
+	FreeCard:          "免费卡牌",
+	CollectionTitle:   "进化图鉴",
+	CollectionUnknown: "？？？",
+	CollectionMadeFmt: "已达成 ",
+	RecipeSeparator:   " + ",
+	Evolutions: map[string]EvolutionCopy{
+		"starfall-volley": {Name: "星落连射", Description: "每发弹矢命中时分裂为三发小弹。", Hint: "余烬箭渴望燃得更快。"},
+		"sun-ring":        {Name: "日轮", Description: "环绕的余烬连成一道持续燃烧的火环。", Hint: "火环渴望更广的光芒。"},
+		"wildfire-path":   {Name: "野火之径", Description: "火焰向两侧蔓延，相触的火堆彼此合并。", Hint: "烬火渴望更轻快的脚步。"},
+		"dawn-bell":       {Name: "破晓之钟", Description: "震波短暂震晕敌人，并为你恢复少许生命。", Hint: "钟声渴望一颗更温暖的心。"},
 	},
 
 	Paused:           "已暂停",
@@ -84,7 +98,7 @@ var zhCNTable = Table{
 	EmberBalanceFmt: "余烬总数 ",
 	UnlockedPrefix:  "已解锁：",
 	UnlockSeparator: "、",
-	Unlocks:         map[string]string{},
+	Unlocks:         map[string]string{"evolution": "武器进化"},
 	PlayAgain:       "再来一局",
 	TitleButton:     "返回标题",
 }

@@ -164,4 +164,15 @@ func TestProgressionLoadsNormalizesAndAppliesRuns(t *testing.T) {
 	if got := defaultProgression().openTier(5); got != 1 {
 		t.Fatalf("a new player may choose up to tier %d, want 1", got)
 	}
+
+	collected, added := addEvolutions(next, []string{"x", "sun-ring", "", "sun-ring", "dawn-bell"})
+	if !reflect.DeepEqual(collected.Collection, []string{"x", "sun-ring", "dawn-bell"}) || !reflect.DeepEqual(added, []string{"sun-ring", "dawn-bell"}) {
+		t.Fatalf("recording evolutions collects %v and adds %v", collected.Collection, added)
+	}
+	if err := saveProgression(storage, collected); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadProgression(storage).Collection; !reflect.DeepEqual(got, collected.Collection) {
+		t.Fatalf("the collection reloads as %v, want %v", got, collected.Collection)
+	}
 }

@@ -90,3 +90,4 @@ enemies:
       life: 2.3
       damage: 10
       burst: 6
+    chest: true

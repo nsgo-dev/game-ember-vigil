@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"testing"
+
+	evstrings "me.oneo/embervigil/strings"
 )
 
 // readData reads a tuning file from the repository, skipping where the test does not run in it, as on a phone or under nsgo test -target.
@@ -74,6 +76,20 @@ func TestEmbeddedDataLoads(t *testing.T) {
 			t.Fatalf("weapon %q has %d levels, want 5", w.Name, len(w.Levels))
 		}
 	}
+	for i, w := range d.weapons.Weapons {
+		evo := w.Evolution
+		if evo == nil || d.evolutionPassive[i] < 0 {
+			t.Fatalf("weapon %q has no evolution paired with a passive", w.Name)
+		}
+		for _, lang := range evstrings.Languages {
+			if c := evstrings.For(lang).Evolutions[evo.ID]; c.Name == "" {
+				t.Fatalf("evolution %q has no %s strings", evo.ID, lang)
+			}
+		}
+		if c := evstrings.For(evstrings.EN).Evolutions[evo.ID]; c.Name != evo.Name || c.Description != evo.Description || c.Hint != evo.Hint {
+			t.Fatalf("evolution %q's English strings %+v differ from its data", evo.ID, c)
+		}
+	}
 	if len(d.upgrades.Passives) != 8 {
 		t.Fatalf("embedded passives = %d, want 8", len(d.upgrades.Passives))
 	}
@@ -125,7 +141,7 @@ func TestDataLoadersRefuseBrokenFiles(t *testing.T) {
 		return bytes.Replace(data, []byte(old), []byte(new), 1)
 	}
 	withUnlock := func(entry string) []byte {
-		return replace(progressionYAML, "unlocks: []", "unlocks:\n"+entry)
+		return replace(progressionYAML, "unlocks:\n", "unlocks:\n"+entry)
 	}
 
 	tests := []struct {
@@ -170,6 +186,33 @@ func TestDataLoadersRefuseBrokenFiles(t *testing.T) {
 		}},
 		{"weapons with duplicate name", func() error {
 			_, err := parseWeaponFile(fileWeapons, replace(weaponYAML, "name: Lantern Halo", "name: Ember Bolt"))
+			return err
+		}},
+		{"weapons with an evolution setting another kind's field", func() error {
+			_, err := parseWeaponFile(fileWeapons, replace(weaponYAML, "      split: 3\n", "      split: 3\n      stun: 1\n"))
+			return err
+		}},
+		{"weapons with an evolution without a hint", func() error {
+			_, err := parseWeaponFile(fileWeapons, replace(weaponYAML, "hint: The halo longs for a wider light.", "hint: \"\""))
+			return err
+		}},
+		{"weapons with an evolution defined twice", func() error {
+			_, err := parseWeaponFile(fileWeapons, replace(weaponYAML, "id: sun-ring", "id: starfall-volley"))
+			return err
+		}},
+		{"an evolution pairing with a missing passive", func() error {
+			weapons, err := parseWeaponFile(fileWeapons, replace(weaponYAML, "passive: oil", "passive: luck"))
+			if err != nil {
+				return err
+			}
+			upgrades, err := parseUpgradeFile(fileUpgrades, upgradeYAML)
+			if err != nil {
+				return err
+			}
+			return (&gameData{weapons: *weapons, upgrades: *upgrades}).check()
+		}},
+		{"run with a chest that never holds", func() error {
+			_, err := parseRunFile(fileRun, replace(runYAML, "hold: 0.6", "hold: 0"))
 			return err
 		}},
 		{"upgrades with another version", func() error {

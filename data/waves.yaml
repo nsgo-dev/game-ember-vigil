@@ -26,7 +26,7 @@ spans:
     every: 0.36
     maxAlive: 140
     health: 1.25
-    damage: 1.3
+    damage: 1.69
     enemies:
       - name: Ash Mite
         weight: 3
@@ -38,7 +38,7 @@ spans:
     every: 0.31
     maxAlive: 200
     health: 1.45
-    damage: 1.38
+    damage: 1.79
     enemies:
       - name: Ash Mite
         weight: 3
@@ -52,7 +52,7 @@ spans:
     every: 0.25
     maxAlive: 270
     health: 1.75
-    damage: 1.7
+    damage: 2.21
     enemies:
       - name: Ash Mite
         weight: 2
@@ -68,7 +68,7 @@ spans:
     every: 0.21
     maxAlive: 345
     health: 2.1
-    damage: 1.9
+    damage: 2.47
     enemies:
       - name: Ash Mite
         weight: 2
@@ -86,7 +86,7 @@ spans:
     every: 0.18
     maxAlive: 413
     health: 2.4
-    damage: 2
+    damage: 2.99
     enemies:
       - name: Moth
         weight: 2
@@ -102,7 +102,7 @@ spans:
     every: 0.145
     maxAlive: 490
     health: 2.7
-    damage: 2.1
+    damage: 3.14
     enemies:
       - name: Husk
         weight: 3
@@ -116,7 +116,7 @@ spans:
     every: 0.118
     maxAlive: 570
     health: 3.2
-    damage: 2.25
+    damage: 3.36
     enemies:
       - name: Husk
         weight: 3

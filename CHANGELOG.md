@@ -25,3 +25,4 @@
 - Make the run harder after 4:30 and give the Hollow King more health, so a good run is no longer a sure win (#48 by @oneo-me).
 - Pay embers at the end of every run, won or lost, show them and the new balance on the results, and keep the balance and unlocks across restarts (#49, #56 by @oneo-me).
 - Add Long Night tiers 1 to 5, each adding one rule on top of the ones below, opened by winning the tier before and chosen on the title (#50, #57 by @oneo-me).
+- Drop a chest from every Gloomwarden that, once a first win unlocks evolution, evolves a maxed weapon held with its paired passive into Starfall Volley, Sun Ring, Wildfire Path or Dawn Bell, and otherwise gives a free card, with a Collection on the title listing the recipes found (#52, #58 by @oneo-me).

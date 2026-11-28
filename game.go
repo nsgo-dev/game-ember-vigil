@@ -52,6 +52,7 @@ const (
 	phaseArena
 	phasePaused
 	phaseSettings
+	phaseCollection
 )
 
 // Menu item counts for directional keyboard/gamepad traversal.
@@ -287,6 +288,9 @@ func (g *emberVigil) update(dt time.Duration) {
 		keeperDamaged := snap.Health < prev.Health-1e-6
 		g.scene.sync(snap, events, dt.Seconds())
 		g.audio.playRunEvents(events, keeperDamaged)
+		if hasEvent(events, EventEvolve) {
+			g.recordEvolutions()
+		}
 		if snap.Phase != prev.Phase {
 			if snap.Phase == PhaseLevelUp {
 				g.cardFocus = 0
@@ -335,6 +339,10 @@ func (g *emberVigil) handleMenuNavigation() {
 		}
 		if g.actions.JustPressed(actionConfirm) {
 			g.confirm()
+		}
+	case phaseCollection:
+		if g.actions.JustPressed(actionConfirm) {
+			g.closeCollection()
 		}
 	case phaseSettings:
 		g.stepVerticalFocus(settingsMenuCount)
@@ -440,7 +448,7 @@ func hudStateOf(s Snapshot, cardFocus int, newRecord bool) hudState {
 	for i := range st.weapons {
 		if i < len(s.Weapons) {
 			w := s.Weapons[i]
-			st.weapons[i] = hudSlot{id: w.ID, name: w.Name, level: w.Level, maxLevel: w.MaxLevel}
+			st.weapons[i] = hudSlot{id: w.ID, name: w.Name, level: w.Level, maxLevel: w.MaxLevel, evolved: w.Evolved}
 		}
 	}
 	// Between the Hollow King's appearances the bar follows the first Gloomwarden on the field.
@@ -509,10 +517,32 @@ func (g *emberVigil) recordResult(s Snapshot) {
 	}
 }
 
+// recordEvolutions adds the run's evolutions to the collection and saves it at once, so a recipe made stays made even if the run is left.
+func (g *emberVigil) recordEvolutions() {
+	prog, added := addEvolutions(g.progress, g.run.Evolutions())
+	if len(added) > 0 {
+		g.progress = prog
+		_ = saveProgression(g.storage, prog)
+	}
+}
+
+// hasEvent reports whether events holds one of kind.
+func hasEvent(events []Event, kind EventKind) bool {
+	for _, e := range events {
+		if e.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
 // start begins a run from the wall clock's seed, which the run itself never reads, and keeps that seed for the arena's ground.
 func (g *emberVigil) start() {
 	g.seed = uint64(time.Now().UnixNano())
 	g.run = NewRun(g.seed, g.tier.GetUntracked())
+	if g.progress.has(unlockEvolution) {
+		g.run.EnableEvolution()
+	}
 	g.scene.startRun(g.seed)
 	g.applyLiveSettings(g.settings.GetUntracked())
 	g.hudClock = 0
@@ -606,7 +636,28 @@ func (g *emberVigil) togglePause() {
 		}
 	case phaseSettings:
 		g.closeSettings()
+	case phaseCollection:
+		g.closeCollection()
 	}
+}
+
+// openCollection opens the collection from the title.
+func (g *emberVigil) openCollection() {
+	if g.phase.GetUntracked() != phaseTitle {
+		return
+	}
+	g.overlay.openPanel()
+	g.setPhase(phaseCollection)
+	g.audio.playCue(cueUISelect)
+}
+
+// closeCollection returns from the collection to the title.
+func (g *emberVigil) closeCollection() {
+	if g.phase.GetUntracked() != phaseCollection {
+		return
+	}
+	g.audio.playCue(cueUIClick)
+	g.setPhase(phaseTitle)
 }
 
 // requestQuitRun asks for confirmation before abandoning an active run.
@@ -951,8 +1002,8 @@ func (g *emberVigil) draw(d *core.Drawing, size core.Size) {
 	lang := g.settings.GetUntracked().Language
 	tr := evstrings.For(lang)
 	p := &overlayPainter{d: d, size: size, art: g.hudArt, icons: g.art, m: &g.overlay, tr: tr, lang: string(lang), pressed: g.pressed}
-	if ph == phaseTitle || (ph == phaseSettings && g.settingsReturn == phaseTitle) {
-		g.drawTitle(p, size, safe, ph == phaseSettings)
+	if ph == phaseTitle || ph == phaseCollection || (ph == phaseSettings && g.settingsReturn == phaseTitle) {
+		g.drawTitle(p, size, safe, ph != phaseTitle)
 	} else {
 		g.drawArena(d, p, size, safe, alpha)
 	}
@@ -963,6 +1014,10 @@ func (g *emberVigil) draw(d *core.Drawing, size core.Size) {
 			rows[i] = g.settingsControls(tr, cfg, i)
 		}
 		drawSettings(p, layoutSettings(size, safe), rows, cfg, g.menuFocus.GetUntracked())
+	}
+	if ph == phaseCollection {
+		entries := collectionEntries(p.tr, recipes(mustGameData()), g.progress.Collection)
+		drawCollection(p, layoutCollection(size, safe, len(entries)), entries)
 	}
 }
 
@@ -980,6 +1035,7 @@ func (g *emberVigil) drawArena(d *core.Drawing, p *overlayPainter, size core.Siz
 	}
 	st := g.hud.GetUntracked()
 	drawHUD(d, layoutHUD(size, safe), st, &g.hudMotion, g.hudArt, g.art, tr, lang, ph == phaseArena, g.pausePushed)
+	drawChestBanner(p, size, safe, g.run.Snapshot().Opening)
 	switch {
 	case ph == phasePaused:
 		confirm := g.confirmQuit.GetUntracked()

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -547,18 +548,20 @@ func TestTitleArtAndFallback(t *testing.T) {
 	press(t, appFallback, "id:title-start")
 }
 
-// TestTitleHidesQuitOnPhones checks that a phone's title offers only Start and Settings, and that the keyboard's focus wraps over those two.
+// TestTitleHidesQuitOnPhones checks that a phone's title offers only Start, Collection and Settings, and that the keyboard's focus wraps over those three.
 func TestTitleHidesQuitOnPhones(t *testing.T) {
 	app, g := startEmberVigil(t, nsgotest.Idiom(core.IdiomPhone))
 	app.Find("id:title-start")
+	app.Find("id:title-collection")
 	app.Find("id:title-settings")
 	if n := len(app.Query("id:title-quit")); n != 0 {
 		t.Fatalf("a phone's title shows %d Quit buttons, want none", n)
 	}
-	g.moveFocus(1, len(g.titleItems(g.tr())))
-	g.moveFocus(1, len(g.titleItems(g.tr())))
+	for range 3 {
+		g.moveFocus(1, len(g.titleItems(g.tr())))
+	}
 	if f := g.menuFocus.Get(); f != 0 {
-		t.Fatalf("focus after two steps over two buttons = %d, want 0", f)
+		t.Fatalf("focus after three steps over three buttons = %d, want 0", f)
 	}
 	g.confirm()
 	if g.phase.Get() != phaseArena {
@@ -993,4 +996,66 @@ func TestTouchLayoutAndSafeAreaOnPhoneLandscape(t *testing.T) {
 	g.run.keeper.health = 0
 	app.Advance(8 * frame)
 	checkSafe("results")
+}
+
+// TestEvolutionUnlocksByAWinAndTheCollectionPersists checks that evolution waits for the first win, that a chest then evolves a met recipe, shows it in the HUD and saves it to the collection at once, and that the collection lists it, and the rest as "???" with a hint, after a restart.
+func TestEvolutionUnlocksByAWinAndTheCollectionPersists(t *testing.T) {
+	app, g := startEmberVigil(t)
+	press(t, app, "id:title-start")
+	if g.run.evolution {
+		t.Fatal("a run before the first win may evolve weapons")
+	}
+	g.run.spawnBoss()
+	app.Advance(frame)
+	g.run.bossEnemy().hp = 0
+	app.Advance(8 * frame)
+	if !g.progress.has(unlockEvolution) {
+		t.Fatalf("the first win did not unlock evolution: %+v", g.progress)
+	}
+	en := evstrings.For(evstrings.EN)
+	if got, want := app.Find("id:results-unlocked").Props.Label, en.UnlockedList([]string{"Long Night 2", en.Unlocks[unlockEvolution]}); got != want {
+		t.Fatalf("results unlocked = %q, want %q", got, want)
+	}
+
+	press(t, app, "id:results-play-again")
+	r := g.run
+	if !r.evolution {
+		t.Fatal("a run after the first win may not evolve weapons")
+	}
+	bolt := weaponByName(t, r, "Ember Bolt")
+	r.weaponLevels[bolt] = len(r.data.weapons.Weapons[bolt].Levels)
+	r.passiveLevels[r.data.evolutionPassive[bolt]] = 1
+	r.recomputeStats()
+	putChest(r, Vec2{})
+	app.Advance(frame)
+	if !slices.Equal(g.progress.Collection, []string{"starfall-volley"}) || !slices.Equal(loadProgression(app.Storage()).Collection, []string{"starfall-volley"}) {
+		t.Fatalf("evolving did not save the recipe at once: %v", g.progress.Collection)
+	}
+	app.Advance(time.Duration(r.data.run.Chest.EvolveHold*rate+2) * frame)
+	if p := r.Snapshot().Phase; p != PhasePlaying {
+		t.Fatalf("after the evolving chest's hold the run is in phase %v, want playing", p)
+	}
+	if st := g.hud.Get(); st.weapons[0].id != "starfall-volley" || !st.weapons[0].evolved {
+		t.Fatalf("the HUD slot shows %+v, want the evolved Starfall Volley", st.weapons[0])
+	}
+
+	app2, g2 := startEmberVigil(t, nsgotest.Storage(storageSnapshot(app.Storage())))
+	press(t, app2, "id:title-collection")
+	if g2.phase.Get() != phaseCollection {
+		t.Fatalf("Collection opened phase %v", g2.phase.Get())
+	}
+	app2.Find("id:collection-heading")
+	if got := app2.Find("id:collection-made").Props.Label; got != en.CollectionMade(1, 4) {
+		t.Fatalf("collection count = %q, want %q", got, en.CollectionMade(1, 4))
+	}
+	if got := app2.Find("id:collection-recipe-starfall-volley").Props.Label; !strings.Contains(got, "Starfall Volley") || !strings.Contains(got, "Ember Bolt + Oil") {
+		t.Fatalf("a made recipe reads %q", got)
+	}
+	if got := app2.Find("id:collection-recipe-sun-ring").Props.Label; got != "???, The halo longs for a wider light." {
+		t.Fatalf("an unmade recipe reads %q", got)
+	}
+	press(t, app2, "id:collection-back")
+	if g2.phase.Get() != phaseTitle {
+		t.Fatalf("Back from the collection gave phase %v, want the title", g2.phase.Get())
+	}
 }

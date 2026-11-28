@@ -24,7 +24,7 @@ A run was too easy and left nothing behind: the balance bot won 9 of 10 seeds wi
   | 5 | Faster enemies; the Hollow King arrives a minute early with one more attack | Foes ×1.1 speed and ×1.15 damage; the King at 11:00, adding a 13-bone fan 1 rad wide at ×1.4 bone speed |
 
   Winning a tier opens the next, saved as the highest tier won; tier 1 is always open. The title offers a tier button once a second tier is open, defaulting to the highest; a win that opens a tier picks it for Play Again. The HUD and the results name the tier.
-- Over seeds 1–100 the sharp bot wins 67%, 53%, 43%, 26% and 22% from tier 1 to tier 5 (over 200 seeds 67%, 53%, 46%, 27% and 25%), and `bot_test.go` holds the fall. The rules alone barely moved the bot: the early Hollow King skips the last minute's hardest waves and clears the field, and faster foes die sooner on the halo and the trail, so tier 5 also raises foe damage. Tier 3's view alone changes nothing for a bot that reads every foe, which is why its light also shortens the ember pull.
+- Over seeds 1–100 the sharp bot wins 67%, 53%, 43%, 26% and 22% from tier 1 to tier 5 (over 200 seeds 67%, 53%, 46%, 27% and 25%), and `bot_test.go` holds the fall. With chests, which the bot opens unless a shadow zone covers them, and the harder waves they brought, seeds 1–100 give 73%, 65%, 49%, 32% and 28%. The rules alone barely moved the bot: the early Hollow King skips the last minute's hardest waves and clears the field, and faster foes die sooner on the halo and the trail, so tier 5 also raises foe damage. Tier 3's view alone changes nothing for a bot that reads every foe, which is why its light also shortens the ember pull.
 
 - The first unlocks are two new weapons and weapon evolution. A weapon at max level, held with its paired passive, evolves into a stronger form when the keeper opens a chest dropped by an elite. Evolution itself is unlocked, and each recipe joins a collection the first time it is made in a run. New keepers wait for a later batch.
 - The two new weapons fill the play styles the current four miss (single shots, orbit, ground fire, knockback pulse):
@@ -69,10 +69,10 @@ A run was too easy and left nothing behind: the balance bot won 9 of 10 seeds wi
   | Lure | +5 pickup radius | +25 |
   | Redraw | One more redraw of the level-up cards per run (new mechanic) | 5 per run |
 
-- Tier 1 is the base run, made harder in `data/waves.yaml` before any tier exists: enemy damage from 4:30 on rises by 13–20% and the Hollow King's health from 20000 to 32000. Over 30 seeds the sharp bot now wins 67% with a median minimum health of about 36% among its wins, and the boss fight lasts about 70 seconds; the bot test holds its wins on seeds 1–10 between 6 and 8.
+- Tier 1 is the base run, made harder in `data/waves.yaml` before any tier exists: enemy damage from 4:30 on rises by 13–20% and the Hollow King's health from 20000 to 32000. Over 30 seeds the sharp bot now wins 67% with a median minimum health of about 36% among its wins, and the boss fight lasts about 70 seconds; the bot test holds its wins on seeds 1–10 between 6 and 8. Chests then gave the bot a free card from each Gloomwarden, so enemy damage from 2:00 on rose by another 30% and from 7:30 on by 15% more; over 120 seeds the sharp bot wins about 73%, and about 82% with evolution unlocked, which shortens the Hollow King fight by about 15%. The evolutions' numbers live in `data/weapons.yaml`.
 - First version scope: the ember currency and shop, Long Night tiers 1–5, two new weapons, and six evolutions (one for each weapon).
 
 ## Open questions
 
-- Exact numbers of the new weapons and the evolutions.
-- Screens: where the shop and the collection live. The results show the embers a run earned, the new balance and what it unlocked.
+- Exact numbers of the new weapons.
+- Screens: where the shop lives; the collection opens from the title. The results show the embers a run earned, the new balance and what it unlocked.

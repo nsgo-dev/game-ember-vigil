@@ -25,6 +25,7 @@
 - One twelve-minute run against a rising tide of shadow creatures, ending with the Hollow King at dawn.
 - Four auto-firing weapons and eight passives, each with five levels, chosen from three cards on every level-up.
 - Six enemy kinds, the Gloomwarden elite and a three-phase boss.
+- Chests from every Gloomwarden that, after a first win, evolve a maxed weapon held with its paired passive, and a collection of the recipes found.
 - Stylized 2D animated sprites and hand-painted forest environment in a lantern-lit ash grove.
 - Keyboard, gamepad and touch controls, with English and Simplified Chinese interface.
 - Embers paid by every run, best records and settings kept between sessions.

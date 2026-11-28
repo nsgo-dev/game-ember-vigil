@@ -42,6 +42,9 @@ const (
 	weaponBell  = "bell"
 )
 
+// unlockEvolution is the id in data/progression.yaml of the unlock that lets chests evolve weapons.
+const unlockEvolution = "evolution"
+
 // Passive stats as data/upgrades.yaml names them.
 const (
 	statDamage    = "damage"
@@ -76,6 +79,8 @@ type gameData struct {
 	progression   progressionFile
 	tiers         tierFile
 	starterWeapon int
+	// evolutionPassive is the passive index each weapon's evolution pairs with, in weapon order, and -1 for a weapon with none.
+	evolutionPassive []int
 }
 
 // runFile is data/run.yaml: the arena, the keeper, the embers and the level curve.
@@ -85,6 +90,7 @@ type runFile struct {
 	Keeper  keeperDef `yaml:"keeper"`
 	Embers  emberDef  `yaml:"embers"`
 	Level   levelDef  `yaml:"level"`
+	Chest   chestDef  `yaml:"chest"`
 }
 
 // arenaDef is the run's world bounds, in world units, which are virtual pixels at zoom one. Fog is the band
@@ -119,6 +125,13 @@ type levelDef struct {
 	Step  float64 `yaml:"step"`
 }
 
+// chestDef is the chest an elite drops: how close the keeper opens it, and how long opening it holds the run, longer when it evolves a weapon.
+type chestDef struct {
+	Radius     float64 `yaml:"radius"`
+	Hold       float64 `yaml:"hold"`
+	EvolveHold float64 `yaml:"evolveHold"`
+}
+
 // weaponFile is data/weapons.yaml: the starter weapon name, knockback decay and every weapon's levels.
 type weaponFile struct {
 	Version       int         `yaml:"version"`
@@ -143,6 +156,35 @@ type weaponDef struct {
 	OrbitSpeed  float64          `yaml:"orbitSpeed,omitempty"`
 	Duration    float64          `yaml:"duration,omitempty"`
 	Levels      []weaponLevelDef `yaml:"levels"`
+	// Evolution is the form the weapon takes at its last level, held with its paired passive, when the keeper opens a chest; nil when it has none.
+	Evolution *evolutionDef `yaml:"evolution,omitempty"`
+}
+
+// evolutionDef is a weapon's evolved form: its own behaviour on top of the last level, which only the fields of the weapon's kind tune.
+type evolutionDef struct {
+	ID   string `yaml:"id"`
+	Name string `yaml:"name"`
+	// Passive is the id of the passive the keeper must hold for the weapon to evolve.
+	Passive     string `yaml:"passive"`
+	Description string `yaml:"description"`
+	// Hint is the collection's one line about a recipe never made.
+	Hint string `yaml:"hint"`
+	// Damage multiplies the last level's damage.
+	Damage float64 `yaml:"damage"`
+	// A bolt splits into Split small shots on each hit, SplitSpread radians apart, each of SplitRadius, flying SplitLife seconds and dealing SplitDamage of the shot's damage and knockback.
+	Split       int     `yaml:"split,omitempty"`
+	SplitSpread float64 `yaml:"splitSpread,omitempty"`
+	SplitRadius float64 `yaml:"splitRadius,omitempty"`
+	SplitLife   float64 `yaml:"splitLife,omitempty"`
+	SplitDamage float64 `yaml:"splitDamage,omitempty"`
+	// A halo's orbs join into one burning ring Width wide at the orbit.
+	Width float64 `yaml:"width,omitempty"`
+	// A trail also drops a patch Spread to each side of the path, and touching patches merge while the circle around both stays within MaxRadius.
+	Spread    float64 `yaml:"spread,omitempty"`
+	MaxRadius float64 `yaml:"maxRadius,omitempty"`
+	// A bell stuns each foe it strikes for Stun seconds, the Hollow King excepted, and heals the keeper Heal per pulse.
+	Stun float64 `yaml:"stun,omitempty"`
+	Heal float64 `yaml:"heal,omitempty"`
 }
 
 // weaponLevelDef is one level of a weapon.
@@ -207,6 +249,9 @@ type enemyDef struct {
 	Orbit           orbitDef     `yaml:"orbit,omitempty"`
 	Shot            enemyShotDef `yaml:"shot,omitempty"`
 	Split           splitDef     `yaml:"split,omitempty"`
+
+	// Chest is whether the enemy drops a chest when it dies.
+	Chest bool `yaml:"chest,omitempty"`
 }
 
 // driftDef is how a drifting enemy sways: Amplitude is the fraction of its speed across its course, and Period is how long one sway takes, in seconds.
@@ -428,6 +473,24 @@ func (d *gameData) check() error {
 		}
 		d.starterWeapon = starter
 	}
+	d.evolutionPassive = make([]int, len(d.weapons.Weapons))
+	for i := range d.weapons.Weapons {
+		d.evolutionPassive[i] = -1
+		evo := d.weapons.Weapons[i].Evolution
+		if evo == nil {
+			continue
+		}
+		found := false
+		for j := range d.upgrades.Passives {
+			if d.upgrades.Passives[j].ID == evo.Passive {
+				d.evolutionPassive[i], found = j, true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("%s: evolution %q: no passive %q", fileWeapons, evo.Name, evo.Passive)
+		}
+	}
 	for i := range d.enemies.Enemies {
 		e := &d.enemies.Enemies[i]
 		if e.Split.Enemy != "" {
@@ -633,6 +696,13 @@ func (r *runFile) validate() error {
 	case !finite(r.Level.Step) || r.Level.Step < 0:
 		return fmt.Errorf("level step %v is negative", r.Level.Step)
 	}
+	c := r.Chest
+	switch {
+	case !positive(c.Radius):
+		return fmt.Errorf("chest radius %v is not above 0", c.Radius)
+	case !positive(c.Hold) || !positive(c.EvolveHold):
+		return fmt.Errorf("chest hold %v or evolveHold %v is not above 0", c.Hold, c.EvolveHold)
+	}
 	return nil
 }
 
@@ -657,6 +727,9 @@ func (f *weaponFile) validate() error {
 			foundStarter = true
 		}
 		for _, other := range f.Weapons[:i] {
+			if w.Evolution != nil && other.Evolution != nil && w.Evolution.ID == other.Evolution.ID {
+				return fmt.Errorf("evolution id %q is defined twice", w.Evolution.ID)
+			}
 			if other.ID == w.ID {
 				return fmt.Errorf("weapon id %q is defined twice", w.ID)
 			}
@@ -731,6 +804,63 @@ func (w *weaponDef) validate() error {
 	for i := range w.Levels {
 		if err := w.Levels[i].validate(w.Kind, w.CooldownMin); err != nil {
 			return fmt.Errorf("weapon %q: level %d: %w", w.Name, i+1, err)
+		}
+	}
+	if w.Evolution != nil {
+		if err := w.Evolution.validate(w.Kind); err != nil {
+			return fmt.Errorf("weapon %q: evolution: %w", w.Name, err)
+		}
+	}
+	return nil
+}
+
+func (e *evolutionDef) validate(kind string) error {
+	switch {
+	case e.ID == "" || e.Name == "":
+		return errors.New("has no id or name")
+	case e.Passive == "":
+		return fmt.Errorf("%q pairs with no passive", e.Name)
+	case e.Description == "" || e.Hint == "":
+		return fmt.Errorf("%q has no description or hint", e.Name)
+	case !positive(e.Damage):
+		return fmt.Errorf("%q damage %v is not above 0", e.Name, e.Damage)
+	}
+	bolt := e.Split != 0 || e.SplitSpread != 0 || e.SplitRadius != 0 || e.SplitLife != 0 || e.SplitDamage != 0
+	halo := e.Width != 0
+	trail := e.Spread != 0 || e.MaxRadius != 0
+	bell := e.Stun != 0 || e.Heal != 0
+	switch kind {
+	case weaponBolt:
+		switch {
+		case e.Split < 1:
+			return fmt.Errorf("%q split %d is not at least 1", e.Name, e.Split)
+		case !finite(e.SplitSpread) || e.SplitSpread < 0:
+			return fmt.Errorf("%q splitSpread %v is negative", e.Name, e.SplitSpread)
+		case !positive(e.SplitRadius) || !positive(e.SplitLife) || !positive(e.SplitDamage):
+			return fmt.Errorf("%q splitRadius, splitLife and splitDamage must be above 0", e.Name)
+		case halo || trail || bell:
+			return fmt.Errorf("%q sets fields for another weapon kind", e.Name)
+		}
+	case weaponHalo:
+		switch {
+		case !positive(e.Width):
+			return fmt.Errorf("%q width %v is not above 0", e.Name, e.Width)
+		case bolt || trail || bell:
+			return fmt.Errorf("%q sets fields for another weapon kind", e.Name)
+		}
+	case weaponTrail:
+		switch {
+		case !positive(e.Spread) || !positive(e.MaxRadius):
+			return fmt.Errorf("%q spread %v and maxRadius %v must be above 0", e.Name, e.Spread, e.MaxRadius)
+		case bolt || halo || bell:
+			return fmt.Errorf("%q sets fields for another weapon kind", e.Name)
+		}
+	case weaponBell:
+		switch {
+		case !finite(e.Stun) || e.Stun < 0 || !finite(e.Heal) || e.Heal < 0 || e.Stun+e.Heal == 0:
+			return fmt.Errorf("%q stun %v and heal %v must not be negative, and one above 0", e.Name, e.Stun, e.Heal)
+		case bolt || halo || trail:
+			return fmt.Errorf("%q sets fields for another weapon kind", e.Name)
 		}
 	}
 	return nil

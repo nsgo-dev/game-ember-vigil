@@ -344,6 +344,54 @@ func TestFrameDrawsNewWeapons(t *testing.T) {
 	}
 }
 
+// TestFrameDrawsChestsAndEvolutions checks that a frame draws a waiting chest, the one being opened with its flourish, and every evolved weapon's look from the art kit, and from the procedural fallback without it.
+func TestFrameDrawsChestsAndEvolutions(t *testing.T) {
+	r := quietRun(t)
+	for _, name := range []string{"Ember Bolt", "Lantern Halo", "Cinder Trail", "Bell Toll"} {
+		evolve(t, r, name)
+	}
+	putEnemy(t, r, enemyByName(t, r, "Husk"), Vec2{X: 30})
+	putChest(r, Vec2{X: 60})
+	for range 20 {
+		stepOnce(r, Controls{Move: Vec2{X: 0.2}})
+	}
+	putChest(r, Vec2{})
+	stepOnce(r, Controls{})
+	s := r.Snapshot()
+	if !s.Opening.Active || len(s.Chests) != 1 || !s.Ring.Active || len(s.Patches) == 0 || !s.Patches[0].Wild {
+		t.Fatalf("the run shows opening %+v, %d chests, ring %+v and %d patches", s.Opening, len(s.Chests), s.Ring, len(s.Patches))
+	}
+	for _, kit := range []*art{newArt(), newArtFromFS(fstest.MapFS{}, fstest.MapFS{})} {
+		a := newArenaRenderer(kit)
+		a.startRun(9)
+		a.sync(s, r.Events(), stepSeconds)
+		d := &core.Drawing{}
+		a.draw(d, 1, runView)
+		if len(a.chests) != 1 || !a.opening.Active || !a.ring.Active {
+			t.Fatalf("the renderer kept %d chests, opening %+v and ring %+v", len(a.chests), a.opening, a.ring)
+		}
+		if kit.sheetAtlas != nil && len(a.ringSprites) != 1 {
+			t.Fatal("Sun Ring did not draw from sun_ring.png")
+		}
+		gradients := func(d *core.Drawing) int {
+			n := 0
+			for _, op := range d.Ops {
+				if op.Kind == core.DrawFillGradient {
+					n++
+				}
+			}
+			return n
+		}
+		with := gradients(d)
+		a.opening = OpeningView{}
+		plain := &core.Drawing{}
+		a.draw(plain, 1, runView)
+		if with <= gradients(plain) {
+			t.Fatal("the opening chest drew no column of light")
+		}
+	}
+}
+
 // TestFrameDrawsNewEnemiesPickupsAndBossTelegraph checks that late enemies, enemy shots, heal caches and boss telegraphs render cleanly.
 func TestFrameDrawsNewEnemiesPickupsAndBossTelegraph(t *testing.T) {
 	r := quietRun(t)
@@ -417,6 +465,11 @@ func TestEmbeddedSpriteSheetsSliceCleanly(t *testing.T) {
 		{"lantern_halo", a.sheets.halo, 4, 4, 0, 64, 64, false},
 		{"cinder_trail", a.sheets.cinderTrail, 4, 4, 0, 64, 64, false},
 		{"bell_toll", a.sheets.bellToll, 4, 4, 0, 64, 64, false},
+		{"chest", a.sheets.chest, 4, 4, 4, 32, 32, false},
+		{"starfall_volley", a.sheets.starfall, 4, 4, 0, 32, 32, false},
+		{"sun_ring", a.sheets.sunRing, 4, 4, 0, 64, 64, false},
+		{"wildfire_path", a.sheets.wildfire, 4, 4, 0, 64, 64, false},
+		{"dawn_bell", a.sheets.dawnBell, 4, 4, 0, 64, 64, false},
 	}
 	for _, tc := range checks {
 		if !tc.actor.loaded {
