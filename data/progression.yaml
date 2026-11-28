@@ -11,17 +11,17 @@ unlocks:
     win: true
   - id: spark-chain
     name: Spark Chain
-    kills: 3000
+    kills: 5000
   - id: ash-censer
     name: Ash Censer
-    elites: 3
+    elites: 7
 shop:
   costs:
-    - 50
     - 100
     - 150
-    - 200
     - 250
+    - 350
+    - 450
   items:
     - id: banked-fire
       name: Banked Fire
@@ -36,18 +36,18 @@ shop:
     - id: hearth
       name: Hearth
       stat: maxHealth
-      description: +10 max health per level.
-      amount: 10
+      description: +6 max health per level.
+      amount: 6
     - id: light-foot
       name: Light Foot
       stat: moveSpeed
-      description: +3 move speed per level.
-      amount: 3
+      description: +2 move speed per level.
+      amount: 2
     - id: lure
       name: Lure
       stat: pickup
-      description: +5 ember pickup radius per level.
-      amount: 5
+      description: +2 ember pickup radius per level.
+      amount: 2
     - id: redraw
       name: Redraw
       stat: redraw

@@ -74,11 +74,11 @@ The balance bot plays tier 1 with and without evolution. Over 120 seeds the shar
 
 ## The ember shop
 
-`data/progression.yaml` lists the shop's items, each adding its `amount` per level to a stat the passives use or to the redraws, and the cost of each level. `SetShop` hands the run the levels the progression holds before the first step; a replay must pass the same ones. The levels add to the passives in `recomputeStats`, after which the keeper starts at full health, and give `Redraws` in the snapshot. Tier 4's `shop` rule in `data/tiers.yaml` halves every bonus from that tier on, rounding redraws down. Buying is `buyShopItem` in `save.go`, a pure rule on the progression; the shell saves after each sale.
+`data/progression.yaml` lists the shop's items, each adding its `amount` per level to a stat the passives use or to the redraws, and the cost of each level. `SetShop` hands the run the levels the progression holds before the first step; a replay must pass the same ones. The levels add to the passives in `recomputeStats`, after which the keeper starts at full health, and give `Redraws` in the snapshot. Each tier's `shop` rule in `data/tiers.yaml` multiplies every bonus from that tier on, down to about a fifth at tier 5, rounding redraws down. Buying is `buyShopItem` in `save.go`, a pure rule on the progression; the shell saves after each sale.
 
 ## Payout and unlocks
 
-A finished run reports what it earned without touching storage. `Payout()` counts whole minutes survived, whole hundreds of kills, chests opened and a win at the rates in `data/progression.yaml`, multiplied by 1 + `tierBonus` for each step the run's Long Night tier is above 1. `Unlocks()` lists the unlocks whose every condition (kills, elites defeated, a win) the run met: `evolution` for a win, `spark-chain` for 3000 kills and `ash-censer` for three elites. The shell adds both to the progression save and names only the unlocks that are new.
+A finished run reports what it earned without touching storage. `Payout()` counts whole minutes survived, whole hundreds of kills, chests opened and a win at the rates in `data/progression.yaml`, multiplied by 1 + `tierBonus` for each step the run's Long Night tier is above 1. `Unlocks()` lists the unlocks whose every condition (kills, elites defeated, a win) the run met: `evolution` for a win, `spark-chain` for 5000 kills and `ash-censer` for seven elites, which only a tier with an added elite holds. The shell adds both to the progression save and names only the unlocks that are new.
 
 ## Long Night tiers
 
