@@ -28,4 +28,4 @@
 - Drop a chest from every Gloomwarden that, once a first win unlocks evolution, evolves a maxed weapon held with its paired passive into Starfall Volley, Sun Ring, Wildfire Path or Dawn Bell, and otherwise gives a free card, with a Collection on the title listing the recipes found (#52, #58 by @oneo-me).
 - Add an ember shop on the title selling six small permanent bonuses, among them redraws of the level-up cards by tap, R or the gamepad, counting in full on every Long Night tier (#51, #59 by @oneo-me).
 - Add Spark Chain, unlocked by 5000 kills in one run, and Ash Censer, unlocked by seven Gloomwardens in one run, which evolve into Ember Storm with Wick and Pyre Censer with Gathering (#53, #60 by @oneo-me).
-- Make a win take both skill and luck: tougher foes from 2:00 on, and much tougher foes on every Long Night tier, so even a full shop rarely clears tier 5 (by @oneo-me).
+- Make a win take both skill and luck: tougher foes from 2:00 on, and much tougher foes on every Long Night tier, so even a full shop rarely clears tier 5 (#62 by @oneo-me).
