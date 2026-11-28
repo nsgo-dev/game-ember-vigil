@@ -999,14 +999,14 @@ func TestTouchLayoutAndSafeAreaOnPhoneLandscape(t *testing.T) {
 	checkSafe("results")
 }
 
-// TestLaterWeaponsUnlockAndAreOfferedAfterARestart checks that a run of 3000 kills and three Gloomwardens unlocks Spark Chain and Ash Censer, names them on the results and saves them, and that runs after a restart offer them.
+// TestLaterWeaponsUnlockAndAreOfferedAfterARestart checks that a run of 5000 kills and seven Gloomwardens unlocks Spark Chain and Ash Censer, names them on the results and saves them, and that runs after a restart offer them.
 func TestLaterWeaponsUnlockAndAreOfferedAfterARestart(t *testing.T) {
 	app, g := startEmberVigil(t)
 	press(t, app, "id:title-start")
 	if ids := offeredIDs(g.run); slices.Contains(ids, unlockSparkChain) || slices.Contains(ids, unlockAshCenser) {
 		t.Fatalf("a first run offers %v", ids)
 	}
-	g.run.kills, g.run.elites = 3000, 3
+	g.run.kills, g.run.elites = 5000, 7
 	g.run.keeper.health = 0
 	app.Advance(8 * frame)
 	if !g.progress.has(unlockSparkChain) || !g.progress.has(unlockAshCenser) {

@@ -50,16 +50,16 @@ func TestLockedWeaponsWaitForTheirUnlocks(t *testing.T) {
 	}
 
 	r = quietRun(t)
-	r.kills = 2999
+	r.kills = 4999
 	if slices.Contains(r.Unlocks(), unlockSparkChain) {
-		t.Fatal("2999 kills unlocked Spark Chain")
+		t.Fatal("4999 kills unlocked Spark Chain")
 	}
-	r.kills = 3000
+	r.kills = 5000
 	if !slices.Contains(r.Unlocks(), unlockSparkChain) {
-		t.Fatal("3000 kills did not unlock Spark Chain")
+		t.Fatal("5000 kills did not unlock Spark Chain")
 	}
 	warden := enemyByName(t, r, "Gloomwarden")
-	for k := range 3 {
+	for k := range 7 {
 		if slices.Contains(r.Unlocks(), unlockAshCenser) {
 			t.Fatalf("%d Gloomwardens unlocked Ash Censer", k)
 		}
@@ -68,7 +68,7 @@ func TestLockedWeaponsWaitForTheirUnlocks(t *testing.T) {
 		r.reap()
 	}
 	if !slices.Contains(r.Unlocks(), unlockAshCenser) {
-		t.Fatal("three Gloomwardens did not unlock Ash Censer")
+		t.Fatal("seven Gloomwardens did not unlock Ash Censer")
 	}
 }
 

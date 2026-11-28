@@ -11,14 +11,17 @@ tiers:
       damage: 12
       tick: 0.5
       life: 14
+    shop: 0.8
   - tier: 3
     light: 0.9
     sight: 0.8
+    shop: 0.75
   - tier: 4
     healCards: 1
     regen: 0.5
     shop: 0.5
   - tier: 5
+    shop: 0.67
     enemySpeed: 1.1
     bossEarlier: 60
     volley:

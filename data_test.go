@@ -333,7 +333,7 @@ func TestDataLoadersRefuseBrokenFiles(t *testing.T) {
 			return err
 		}},
 		{"a shop level costing nothing", func() error {
-			_, err := parseProgressionFile(fileProgression, replace(progressionYAML, "    - 50\n", "    - 0\n"))
+			_, err := parseProgressionFile(fileProgression, replace(progressionYAML, "    - 100\n", "    - 0\n"))
 			return err
 		}},
 		{"a shop item of an unknown stat", func() error {

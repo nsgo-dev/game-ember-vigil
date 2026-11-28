@@ -23,20 +23,20 @@ func fullShop() map[string]int {
 	return levels
 }
 
-// TestShopFollowsTheDesign checks the shop of docs/meta-progression.md: six items of five levels costing 50 to 250, about 4500 in all, with the bonuses at max.
+// TestShopFollowsTheDesign checks the shop of docs/meta-progression.md: six items of five levels costing 100 to 450, 7800 in all, with the bonuses at max.
 func TestShopFollowsTheDesign(t *testing.T) {
 	shop := &mustGameData().progression.Shop
-	if !slices.Equal(shop.Costs, []int{50, 100, 150, 200, 250}) {
+	if !slices.Equal(shop.Costs, []int{100, 150, 250, 350, 450}) {
 		t.Fatalf("the shop costs %v", shop.Costs)
 	}
 	total := 0
 	for _, c := range shop.Costs {
 		total += c * len(shop.Items)
 	}
-	if len(shop.Items) != 6 || total != 4500 {
-		t.Fatalf("the shop has %d items costing %d in all, want 6 and 4500", len(shop.Items), total)
+	if len(shop.Items) != 6 || total != 7800 {
+		t.Fatalf("the shop has %d items costing %d in all, want 6 and 7800", len(shop.Items), total)
 	}
-	want := map[string]string{"banked-fire": "+15%", "lamp-oil": "-10%", "hearth": "+50", "light-foot": "+15", "lure": "+25", "redraw": "+5"}
+	want := map[string]string{"banked-fire": "+15%", "lamp-oil": "-10%", "hearth": "+30", "light-foot": "+10", "lure": "+10", "redraw": "+5"}
 	for i := range shop.Items {
 		it := &shop.Items[i]
 		if got := shopBonus(it, shop.maxLevel()); got != want[it.ID] {
@@ -45,8 +45,8 @@ func TestShopFollowsTheDesign(t *testing.T) {
 	}
 }
 
-// TestShopLevelsFoldIntoTheRunAndHalveAtTier4 checks that bought levels raise the run's derived stats and redraws, start the keeper at the higher health, and count half from Long Night 4 on.
-func TestShopLevelsFoldIntoTheRunAndHalveAtTier4(t *testing.T) {
+// TestShopLevelsFoldIntoTheRunAndWeakenByTier checks that bought levels raise the run's derived stats and redraws, start the keeper at the higher health, and count for less on every Long Night tier above 1, down to a fifth at tier 5.
+func TestShopLevelsFoldIntoTheRunAndWeakenByTier(t *testing.T) {
 	gain := func(tier int) (stats, int, float64) {
 		base := NewRun(3, tier)
 		r := NewRun(3, tier)
@@ -61,29 +61,32 @@ func TestShopLevelsFoldIntoTheRunAndHalveAtTier4(t *testing.T) {
 		}, r.Snapshot().Redraws, r.keeper.health - b.maxHealth
 	}
 	full, redraws, missing := gain(1)
-	want := stats{damageMul: 0.15, cooldownMul: 0.10, moveSpeed: 15, maxHealth: 50, pickupRadius: 25}
+	want := stats{damageMul: 0.15, cooldownMul: 0.10, moveSpeed: 10, maxHealth: 30, pickupRadius: 10}
 	near := func(a, b stats, k float64) bool {
 		return math.Abs(a.damageMul-b.damageMul*k) < 1e-9 && math.Abs(a.cooldownMul-b.cooldownMul*k) < 1e-9 &&
 			math.Abs(a.moveSpeed-b.moveSpeed*k) < 1e-9 && math.Abs(a.maxHealth-b.maxHealth*k) < 1e-9
 	}
-	if !near(full, want, 1) || math.Abs(full.pickupRadius-25) > 1e-9 || redraws != 5 || missing != 0 {
+	if !near(full, want, 1) || math.Abs(full.pickupRadius-10) > 1e-9 || redraws != 5 || missing != 0 {
 		t.Fatalf("a full shop at tier 1 adds %+v and %d redraws, %v health short; want %+v and 5", full, redraws, missing, want)
 	}
-	for _, tier := range []int{2, 3} {
-		if got, n, _ := gain(tier); !near(got, want, 1) || n != 5 {
-			t.Fatalf("a full shop at tier %d adds %+v and %d redraws, want them whole", tier, got, n)
+	for _, c := range []struct {
+		tier    int
+		k       float64
+		redraws int
+	}{{2, 0.8, 4}, {3, 0.6, 3}, {4, 0.3, 1}, {5, 0.201, 1}} {
+		got, n, _ := gain(c.tier)
+		// Tier 3's light also shortens the pull, so from tier 3 on pickup gains its share at 90%.
+		light := 1.0
+		if c.tier >= 3 {
+			light = 0.9
 		}
-	}
-	for _, tier := range []int{4, 5} {
-		got, n, _ := gain(tier)
-		// Tier 3's light also shortens the pull, so pickup gains half of 25 at 90%.
-		if !near(got, want, 0.5) || math.Abs(got.pickupRadius-12.5*0.9) > 1e-9 || n != 2 {
-			t.Fatalf("a full shop at tier %d adds %+v and %d redraws, want half and 2", tier, got, n)
+		if !near(got, want, c.k) || math.Abs(got.pickupRadius-10*c.k*light) > 1e-9 || n != c.redraws {
+			t.Fatalf("a full shop at tier %d adds %+v and %d redraws, want %.3f of it and %d", c.tier, got, n, c.k, c.redraws)
 		}
 	}
 	r := NewRun(3, 1)
 	r.SetShop(map[string]int{"hearth": 99, "redraw": -2, "unknown": 3})
-	if r.stats.maxHealth != NewRun(3, 1).stats.maxHealth+50 || r.redraws != 0 {
+	if r.stats.maxHealth != NewRun(3, 1).stats.maxHealth+30 || r.redraws != 0 {
 		t.Fatalf("levels out of range give %v max health and %d redraws", r.stats.maxHealth, r.redraws)
 	}
 }
@@ -155,8 +158,8 @@ func TestShopAndRedrawsReplayIdentically(t *testing.T) {
 	}
 	first, firstEvents, n := play()
 	second, secondEvents, _ := play()
-	if n != 2 {
-		t.Fatalf("the run redrew %d times at tier 4, want its 2", n)
+	if n != 1 {
+		t.Fatalf("the run redrew %d times at tier 4, want its 1", n)
 	}
 	if !reflect.DeepEqual(firstEvents, secondEvents) || !reflect.DeepEqual(first.Snapshot(), second.Snapshot()) {
 		t.Fatal("the same seed, shop and controls ended in different runs")
@@ -166,15 +169,15 @@ func TestShopAndRedrawsReplayIdentically(t *testing.T) {
 // TestBuyingSpendsRaisesAndStopsAtMax checks the buy rule: it spends the next level's cost, refuses what the balance cannot pay, an unknown item and a maxed one, and never changes the progression it started from.
 func TestBuyingSpendsRaisesAndStopsAtMax(t *testing.T) {
 	shop := &mustGameData().progression.Shop
-	p := Progression{Embers: 800, Shop: map[string]int{"lure": 1}}
+	p := Progression{Embers: 1400, Shop: map[string]int{"lure": 1}}
 	next, ok := buyShopItem(p, shop, "hearth")
-	if !ok || next.Embers != 750 || next.Shop["hearth"] != 1 || next.Shop["lure"] != 1 {
+	if !ok || next.Embers != 1300 || next.Shop["hearth"] != 1 || next.Shop["lure"] != 1 {
 		t.Fatalf("buying Hearth gives %+v", next)
 	}
-	if p.Shop["hearth"] != 0 || p.Embers != 800 {
+	if p.Shop["hearth"] != 0 || p.Embers != 1400 {
 		t.Fatalf("buying changed the progression it started from: %+v", p)
 	}
-	for _, want := range []int{650, 500, 300, 50} {
+	for _, want := range []int{1150, 900, 550, 100} {
 		if next, ok = buyShopItem(next, shop, "hearth"); !ok || next.Embers != want {
 			t.Fatalf("buying Hearth again leaves %d embers, want %d", next.Embers, want)
 		}
@@ -188,11 +191,11 @@ func TestBuyingSpendsRaisesAndStopsAtMax(t *testing.T) {
 			t.Fatalf("buying %s gave %+v", id, got)
 		}
 	}
-	if _, ok := buyShopItem(Progression{Embers: 99}, shop, "lure"); !ok {
-		t.Fatal("a first level of 50 was refused with 99 embers")
+	if _, ok := buyShopItem(Progression{Embers: 100}, shop, "lure"); !ok {
+		t.Fatal("a first level of 100 was refused with 100 embers")
 	}
-	if _, ok := buyShopItem(Progression{Embers: 49}, shop, "lure"); ok {
-		t.Fatal("a first level of 50 was sold for 49 embers")
+	if _, ok := buyShopItem(Progression{Embers: 99}, shop, "lure"); ok {
+		t.Fatal("a first level of 100 was sold for 99 embers")
 	}
 }
 
@@ -220,14 +223,14 @@ func TestShopBuysByEveryInputAndTheNextRunTakesIt(t *testing.T) {
 
 	// A tap buys Hearth's last level; another tap on the maxed item changes nothing.
 	press(t, app, "id:shop-item-hearth")
-	if g.progress.Embers != 750 || g.progress.Shop["hearth"] != 5 || loadProgression(app.Storage()).Shop["hearth"] != 5 {
+	if g.progress.Embers != 550 || g.progress.Shop["hearth"] != 5 || loadProgression(app.Storage()).Shop["hearth"] != 5 {
 		t.Fatalf("buying Hearth by tap gave %+v", g.progress)
 	}
 	if got := app.Find("id:shop-item-hearth").Props.Hint; !strings.Contains(got, en.ShopMax) {
 		t.Fatalf("a maxed Hearth reads %q", got)
 	}
 	press(t, app, "id:shop-item-hearth")
-	if g.progress.Embers != 750 {
+	if g.progress.Embers != 550 {
 		t.Fatalf("a maxed Hearth sold again: %+v", g.progress)
 	}
 
@@ -246,7 +249,7 @@ func TestShopBuysByEveryInputAndTheNextRunTakesIt(t *testing.T) {
 	app.Advance(2 * frame)
 	app.KeyUp("enter")
 	app.Advance(frame)
-	if g.progress.Shop["lure"] != 1 || g.progress.Embers != 700 {
+	if g.progress.Shop["lure"] != 1 || g.progress.Embers != 450 {
 		t.Fatalf("buying Lure by keyboard gave %+v", g.progress)
 	}
 	app.ConnectGamepad(0, "Test Pad")
@@ -260,7 +263,7 @@ func TestShopBuysByEveryInputAndTheNextRunTakesIt(t *testing.T) {
 	for range 2 {
 		tap(gamepad.ButtonSouth)
 	}
-	if g.progress.Shop["redraw"] != 2 || g.progress.Embers != 550 {
+	if g.progress.Shop["redraw"] != 2 || g.progress.Embers != 200 {
 		t.Fatalf("buying Redraw twice by gamepad gave %+v", g.progress)
 	}
 	tap(gamepad.ButtonDPadDown)
@@ -275,13 +278,13 @@ func TestShopBuysByEveryInputAndTheNextRunTakesIt(t *testing.T) {
 	// After a restart the shop reads what was bought, and the next run starts with it.
 	app2, g2 := startEmberVigil(t, nsgotest.Storage(storageSnapshot(app.Storage())))
 	press(t, app2, "id:title-shop")
-	if got := app2.Find("id:shop-item-redraw").Props.Hint; !strings.Contains(got, en.Level(2)+"/5") || !strings.Contains(got, en.ShopCost(150)) {
+	if got := app2.Find("id:shop-item-redraw").Props.Hint; !strings.Contains(got, en.Level(2)+"/5") || !strings.Contains(got, en.ShopCost(250)) {
 		t.Fatalf("Redraw after a restart reads %q", got)
 	}
 	press(t, app2, "id:shop-back")
 	press(t, app2, "id:title-start")
 	base := NewRun(1, 1)
-	if s := g2.run.Snapshot(); s.MaxHealth != base.stats.maxHealth+50 || s.Health != s.MaxHealth || s.Redraws != 2 {
+	if s := g2.run.Snapshot(); s.MaxHealth != base.stats.maxHealth+30 || s.Health != s.MaxHealth || s.Redraws != 2 {
 		t.Fatalf("the next run starts with %v of %v health and %d redraws", s.Health, s.MaxHealth, s.Redraws)
 	}
 
@@ -369,7 +372,7 @@ func TestShopDrawsWithoutTheKit(t *testing.T) {
 		d := &core.Drawing{}
 		entries := shopEntries(tr, shop, Progression{Embers: 120, Shop: map[string]int{"hearth": 5}})
 		drawShop(testPainter(d, size, newHUDArt(nil), settled(0), lang), layoutShop(size, core.Edges{}, len(entries)), entries, 120, 0)
-		for _, want := range []string{tr.ShopTitle, tr.ShopItem("lure", "", "").Name, tr.ShopMax, "50", tr.ShopNow("+50"), tr.Back} {
+		for _, want := range []string{tr.ShopTitle, tr.ShopItem("lure", "", "").Name, tr.ShopMax, "100", tr.ShopNow("+30"), tr.Back} {
 			if !drewText(d.Ops, want) {
 				t.Fatalf("%s: the shop without the kit did not write %q", lang, want)
 			}
