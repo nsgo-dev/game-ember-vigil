@@ -91,3 +91,4 @@ enemies:
       damage: 10
       burst: 6
     chest: true
+    magnet: true

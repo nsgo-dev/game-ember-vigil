@@ -365,6 +365,29 @@ var pictures = []picture{
 		"..b7777b..",
 		"...bbbb...",
 	}},
+	{name: "potion", rows: []string{
+		"...ff...",
+		"..1ff1..",
+		"..1661..",
+		".16cc61.",
+		"16c6ccc1",
+		"1cc6ccd1",
+		"1ccccdd1",
+		"1cccddd1",
+		".1dddd1.",
+		"..1111..",
+	}},
+	{name: "magnet", rows: []string{
+		"..111111..",
+		".1cccccc1.",
+		"1cbc11ccc1",
+		"1cb1..1cc1",
+		"1c1....1c1",
+		"1c1....1c1",
+		"161....161",
+		"161....161",
+		"111....111",
+	}},
 }
 
 // pixels is a picture rasterized to the palette, which both the atlas and the ground draw.
@@ -379,7 +402,7 @@ type frames struct {
 	thornling, wisp, shade                sprite.Frame
 	gloomwarden, hollowking               sprite.Frame
 	ember, bolt, halo, thorn, bone, cache sprite.Frame
-	chest                                 sprite.Frame
+	chest, potion, magnet                 sprite.Frame
 	spark, puff, trail                    sprite.Frame
 	grass, fern, stone                    sprite.Frame
 	mushroom, twig                        sprite.Frame
@@ -964,6 +987,8 @@ func framesOf(m map[string]sprite.Frame) frames {
 		bone:        get("bone"),
 		cache:       get("cache"),
 		chest:       get("chest"),
+		potion:      get("potion"),
+		magnet:      get("magnet"),
 		spark:       get("spark"),
 		puff:        get("puff"),
 		trail:       get("trail"),

@@ -534,11 +534,11 @@ func (r *arenaRenderer) trackChests(s Snapshot) {
 	}
 }
 
-// trackPickups copies elite healing caches, blending them by id.
+// trackPickups copies the caches, potions and magnets on the ground, blending them by id.
 func (r *arenaRenderer) trackPickups(s Snapshot) {
 	r.pickups = growActors(r.pickups, len(s.Pickups))
 	for i, p := range s.Pickups {
-		r.pickups[i] = r.tracked(r.pickups[i], p.ID, 0, 6, p.Pos, true)
+		r.pickups[i] = r.tracked(r.pickups[i], p.ID, int(p.Kind), 6, p.Pos, true)
 	}
 }
 
@@ -690,6 +690,8 @@ func (r *arenaRenderer) stepEffects(events []Event, keeperDamaged bool, dt float
 			}
 		case EventEmber:
 			r.burst(e.Pos, particleSpark, 2, 30, sparkSeconds)
+		case EventMagnet:
+			r.burst(e.Pos, particleSpark, 18, 80, sparkSeconds*1.5)
 		case EventLevelUp:
 			fx.levelFlash = levelFlashSeconds
 			r.burst(r.keeper.pos, particleSpark, 16, 62, sparkSeconds*1.4)
@@ -904,15 +906,20 @@ func (r *arenaRenderer) addEmbers(ox, oy float32) {
 	}
 }
 
-// addPickups adds elite healing caches waiting on the ground.
+// addPickups adds the caches, potions and magnets waiting on the ground.
 func (r *arenaRenderer) addPickups(ox, oy float32) {
 	sa := r.art.sheets.cache
 	for i := range r.pickups {
 		var s *sprite.Sprite
-		if sa.loaded {
+		switch {
+		case r.pickups[i].kind == int(PickupPotion):
+			s = r.add(r.art.frames.potion, r.pickups[i], ox, oy, 1, 1)
+		case r.pickups[i].kind == int(PickupMagnet):
+			s = r.add(r.art.frames.magnet, r.pickups[i], ox, oy, 1, 1)
+		case sa.loaded:
 			frame := sampleAnimation(sa, r.pickups[i].id, r.animTime)
 			s = r.addSheet(frame, sa.scale, r.pickups[i], ox, oy, 1, 1)
-		} else {
+		default:
 			s = r.add(r.art.frames.cache, r.pickups[i], ox, oy, 1, 1)
 		}
 		if s != nil {
@@ -1644,7 +1651,14 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 		}
 		l := r.glows[glow]
 		glow++
-		*l = lights2d.Light{X: x, Y: y, Radius: 28, Color: core.RGBA(0x52a868, 0.82), Intensity: 0.55, Falloff: 1.5, Enabled: true}
+		c := core.RGBA(0x52a868, 0.82)
+		switch r.pickups[i].kind {
+		case int(PickupPotion):
+			c = core.RGBA(0xe0503a, 0.82)
+		case int(PickupMagnet):
+			c = core.RGBA(0xffd166, 0.85)
+		}
+		*l = lights2d.Light{X: x, Y: y, Radius: 28, Color: c, Intensity: 0.55, Falloff: 1.5, Enabled: true}
 		r.lights = append(r.lights, l)
 	}
 	for i := range r.enemyShots {

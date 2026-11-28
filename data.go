@@ -98,6 +98,7 @@ type runFile struct {
 	Embers  emberDef  `yaml:"embers"`
 	Level   levelDef  `yaml:"level"`
 	Chest   chestDef  `yaml:"chest"`
+	Finds   findsDef  `yaml:"finds"`
 }
 
 // arenaDef is the run's world bounds, in world units, which are virtual pixels at zoom one. Fog is the band
@@ -137,6 +138,24 @@ type chestDef struct {
 	Radius     float64 `yaml:"radius"`
 	Hold       float64 `yaml:"hold"`
 	EvolveHold float64 `yaml:"evolveHold"`
+}
+
+// findsDef is what turns up on the ground now and then near the keeper: a small potion that heals and a magnet that pulls in every ember. Each one appears Near to Far from the keeper, rolled every so many seconds, while fewer than Most of it lie on the ground.
+type findsDef struct {
+	Radius float64 `yaml:"radius"`
+	Near   float64 `yaml:"near"`
+	Far    float64 `yaml:"far"`
+	Potion findDef `yaml:"potion"`
+	Magnet findDef `yaml:"magnet"`
+}
+
+// findDef is one kind of find: every Every seconds it appears with Chance, unless Most already lie on the ground. Heal is the fraction of maximum health a potion restores, and Pull how far from the keeper a magnet's embers lie, which bounds what a magnet in the open is worth.
+type findDef struct {
+	Every  float64 `yaml:"every"`
+	Chance float64 `yaml:"chance"`
+	Most   int     `yaml:"most"`
+	Heal   float64 `yaml:"heal,omitempty"`
+	Pull   float64 `yaml:"pull,omitempty"`
 }
 
 // weaponFile is data/weapons.yaml: the starter weapon name, knockback decay and every weapon's levels.
@@ -271,8 +290,9 @@ type enemyDef struct {
 	Shot            enemyShotDef `yaml:"shot,omitempty"`
 	Split           splitDef     `yaml:"split,omitempty"`
 
-	// Chest is whether the enemy drops a chest when it dies.
-	Chest bool `yaml:"chest,omitempty"`
+	// Chest is whether the enemy drops a chest when it dies, and Magnet whether it drops a magnet that pulls in every ember.
+	Chest  bool `yaml:"chest,omitempty"`
+	Magnet bool `yaml:"magnet,omitempty"`
 }
 
 // driftDef is how a drifting enemy sways: Amplitude is the fraction of its speed across its course, and Period is how long one sway takes, in seconds.
@@ -764,6 +784,31 @@ func (r *runFile) validate() error {
 		return fmt.Errorf("chest radius %v is not above 0", c.Radius)
 	case !positive(c.Hold) || !positive(c.EvolveHold):
 		return fmt.Errorf("chest hold %v or evolveHold %v is not above 0", c.Hold, c.EvolveHold)
+	}
+	f := r.Finds
+	switch {
+	case !positive(f.Radius):
+		return fmt.Errorf("finds radius %v is not above 0", f.Radius)
+	case !finite(f.Near) || f.Near < 0 || !finite(f.Far) || f.Far < f.Near:
+		return fmt.Errorf("finds near %v and far %v are not 0 <= near <= far", f.Near, f.Far)
+	}
+	for _, k := range []struct {
+		name string
+		def  findDef
+	}{{"potion", f.Potion}, {"magnet", f.Magnet}} {
+		d := k.def
+		switch {
+		case !positive(d.Every):
+			return fmt.Errorf("finds %s every %v is not above 0", k.name, d.Every)
+		case !finite(d.Chance) || d.Chance < 0 || d.Chance > 1:
+			return fmt.Errorf("finds %s chance %v is not in [0, 1]", k.name, d.Chance)
+		case d.Most < 0:
+			return fmt.Errorf("finds %s most %d is negative", k.name, d.Most)
+		case !finite(d.Heal) || d.Heal < 0 || d.Heal > 1:
+			return fmt.Errorf("finds %s heal %v is not in [0, 1]", k.name, d.Heal)
+		case !finite(d.Pull) || d.Pull < 0:
+			return fmt.Errorf("finds %s pull %v is negative", k.name, d.Pull)
+		}
 	}
 	return nil
 }

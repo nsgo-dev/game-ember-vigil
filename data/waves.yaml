@@ -8,7 +8,7 @@ spans:
     every: 0.62
     maxAlive: 55
     health: 1
-    damage: 1.15
+    damage: 1.29
     enemies:
       - name: Ash Mite
         weight: 1
@@ -16,7 +16,7 @@ spans:
     every: 0.48
     maxAlive: 95
     health: 1.1
-    damage: 1.25
+    damage: 1.4
     enemies:
       - name: Ash Mite
         weight: 3
@@ -26,7 +26,7 @@ spans:
     every: 0.36
     maxAlive: 140
     health: 1.56
-    damage: 2.03
+    damage: 2.27
     enemies:
       - name: Ash Mite
         weight: 3
@@ -38,7 +38,7 @@ spans:
     every: 0.31
     maxAlive: 200
     health: 1.81
-    damage: 2.15
+    damage: 2.41
     enemies:
       - name: Ash Mite
         weight: 3
@@ -52,7 +52,7 @@ spans:
     every: 0.25
     maxAlive: 270
     health: 2.19
-    damage: 2.65
+    damage: 2.97
     enemies:
       - name: Ash Mite
         weight: 2
@@ -68,7 +68,7 @@ spans:
     every: 0.21
     maxAlive: 345
     health: 2.62
-    damage: 2.96
+    damage: 3.32
     enemies:
       - name: Ash Mite
         weight: 2
@@ -86,7 +86,7 @@ spans:
     every: 0.18
     maxAlive: 413
     health: 3
-    damage: 3.59
+    damage: 4.02
     enemies:
       - name: Moth
         weight: 2
@@ -102,7 +102,7 @@ spans:
     every: 0.145
     maxAlive: 490
     health: 3.38
-    damage: 3.77
+    damage: 4.22
     enemies:
       - name: Husk
         weight: 3
@@ -116,7 +116,7 @@ spans:
     every: 0.118
     maxAlive: 570
     health: 4
-    damage: 4.03
+    damage: 4.51
     enemies:
       - name: Husk
         weight: 3
@@ -131,63 +131,63 @@ surges:
     enemy: Ash Mite
     count: 40
     health: 1
-    damage: 1.15
+    damage: 1.29
     surround: true
   - at: 170
     enemy: Moth
     count: 55
     health: 1.15
-    damage: 1.25
+    damage: 1.4
     surround: true
   - at: 285
     enemy: Ash Mite
     count: 80
     health: 1.6
-    damage: 1.4
+    damage: 1.57
     surround: true
   - at: 405
     enemy: Thornling
     count: 35
     health: 2
-    damage: 1.6
+    damage: 1.79
     surround: true
   - at: 510
     enemy: Shade
     count: 65
     health: 2.4
-    damage: 1.7
+    damage: 1.9
     surround: true
   - at: 615
     enemy: Moth
     count: 90
     health: 3
-    damage: 1.82
+    damage: 2.04
     surround: true
 elites:
   - at: 110
     enemy: Gloomwarden
     health: 0.7
-    damage: 1.1
+    damage: 1.23
   - at: 230
     enemy: Gloomwarden
     health: 1.1
-    damage: 1.25
+    damage: 1.4
   - at: 350
     enemy: Gloomwarden
     health: 1.6
-    damage: 1.45
+    damage: 1.62
   - at: 465
     enemy: Gloomwarden
     health: 2.2
-    damage: 1.65
+    damage: 1.85
   - at: 575
     enemy: Gloomwarden
     health: 2.6
-    damage: 1.7
+    damage: 1.9
   - at: 660
     enemy: Gloomwarden
     health: 3
-    damage: 1.82
+    damage: 2.04
 boss:
   at: 720
   name: Hollow King

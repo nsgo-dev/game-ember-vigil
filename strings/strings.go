@@ -125,6 +125,7 @@ type Table struct {
 	LanguageEN     string
 	LanguageZhCN   string
 	Stats          string
+	ShowFPS        string
 	DecreasePrefix string
 	IncreasePrefix string
 	Apply          string
