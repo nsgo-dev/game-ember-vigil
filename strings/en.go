@@ -12,6 +12,7 @@ var enTable = Table{
 	BestTimeFmt:   "Best Time ",
 	BestKillsFmt:  "Best Kills ",
 	BestLevelFmt:  "Best Level ",
+	TierPrefix:    "Long Night ",
 	WinsFmt:       "Wins ",
 
 	LevelPrefix:  "Level ",

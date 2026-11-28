@@ -7,6 +7,8 @@ import (
 
 	"github.com/nsgo-dev/game/packages/game/input"
 	"github.com/nsgo-dev/nsgo/core"
+	"github.com/nsgo-dev/nsgo/gamepad"
+	"github.com/nsgo-dev/nsgo/nsgotest"
 	evstrings "me.oneo/embervigil/strings"
 )
 
@@ -183,5 +185,80 @@ func TestPauseButtonStaysThumbSized(t *testing.T) {
 		if l.pause.x+l.pause.w > float32(size.Width)-44 {
 			t.Errorf("%v: the pause button leaves the safe area", size)
 		}
+	}
+}
+
+// TestWinningOpensTheNextTierToChoose checks that a new player's title offers no tier, that a win at tier 1 opens tier 2 and makes it the next run's, that the opened tier survives a restart, and that the title cycles the open tiers by tap and gamepad before a run starts at the chosen one, which the HUD and results name.
+func TestWinningOpensTheNextTierToChoose(t *testing.T) {
+	app, g := startEmberVigil(t)
+	if n := len(app.Query("id:title-tier")); n != 0 {
+		t.Fatalf("a new player's title shows %d tier buttons, want none", n)
+	}
+	press(t, app, "id:title-start")
+	if g.run.Tier() != 1 {
+		t.Fatalf("a new player's run plays tier %d, want 1", g.run.Tier())
+	}
+	wantLabel(t, app, "Long Night 1")
+	g.run.spawnBoss()
+	app.Advance(frame)
+	g.run.bossEnemy().hp = 0
+	app.Advance(8 * frame)
+	en := evstrings.For(evstrings.EN)
+	if got, want := app.Find("id:results-unlocked").Props.Label, en.UnlockedList([]string{"Long Night 2"}); got != want {
+		t.Fatalf("results after the first win say %q, want %q", got, want)
+	}
+	if g.progress.TierWon != 1 || g.tier.Get() != 2 {
+		t.Fatalf("after a tier 1 win the progression is %+v and the next run plays tier %d, want tier 2", g.progress, g.tier.Get())
+	}
+	press(t, app, "id:results-play-again")
+	if g.run.Tier() != 2 {
+		t.Fatalf("Play Again after the win plays tier %d, want 2", g.run.Tier())
+	}
+
+	app2, g2 := startEmberVigil(t, nsgotest.Storage(storageSnapshot(app.Storage())))
+	if g2.progress.TierWon != 1 || g2.tier.Get() != 2 {
+		t.Fatalf("after a restart the progression is %+v and the title picks tier %d, want tier 2 open and picked", g2.progress, g2.tier.Get())
+	}
+	if got := app2.Find("id:title-tier").Props.Label; got != "Long Night 2" {
+		t.Fatalf("the title's tier button says %q, want Long Night 2", got)
+	}
+	if !drewText(app2.Find("id:arena").Ops, "Long Night 2") {
+		t.Fatal("the title did not paint the tier button")
+	}
+	press(t, app2, "id:title-tier")
+	if g2.tier.Get() != 1 || app2.Find("id:title-tier").Props.Label != "Long Night 1" {
+		t.Fatalf("tapping the tier picked tier %d, want it to wrap to 1", g2.tier.Get())
+	}
+	app2.ConnectGamepad(0, "Test Pad")
+	tap := func(b gamepad.Button) {
+		app2.SetGamepadButton(0, b, 1)
+		app2.Advance(2 * frame)
+		app2.SetGamepadButton(0, b, 0)
+		app2.Advance(frame)
+	}
+	tap(gamepad.ButtonDPadRight)
+	if g2.menuFocus.Get() != 1 {
+		t.Fatalf("the gamepad moved the title's focus to %d, want the tier button", g2.menuFocus.Get())
+	}
+	tap(gamepad.ButtonSouth)
+	if g2.tier.Get() != 2 {
+		t.Fatalf("the gamepad picked tier %d, want 2", g2.tier.Get())
+	}
+	press(t, app2, "id:title-start")
+	if g2.run.Tier() != 2 {
+		t.Fatalf("the run started at tier %d, want the chosen 2", g2.run.Tier())
+	}
+	wantLabel(t, app2, "Long Night 2")
+	app2.Advance(frame)
+	if !drewText(app2.Find("id:arena").Ops, "Long Night 2") {
+		t.Fatal("the HUD did not draw the run's tier")
+	}
+	g2.run.keeper.health = 0
+	app2.Advance(8 * frame)
+	if got := app2.Find("id:results-outcome").Props.Label; got != en.DefeatBadge+"  ·  Long Night 2" {
+		t.Fatalf("results outcome = %q, want the defeat at Long Night 2", got)
+	}
+	if g2.progress.TierWon != 1 {
+		t.Fatalf("a lost tier 2 run changed the tier won to %d", g2.progress.TierWon)
 	}
 }

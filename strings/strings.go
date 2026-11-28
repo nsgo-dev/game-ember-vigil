@@ -48,6 +48,8 @@ type Table struct {
 	BestKillsFmt  string
 	BestLevelFmt  string
 	WinsFmt       string
+	// TierPrefix leads a Long Night tier's number, such as "Long Night 3".
+	TierPrefix string
 
 	// HUD
 	LevelPrefix  string
@@ -126,6 +128,9 @@ func For(lang Lang) Table {
 
 // Level formats a level readout such as "Level 3" or "等级 3".
 func (t Table) Level(n int) string { return t.LevelPrefix + strconv.Itoa(n) }
+
+// Tier names a Long Night tier, such as "Long Night 3" or "长夜 3".
+func (t Table) Tier(n int) string { return t.TierPrefix + strconv.Itoa(n) }
 
 // Kills formats a kill count readout such as "Kills 12" or "击杀 12".
 func (t Table) Kills(n int) string { return t.KillsPrefix + strconv.Itoa(n) }

@@ -62,9 +62,6 @@ const (
 	resultsMenuCount     = 2                    // Play Again, Title
 )
 
-// runTier is the Long Night tier every run plays until the player can choose one.
-const runTier = 1
-
 // emberVigil is the game's shell: it owns the window, the fixed-step loop, input and the screens, and hands the run its steps.
 type emberVigil struct {
 	cx      *core.Scope
@@ -107,7 +104,9 @@ type emberVigil struct {
 	settings *core.Signal[Settings]
 	records  *core.Signal[Records]
 	// progress is the saved progression; it changes only as a run ends, before the HUD publishes the results it shows on.
-	progress       Progression
+	progress Progression
+	// tier is the Long Night tier the next run plays, which the title chooses among the open ones.
+	tier           *core.Signal[int]
 	savedSettings  Settings
 	settingsReturn phase
 	confirmQuit    *core.Signal[bool]
@@ -155,6 +154,7 @@ func newEmberVigil(cx *core.Scope) *emberVigil {
 		settings:       core.NewSignal(cx, saved),
 		records:        core.NewSignal(cx, recs),
 		progress:       prog,
+		tier:           core.NewSignal(cx, prog.openTier(mustGameData().tiers.maxTier())),
 		savedSettings:  saved,
 		settingsReturn: phaseTitle,
 		confirmQuit:    core.NewSignal(cx, false),
@@ -267,9 +267,10 @@ func (g *emberVigil) update(dt time.Duration) {
 			g.choose(2)
 			return
 		case g.actions.JustPressed(actionLeft):
-			g.focusCard((g.cardFocus + offerCount - 1) % offerCount)
+			n := max(1, len(g.run.Snapshot().Offers))
+			g.focusCard((g.cardFocus + n - 1) % n)
 		case g.actions.JustPressed(actionRight):
-			g.focusCard((g.cardFocus + 1) % offerCount)
+			g.focusCard((g.cardFocus + 1) % max(1, len(g.run.Snapshot().Offers)))
 		case g.actions.JustPressed(actionConfirm):
 			g.choose(g.cardFocus)
 			return
@@ -434,6 +435,7 @@ func hudStateOf(s Snapshot, cardFocus int, newRecord bool) hudState {
 		bossMaxHealth: int(math.Round(s.Boss.MaxHealth)),
 		bossPhase:     s.Boss.Phase,
 		newRecord:     newRecord,
+		tier:          s.Tier,
 	}
 	for i := range st.weapons {
 		if i < len(s.Weapons) {
@@ -488,7 +490,11 @@ func (g *emberVigil) recordResult(s Snapshot) {
 		return
 	}
 	g.runRecorded = true
-	prog, reward := applyRunProgression(g.progress, s.Phase == PhaseVictory, runTier, g.run.Payout(runTier), g.run.Unlocks())
+	prog, reward := applyRunProgression(g.progress, s.Phase == PhaseVictory, g.run.Tier(), mustGameData().tiers.maxTier(), g.run.Payout(), g.run.Unlocks())
+	// A win that opens the next tier makes it the next run's, so Play Again climbs.
+	if reward.tierOpened > 0 {
+		g.tier.Set(reward.tierOpened)
+	}
 	_ = saveProgression(g.storage, prog)
 	g.lastReward = reward
 	g.progress = prog
@@ -506,7 +512,7 @@ func (g *emberVigil) recordResult(s Snapshot) {
 // start begins a run from the wall clock's seed, which the run itself never reads, and keeps that seed for the arena's ground.
 func (g *emberVigil) start() {
 	g.seed = uint64(time.Now().UnixNano())
-	g.run = NewRun(g.seed)
+	g.run = NewRun(g.seed, g.tier.GetUntracked())
 	g.scene.startRun(g.seed)
 	g.applyLiveSettings(g.settings.GetUntracked())
 	g.hudClock = 0
@@ -680,6 +686,14 @@ func (g *emberVigil) toggleStats() {
 
 func (g *emberVigil) setQuality(q Quality) {
 	g.updateDraft(func(s *Settings) { s.Quality = q })
+}
+
+// cycleTier moves the next run's Long Night tier by delta, wrapping over the open tiers.
+func (g *emberVigil) cycleTier(delta int) {
+	open := g.progress.openTier(mustGameData().tiers.maxTier())
+	next := ((g.tier.GetUntracked()-1+delta)%open+open)%open + 1
+	g.tier.Set(next)
+	g.audio.playCue(cueUIClick)
 }
 
 func (g *emberVigil) cycleQuality(delta int) {

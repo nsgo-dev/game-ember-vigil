@@ -13,15 +13,20 @@ const spawnTries = 8
 
 // director is the wave director: it reads data/waves.yaml at the run clock, picks enemies from the span's mix, triggers surges and elites, and hands off to the Hollow King at 12:00.
 type director struct {
-	waves       *waveFile
+	waves *waveFile
+	// elites are the waves' elites and the tier's in time order, and bossAt when the tier brings the Hollow King.
+	elites      []eliteSpawnDef
+	bossAt      float64
 	nextSpawn   float64
 	nextSurge   int
 	nextElite   int
 	bossSpawned bool
 }
 
-// newDirector starts the director at the timeline's beginning.
-func newDirector(w *waveFile) director { return director{waves: w} }
+// newDirector starts the director at the timeline's beginning, with the elites and the Hollow King's arrival of the run's tier.
+func newDirector(w *waveFile, rules *tierRules) director {
+	return director{waves: w, elites: rules.elites, bossAt: w.Boss.At - rules.bossEarlier}
+}
 
 // spanAt returns the span the clock is in, or nil before the timeline starts.
 func (d *director) spanAt(seconds float64) *spanDef {
@@ -38,15 +43,15 @@ func (d *director) step(r *Run) {
 	if d.bossSpawned || r.boss.active {
 		return
 	}
-	if d.waves.Boss.At > 0 && r.time >= d.waves.Boss.At {
+	if d.bossAt > 0 && r.time >= d.bossAt {
 		d.bossSpawned = true
 		r.spawnBoss()
 		return
 	}
 
 	// Scheduled elites always appear on time (up to maxEnemies), independent of the span's soft alive cap.
-	for d.nextElite < len(d.waves.Elites) && r.time >= d.waves.Elites[d.nextElite].At {
-		el := &d.waves.Elites[d.nextElite]
+	for d.nextElite < len(d.elites) && r.time >= d.elites[d.nextElite].At {
+		el := &d.elites[d.nextElite]
 		d.nextElite++
 		if kind, ok := r.data.enemyIndex(el.Enemy); ok {
 			def := &r.data.enemies.Enemies[kind]
@@ -106,14 +111,14 @@ func (d *director) step(r *Run) {
 
 // spawnPos draws a point on the ring around the keeper, clamped inside the arena and off the view, or reports that no attempt this step landed there.
 func (r *Run) spawnPos(radius float64) (Vec2, bool) {
-	ring := r.data.waves.Ring
+	ring, sight := r.data.waves.Ring, r.rules.sight
 	for range spawnTries {
 		dir := Vec2{r.spawns.Range(-1, 1), r.spawns.Range(-1, 1)}
 		if l2 := dir.LenSq(); l2 < 1e-6 || l2 > 1 {
 			continue
 		}
-		p := r.clamp(r.keeper.pos.Add(dir.Normalized().Scale(r.spawns.Range(ring.Min, ring.Max))), radius)
-		if offscreen(r.keeper.pos, p) {
+		p := r.clamp(r.keeper.pos.Add(dir.Normalized().Scale(r.spawns.Range(ring.Min*sight, ring.Max*sight))), radius)
+		if offscreenWithin(r.keeper.pos, p, sight) {
 			return p, true
 		}
 	}
@@ -126,6 +131,7 @@ func (r *Run) spawnSurround(kind int, radius float64, count int, healthMul, dama
 		return
 	}
 	ring := r.data.waves.Ring
+	ring.Min, ring.Max = ring.Min*r.rules.sight, ring.Max*r.rules.sight
 	baseAngle := r.spawns.Range(0, 2*math.Pi)
 	step := 2 * math.Pi / float64(count)
 	for i := range count {
@@ -147,13 +153,16 @@ func (r *Run) fallbackRingPos(radius float64) Vec2 {
 	if dir == (Vec2{}) {
 		dir = Vec2{X: 1}
 	}
-	return r.clamp(r.keeper.pos.Add(dir.Scale(r.data.waves.Ring.Min)), radius)
+	return r.clamp(r.keeper.pos.Add(dir.Scale(r.data.waves.Ring.Min*r.rules.sight)), radius)
 }
 
 // offscreen reports whether p lies outside the view the arena shows around center.
-func offscreen(center, p Vec2) bool {
+func offscreen(center, p Vec2) bool { return offscreenWithin(center, p, 1) }
+
+// offscreenWithin reports whether p lies outside the view around center shrunk by sight, which a Long Night tier's shorter sight shrinks.
+func offscreenWithin(center, p Vec2, sight float64) bool {
 	d := p.Sub(center)
-	return math.Abs(d.X) > viewWidth/2 || math.Abs(d.Y) > viewHeight/2
+	return math.Abs(d.X) > viewWidth/2*sight || math.Abs(d.Y) > viewHeight/2*sight
 }
 
 // addEnemy puts one enemy of kind on the field from the span's multipliers.
@@ -162,7 +171,7 @@ func (r *Run) addEnemy(kind int, pos Vec2, healthMul, damageMul float64) {
 		return
 	}
 	def := &r.data.enemies.Enemies[kind]
-	health := def.Health * healthMul
+	health := def.Health * healthMul * r.rules.health
 	orbitDir := 1.0
 	if def.Motion == motionOrbit && r.spawns.Range(-1, 1) < 0 {
 		orbitDir = -1.0
@@ -182,9 +191,9 @@ func (r *Run) addEnemy(kind int, pos Vec2, healthMul, damageMul float64) {
 		maxHP:           health,
 		healthMul:       healthMul,
 		damageMul:       damageMul,
-		damage:          def.Damage * damageMul,
+		damage:          def.Damage * damageMul * r.rules.damage,
 		radius:          def.Radius,
-		speed:           def.Speed,
+		speed:           def.Speed * r.rules.enemySpeed,
 		motion:          def.Motion,
 		driftAmplitude:  def.Drift.Amplitude,
 		driftPeriod:     def.Drift.Period,
@@ -198,7 +207,7 @@ func (r *Run) addEnemy(kind int, pos Vec2, healthMul, damageMul float64) {
 		shotSpeed:       def.Shot.Speed,
 		shotRadius:      def.Shot.Radius,
 		shotLife:        def.Shot.Life,
-		shotDamage:      def.Shot.Damage * damageMul,
+		shotDamage:      def.Shot.Damage * damageMul * r.rules.damage,
 		shotBurst:       def.Shot.Burst,
 		splitKind:       splitKind,
 		splitCount:      def.Split.Count,

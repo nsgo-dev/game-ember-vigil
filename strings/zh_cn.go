@@ -12,6 +12,7 @@ var zhCNTable = Table{
 	BestTimeFmt:   "最佳生存 ",
 	BestKillsFmt:  "最高击杀 ",
 	BestLevelFmt:  "最高等级 ",
+	TierPrefix:    "长夜 ",
 	WinsFmt:       "通关次数 ",
 
 	LevelPrefix:  "等级 ",

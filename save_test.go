@@ -140,7 +140,7 @@ func TestProgressionLoadsNormalizesAndAppliesRuns(t *testing.T) {
 		t.Fatalf("a saved progression loads %+v, want %+v", got, want)
 	}
 
-	next, reward := applyRunProgression(want, false, 1, 20, []string{"b", "c"})
+	next, reward := applyRunProgression(want, false, 1, 5, 20, []string{"b", "c"})
 	if next.Embers != 20 || next.TierWon != 0 || !reflect.DeepEqual(next.Unlocked, []string{"a", "b", "c"}) {
 		t.Fatalf("a lost run gives %+v", next)
 	}
@@ -150,8 +150,18 @@ func TestProgressionLoadsNormalizesAndAppliesRuns(t *testing.T) {
 	if !reflect.DeepEqual(want.Unlocked, []string{"a", "b"}) {
 		t.Fatalf("applying a run changed the progression it started from: %+v", want.Unlocked)
 	}
-	next, reward = applyRunProgression(next, true, 1, 250, nil)
-	if next.Embers != 270 || next.TierWon != 1 || len(reward.unlocks) != 0 {
-		t.Fatalf("a won run gives %+v and rewards %+v", next, reward)
+	next, reward = applyRunProgression(next, true, 1, 5, 250, nil)
+	if next.Embers != 270 || next.TierWon != 1 || len(reward.unlocks) != 0 || reward.tierOpened != 2 || next.openTier(5) != 2 {
+		t.Fatalf("a won run gives %+v and rewards %+v, want tier 2 opened", next, reward)
+	}
+	// Winning a lower tier again opens nothing, and winning the last opens nothing past it.
+	if again, reward := applyRunProgression(next, true, 1, 5, 0, nil); again.TierWon != 1 || reward.tierOpened != 0 {
+		t.Fatalf("winning tier 1 again gives %+v and rewards %+v", again, reward)
+	}
+	if top, reward := applyRunProgression(Progression{TierWon: 4}, true, 5, 5, 0, nil); top.TierWon != 5 || reward.tierOpened != 0 || top.openTier(5) != 5 {
+		t.Fatalf("winning the last tier gives %+v and rewards %+v", top, reward)
+	}
+	if got := defaultProgression().openTier(5); got != 1 {
+		t.Fatalf("a new player may choose up to tier %d, want 1", got)
 	}
 }

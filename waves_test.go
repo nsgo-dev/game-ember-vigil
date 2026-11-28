@@ -109,7 +109,7 @@ func TestDirectorWaitsAtTheAliveCap(t *testing.T) {
 
 // TestDirectorTriggersSurgesElitesAndPausesForBoss checks scheduled surges, Gloomwarden elites, and that normal spawns pause once the Hollow King arrives at 12:00.
 func TestDirectorTriggersSurgesElitesAndPausesForBoss(t *testing.T) {
-	r := NewRun(19)
+	r := NewRun(19, 1)
 	r.director.nextSpawn = math.Inf(1)
 
 	// Trigger the first surge.
@@ -159,7 +159,7 @@ func TestDirectorTriggersSurgesElitesAndPausesForBoss(t *testing.T) {
 
 // TestDirectorSpawnsSurroundWaveAroundKeeper checks that a surround surge places enemies across all four quadrants around the keeper.
 func TestDirectorSpawnsSurroundWaveAroundKeeper(t *testing.T) {
-	r := NewRun(23)
+	r := NewRun(23, 1)
 	r.director.nextSpawn = math.Inf(1)
 	r.director.nextElite = len(r.data.waves.Elites)
 

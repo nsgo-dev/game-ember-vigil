@@ -74,6 +74,7 @@ type gameData struct {
 	enemies       enemyFile
 	waves         waveFile
 	progression   progressionFile
+	tiers         tierFile
 	starterWeapon int
 }
 
@@ -403,7 +404,15 @@ func loadGameData(fsys fs.FS) (*gameData, error) {
 	if err != nil {
 		return nil, err
 	}
-	d := &gameData{run: *run, weapons: *weapons, upgrades: *upgrades, enemies: *enemies, waves: *waves, progression: *progression}
+	tierBytes, err := fs.ReadFile(fsys, fileTiers)
+	if err != nil {
+		return nil, err
+	}
+	tiers, err := parseTierFile(fileTiers, tierBytes)
+	if err != nil {
+		return nil, err
+	}
+	d := &gameData{run: *run, weapons: *weapons, upgrades: *upgrades, enemies: *enemies, waves: *waves, progression: *progression, tiers: *tiers}
 	if err := d.check(); err != nil {
 		return nil, err
 	}
@@ -460,7 +469,7 @@ func (d *gameData) check() error {
 			return fmt.Errorf("%s: boss phase %d: no enemy %q", fileWaves, i+1, p.SummonEnemy)
 		}
 	}
-	return nil
+	return d.tiers.check(d)
 }
 
 // weaponIndex returns the position of the weapon called name in the weapons file.

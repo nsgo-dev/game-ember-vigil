@@ -458,15 +458,21 @@ func resultsTextOf(tr evstrings.Table, st hudState, rec Records, reward runRewar
 	if st.phase == PhaseVictory {
 		r.victory, r.outcome, r.title = true, tr.VictoryBadge, tr.VictoryTitle
 	}
+	if st.tier > 0 {
+		r.outcome += "  ·  " + tr.Tier(st.tier)
+	}
 	if st.newRecord {
 		r.newRecord, r.record = true, tr.NewRecord
 	}
 	r.time, r.kills, r.level = tr.Time(st.time), tr.Kills(st.kills), tr.Level(st.level)
 	r.embers = tr.EmbersEarned(reward.embers) + "  ·  " + tr.EmberBalance(balance)
-	if len(reward.unlocks) > 0 {
-		names := make([]string, len(reward.unlocks))
-		for i, id := range reward.unlocks {
-			names[i] = unlockName(tr, id)
+	if len(reward.unlocks) > 0 || reward.tierOpened > 0 {
+		names := make([]string, 0, len(reward.unlocks)+1)
+		if reward.tierOpened > 0 {
+			names = append(names, tr.Tier(reward.tierOpened))
+		}
+		for _, id := range reward.unlocks {
+			names = append(names, unlockName(tr, id))
 		}
 		r.unlocked = tr.UnlockedList(names)
 	}

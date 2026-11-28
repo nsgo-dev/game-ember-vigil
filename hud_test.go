@@ -307,7 +307,7 @@ func TestCanvasPauseTakesMouseKeyboardAndGamepad(t *testing.T) {
 
 // TestRunDataSetsTheHUDsDangerLine checks that the low-health line comes from data/run.yaml through the snapshot.
 func TestRunDataSetsTheHUDsDangerLine(t *testing.T) {
-	r := NewRun(1)
+	r := NewRun(1, 1)
 	if got := hudStateOf(r.Snapshot(), 0, false).lowHealthAt; got != r.data.run.Keeper.LowHealth || got <= 0 {
 		t.Fatalf("the HUD's danger line = %v, want data's %v", got, r.data.run.Keeper.LowHealth)
 	}

@@ -183,7 +183,9 @@ type hudLayout struct {
 	killsX, killsY, killsH       float32
 	slots                        [maxHUDWeapons]rect
 	timer, boss, pause, pauseHit rect
-	bottom                       float32
+	// tier is where the Long Night tier's caption sits, right of the timer.
+	tier   rect
+	bottom float32
 }
 
 // layoutHUD lays the HUD out at the canvas's real size: health, XP, level, kills and slots top-left, the timer and the boss bar top-centre and pause top-right, all inside the safe area.
@@ -217,6 +219,8 @@ func layoutHUD(size core.Size, safe core.Edges) hudLayout {
 
 	mid := w / 2
 	l.timer = rect{mid - timerW*s/2, top, timerW * s, timerH * s}
+	tierX := l.timer.x + l.timer.w + hudGapPt*s
+	l.tier = rect{tierX, top, max(0, l.pauseHit.x-hudGapPt-tierX), timerH * s}
 	// The boss bar shrinks before it would reach the left cluster or the pause button.
 	clusterRight := x0 + xpW*s + hudGapPt
 	half := min(mid-clusterRight, l.pauseHit.x-hudGapPt-mid)
@@ -296,13 +300,16 @@ func (s hudState) lowHealth() bool {
 	return s.maxHealth > 0 && s.health > 0 && s.healthFraction() <= s.lowHealthAt
 }
 
-// hudLabel is what the canvas tells assistive technology about the HUD: the clock, health, level, kills and the boss.
+// hudLabel is what the canvas tells assistive technology about the HUD: the clock, health, level, kills, the tier and the boss.
 func hudLabel(tr evstrings.Table, st hudState) string {
 	label := tr.ArenaLabel
 	if st.maxHealth <= 0 {
 		return label
 	}
 	label += ", " + st.time + ", " + tr.Health(st.health, st.maxHealth) + ", " + tr.Level(st.level) + ", " + tr.Kills(st.kills)
+	if st.tier > 0 {
+		label += ", " + tr.Tier(st.tier)
+	}
 	if st.bossActive {
 		label += ", " + st.bossTitle(tr)
 	}
@@ -344,6 +351,7 @@ func drawHUD(d *core.Drawing, l hudLayout, st hudState, m *hudMotion, kit *hudAr
 	p.drawKills()
 	p.drawSlots()
 	p.drawTimer()
+	p.drawTier()
 	if st.bossActive {
 		p.drawBoss()
 	}
@@ -546,6 +554,20 @@ func (p *hudPainter) drawTimer() {
 	}
 	cx, cy := r.center()
 	p.drawNumber(p.st.time, cx, cy, 26*p.l.scale, core.TextAlignCenter, false)
+}
+
+// drawTier writes the Long Night tier the run plays beside the timer, cut to the room before the pause button.
+func (p *hudPainter) drawTier() {
+	r := p.l.tier
+	if p.st.tier < 1 || r.w <= 0 {
+		return
+	}
+	font := core.Font{Size: core.Points(13 * p.l.scale), Weight: core.FontWeightBold, Language: p.lang}
+	text := fitText(p.d, p.tr.Tier(p.st.tier), font, r.w)
+	_, cy := r.center()
+	p.d.SetTextAlign(core.TextAlignLeft).SetTextBaseline(core.BaselineMiddle)
+	p.d.SetStrokeColor(hudOutline).SetLineWidth(3).StrokeText(text, r.x, cy, font)
+	p.d.SetFillColor(hudGold).FillText(text, r.x, cy, font)
 }
 
 func (p *hudPainter) drawBoss() {

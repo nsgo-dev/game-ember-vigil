@@ -66,7 +66,9 @@ type hudState struct {
 	bossMaxHealth int
 	bossPhase     int
 	newRecord     bool
-	weapons       [maxHUDWeapons]hudSlot
+	// tier is the Long Night tier the run plays.
+	tier    int
+	weapons [maxHUDWeapons]hudSlot
 	// offers are the cards a level-up offers, empty when none is open.
 	offers [offerCount]hudCard
 }

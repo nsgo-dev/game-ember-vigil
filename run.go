@@ -191,6 +191,8 @@ const (
 	bossCharging
 	bossRingWindup
 	bossSummonWindup
+	// bossVolleyWindup is the attack a Long Night tier adds: a fan of bones aimed at the keeper.
+	bossVolleyWindup
 )
 
 // bossState tracks the Hollow King's phase and deterministic attack queue while it is alive.
@@ -202,6 +204,7 @@ type bossState struct {
 	nextAttack int
 	timer      float64
 	timerMax   float64
+	// chargeDir is where a charge or a volley is aimed.
 	chargeDir  Vec2
 	ringOffset float64
 }
@@ -266,6 +269,9 @@ type pulse struct {
 // Run is one run of the game, simulated headlessly: no views, devices, sound or storage, and no wall clock. The shell steps it one fixed step at a time and draws what its snapshot and events say.
 type Run struct {
 	data *gameData
+	// tier is the Long Night tier the run plays, and rules every rule up to it.
+	tier  int
+	rules tierRules
 
 	// streams keep spawns, offers and drops apart, so a change to one never shifts the others.
 	spawns *random.Stream
@@ -287,6 +293,9 @@ type Run struct {
 	pickups    []pickup
 	patches    []patch
 	pulses     []pulse
+	shadows    []shadow
+	// shadowTick is how long until a shadow zone the keeper stands in hurts again.
+	shadowTick float64
 
 	boss     bossState
 	director director
@@ -312,14 +321,17 @@ type Run struct {
 	maxRadius float64
 }
 
-// NewRun starts a run at 00:00 from the embedded tuning and seed.
-func NewRun(seed uint64) *Run { return newRunWith(mustGameData(), seed) }
+// NewRun starts a run at 00:00 at Long Night tier from the embedded tuning and seed; a tier outside those the data defines plays the nearest one.
+func NewRun(seed uint64, tier int) *Run { return newRunWith(mustGameData(), seed, tier) }
 
 // newRunWith starts a run from d, which tests may hold themselves.
-func newRunWith(d *gameData, seed uint64) *Run {
+func newRunWith(d *gameData, seed uint64, tier int) *Run {
 	streams := random.NewStreams(seed)
+	tier = d.tiers.clampTier(tier)
 	r := &Run{
 		data:            d,
+		tier:            tier,
+		rules:           d.tiers.rules(tier, &d.waves),
 		spawns:          streams.Stream("spawns"),
 		offers:          streams.Stream("offers"),
 		drops:           streams.Stream("drops"),
@@ -337,6 +349,7 @@ func newRunWith(d *gameData, seed uint64) *Run {
 		pickups:         make([]pickup, 0, maxPickups),
 		patches:         make([]patch, 0, maxPatches),
 		pulses:          make([]pulse, 0, maxPulses),
+		shadows:         make([]shadow, 0, maxShadows),
 	}
 	if len(r.weaponLevels) > 0 {
 		r.weaponLevels[d.starterWeapon] = 1
@@ -344,7 +357,7 @@ func newRunWith(d *gameData, seed uint64) *Run {
 	r.keeper = keeper{pos: Vec2{d.run.Arena.Width / 2, d.run.Arena.Height / 2}, health: d.run.Keeper.Health}
 	r.recomputeStats()
 	r.keeper.health = r.stats.maxHealth
-	r.director = newDirector(&d.waves)
+	r.director = newDirector(&d.waves, &r.rules)
 	r.grid = newGrid(gridCell, d.run.Arena.Width, d.run.Arena.Height)
 	for i := range d.enemies.Enemies {
 		r.maxRadius = math.Max(r.maxRadius, d.enemies.Enemies[i].Radius)
@@ -398,6 +411,7 @@ func (r *Run) Step(dt time.Duration, controls Controls) {
 
 	// Hit, fire weapons, bury the dead and gather what they left.
 	r.contact()
+	r.stepShadows()
 	r.stepWeapons()
 	r.stepPatches()
 	r.reap()
@@ -556,11 +570,11 @@ func (r *Run) spawnBoss() {
 		kind:            -1,
 		isBoss:          true,
 		pos:             pos,
-		hp:              b.Health,
-		maxHP:           b.Health,
+		hp:              b.Health * r.rules.health,
+		maxHP:           b.Health * r.rules.health,
 		healthMul:       1,
 		damageMul:       1,
-		damage:          b.Damage,
+		damage:          b.Damage * r.rules.damage,
 		radius:          b.Radius,
 		speed:           b.Speed,
 		motion:          motionChase,
@@ -588,7 +602,7 @@ func (r *Run) bossEnemy() *enemy {
 	return nil
 }
 
-// stepBoss advances the Hollow King's phase transitions, movement and three-attack cycle.
+// stepBoss advances the Hollow King's phase transitions, movement and attack cycle: three attacks, or four when the tier adds the volley.
 func (r *Run) stepBoss() {
 	if !r.boss.active {
 		return
@@ -611,10 +625,14 @@ func (r *Run) stepBoss() {
 	switch r.boss.state {
 	case bossChase:
 		dir := r.keeper.pos.Sub(e.pos).Normalized()
-		vel = dir.Scale(b.Speed * ph.SpeedMul)
+		vel = dir.Scale(b.Speed * ph.SpeedMul * r.rules.enemySpeed)
 		if r.boss.timer <= 0 {
+			attacks := 3
+			if r.rules.volley.Count > 0 {
+				attacks = 4
+			}
 			atk := r.boss.nextAttack
-			r.boss.nextAttack = (r.boss.nextAttack + 1) % 3
+			r.boss.nextAttack = (r.boss.nextAttack + 1) % attacks
 			switch atk {
 			case 0:
 				r.boss.state = bossChargeWindup
@@ -629,6 +647,15 @@ func (r *Run) stepBoss() {
 				r.boss.state = bossRingWindup
 				r.boss.timer = ph.RingWindup
 				r.boss.timerMax = ph.RingWindup
+			case 3:
+				r.boss.state = bossVolleyWindup
+				r.boss.timer = r.rules.volley.Windup
+				r.boss.timerMax = r.rules.volley.Windup
+				aim := r.keeper.pos.Sub(e.pos).Normalized()
+				if aim == (Vec2{}) {
+					aim = Vec2{X: 1}
+				}
+				r.boss.chargeDir = aim
 			default:
 				r.boss.state = bossSummonWindup
 				r.boss.timer = ph.SummonWindup
@@ -654,9 +681,23 @@ func (r *Run) stepBoss() {
 			for k := range ph.BoneCount {
 				ang := r.boss.ringOffset + float64(k)*step
 				dir := Vec2{X: math.Cos(ang), Y: math.Sin(ang)}
-				r.addEnemyShot(e.pos, dir.Scale(ph.BoneSpeed), ph.BoneDamage, ph.BoneRadius, ph.BoneLife, enemyShotBone)
+				r.addEnemyShot(e.pos, dir.Scale(ph.BoneSpeed), ph.BoneDamage*r.rules.damage, ph.BoneRadius, ph.BoneLife, enemyShotBone)
 			}
 			r.boss.ringOffset += step * 0.5
+			r.boss.state = bossChase
+			r.boss.timer = ph.Cooldown
+			r.boss.timerMax = ph.Cooldown
+		}
+	case bossVolleyWindup:
+		if r.boss.timer <= 0 {
+			v := r.rules.volley
+			for k := range v.Count {
+				ang := 0.0
+				if v.Count > 1 {
+					ang = v.Spread * (float64(k)/float64(v.Count-1) - 0.5)
+				}
+				r.addEnemyShot(e.pos, r.boss.chargeDir.Rotated(ang).Scale(ph.BoneSpeed*v.Speed), ph.BoneDamage*r.rules.damage, ph.BoneRadius, ph.BoneLife, enemyShotBone)
+			}
 			r.boss.state = bossChase
 			r.boss.timer = ph.Cooldown
 			r.boss.timerMax = ph.Cooldown
@@ -1052,6 +1093,7 @@ func (r *Run) reap() {
 		}
 		if dead.elite {
 			r.elites++
+			r.leaveShadow(dead.pos)
 		}
 		r.dropEmbers(&dead)
 		if dead.healDrop > 0 && len(r.pickups) < maxPickups {
@@ -1182,8 +1224,12 @@ func (r *Run) defeat() {
 	r.emit(Event{Kind: EventDefeat, Pos: r.keeper.pos})
 }
 
-// Payout is how many embers the run has earned at Long Night tier, which counts as 1 when below it: whole minutes survived, whole hundreds of kills, chests and a win, times the tier's multiplier.
-func (r *Run) Payout(tier int) int {
+// Tier is the Long Night tier the run plays.
+func (r *Run) Tier() int { return r.tier }
+
+// Payout is how many embers the run has earned: whole minutes survived, whole hundreds of kills, chests and a win, times its Long Night tier's multiplier.
+func (r *Run) Payout() int {
+	tier := r.tier
 	p := r.data.progression.Payout
 	base := p.PerMinute*int(r.time/60) + p.PerHundredKills*(r.kills/100) + p.PerChest*r.chests
 	if r.phase == PhaseVictory {
@@ -1246,11 +1292,14 @@ type Snapshot struct {
 	MaxHealth    float64 `json:"maxHealth"`
 	Invulnerable float64 `json:"invulnerable"`
 	// LowHealth is the health fraction at or under which the keeper is in danger.
-	LowHealth  float64         `json:"lowHealth"`
-	Level      int             `json:"level"`
-	XP         float64         `json:"xp"`
-	XPNeeded   float64         `json:"xpNeeded"`
-	Kills      int             `json:"kills"`
+	LowHealth float64 `json:"lowHealth"`
+	Level     int     `json:"level"`
+	XP        float64 `json:"xp"`
+	XPNeeded  float64 `json:"xpNeeded"`
+	Kills     int     `json:"kills"`
+	// Tier is the Long Night tier the run plays, and Sight how far the keeper sees through the fog, as a fraction of the base run's.
+	Tier       int             `json:"tier"`
+	Sight      float64         `json:"sight"`
 	Enemies    []EnemyView     `json:"enemies"`
 	Shots      []ShotView      `json:"shots"`
 	EnemyShots []EnemyShotView `json:"enemyShots"`
@@ -1259,6 +1308,7 @@ type Snapshot struct {
 	Halo       []HaloOrbView   `json:"halo"`
 	Patches    []PatchView     `json:"patches"`
 	Pulses     []PulseView     `json:"pulses"`
+	Shadows    []ShadowView    `json:"shadows"`
 	Boss       BossView        `json:"boss"`
 	Weapons    []SlotView      `json:"weapons"`
 	Passives   []SlotView      `json:"passives"`
@@ -1318,6 +1368,8 @@ type BossView struct {
 	TelegraphDir      Vec2    `json:"telegraphDir,omitempty"`
 	TelegraphProgress float64 `json:"telegraphProgress,omitempty"`
 	TelegraphLength   float64 `json:"telegraphLength,omitempty"`
+	// TelegraphSpread is how wide a volley's fan opens, in radians.
+	TelegraphSpread float64 `json:"telegraphSpread,omitempty"`
 }
 
 // HaloOrbView is one Lantern Halo ember orbiting the keeper.
@@ -1381,6 +1433,8 @@ func (r *Run) Snapshot() Snapshot {
 	s.XP = r.xp
 	s.XPNeeded = r.xpNeeded()
 	s.Kills = r.kills
+	s.Tier = r.tier
+	s.Sight = r.rules.sight
 
 	s.Enemies = s.Enemies[:0]
 	for i := range r.enemies {
@@ -1447,6 +1501,12 @@ func (r *Run) Snapshot() Snapshot {
 				bv.Telegraph = "summon"
 				bv.TelegraphProgress = prog
 				bv.TelegraphLength = be.radius + 36
+			case bossVolleyWindup:
+				bv.Telegraph = "volley"
+				bv.TelegraphDir = r.boss.chargeDir
+				bv.TelegraphProgress = prog
+				bv.TelegraphLength = be.radius + 70
+				bv.TelegraphSpread = r.rules.volley.Spread
 			}
 			s.Boss = bv
 		}
@@ -1477,6 +1537,11 @@ func (r *Run) Snapshot() Snapshot {
 	for i := range r.pulses {
 		p := &r.pulses[i]
 		s.Pulses = append(s.Pulses, PulseView{ID: p.id, Pos: p.pos, Radius: p.radius, Life: p.life, Max: p.max})
+	}
+	s.Shadows = s.Shadows[:0]
+	for i := range r.shadows {
+		sh := &r.shadows[i]
+		s.Shadows = append(s.Shadows, ShadowView{ID: sh.id, Pos: sh.pos, Radius: r.rules.shadow.Radius, Life: sh.life, Max: r.rules.shadow.Life})
 	}
 	s.Weapons = s.Weapons[:0]
 	for i := range r.data.weapons.Weapons {
