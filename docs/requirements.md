@@ -32,12 +32,15 @@ The first version is one playable run on one open arena:
 
 The target is 60 fixed updates a second at 480×270 virtual pixels, holding 60 fps with 200 enemies and effects on the user's Mac.
 
+## Next version
+
+The next version adds progression between runs: an ember shop, Long Night difficulty tiers, two new weapons and weapon evolutions. [meta-progression.md](meta-progression.md) holds its design.
+
 ## Out of scope
 
 The first version does not include:
 
-- Other keepers, maps, weapon sets or weapon evolutions.
-- Permanent meta upgrades, unlocks, shops or currencies.
+- Other keepers, maps or weapon sets.
 - Multiplayer, accounts, cloud saves or leaderboards.
 - Android and iOS store builds. The touch layout and builds are prepared, but store packaging comes later.
 - Steam, consoles, achievements, modding or replay files.

@@ -236,7 +236,7 @@ func botChoose(s Snapshot) int {
 	return best
 }
 
-// TestTwelveMinuteBotBalanceAndDeterminism verifies that sharp movement wins most runs and sees every enemy and boss phase, that slow movement loses most of the same runs, that standing still loses, and that a run replays deterministically.
+// TestTwelveMinuteBotBalanceAndDeterminism verifies that sharp movement wins most runs but not all and sees every enemy and boss phase, that slow movement loses most of the same runs, that standing still loses, and that a run replays deterministically.
 func TestTwelveMinuteBotBalanceAndDeterminism(t *testing.T) {
 	const seeds = 10
 	wins, slowWins := 0, 0
@@ -260,8 +260,8 @@ func TestTwelveMinuteBotBalanceAndDeterminism(t *testing.T) {
 			slowWins++
 		}
 	}
-	if wins < 8 {
-		t.Fatalf("sharp bot won %d/%d seeds, want at least 8: good movement should win", wins, seeds)
+	if wins < 6 || wins > 8 {
+		t.Fatalf("sharp bot won %d/%d seeds, want 6 to 8: good movement should usually win, but not always", wins, seeds)
 	}
 	if slowWins > 3 {
 		t.Fatalf("slow bot won %d/%d seeds, want at most 3: the run should demand movement", slowWins, seeds)
