@@ -21,3 +21,17 @@ chest:
   radius: 8
   hold: 0.6
   evolveHold: 1.4
+finds:
+  radius: 6
+  near: 60
+  far: 120
+  potion:
+    every: 60
+    chance: 0.25
+    most: 2
+    heal: 0.08
+  magnet:
+    every: 60
+    chance: 0.15
+    most: 1
+    pull: 400

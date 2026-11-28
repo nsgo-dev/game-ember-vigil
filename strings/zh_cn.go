@@ -104,6 +104,7 @@ var zhCNTable = Table{
 	LanguageEN:     "English",
 	LanguageZhCN:   "简体中文",
 	Stats:          "使用统计",
+	ShowFPS:        "显示帧率",
 	DecreasePrefix: "降低",
 	IncreasePrefix: "提高",
 	Apply:          "保存",

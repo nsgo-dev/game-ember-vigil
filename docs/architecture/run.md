@@ -60,6 +60,10 @@ At 12:00 the director stops normal spawns, clears space and spawns the Hollow Ki
 
 Three distinct cards are drawn from the pool on the offer stream. If fewer than three remain, the rest are healing cards, up to the limit the run's tier sets. `Redraw` spends one of the run's redraws on a new hand from the same stream, putting the cards it replaces after the rest of the pool so they return only when nothing else is left. Applying a card raises a level and recomputes one derived stat block: damage, cooldown, area, move speed, max health, regeneration, pickup radius and XP gain. Weapons read the block every step instead of caching a modified copy.
 
+## Finds
+
+`data/run.yaml`'s `finds` roll, on their own `finds` stream so the other streams never shift, for a small potion and a magnet to turn up `near` to `far` from the keeper: each kind every `every` seconds with its `chance`, while fewer than its `most` lie on the ground. A Gloomwarden, marked `magnet` in `data/enemies.yaml`, always drops one too. A potion heals `heal` of maximum health; a magnet sets every ember within `pull` of the keeper flying in and reports `EventMagnet`. Both share the heal caches' slice as pickups of another kind.
+
 ## Spark Chain and Ash Censer
 
 `weapons.go` holds the two weapons a run unlocks. Spark Chain strikes the nearest living foe in `range` and leaps to the nearest foe it has not struck within `jumpRange`, striking the level's `count` foes in all; the hits land in the step it casts, and the snapshot's `Arcs` keep each leap for `duration` so the arena can draw it. Ash Censer picks, among the foes in `range`, the one whose burst would catch the most foes, and flies `flight` seconds to where it stood; the snapshot's `Censers` show it in flight. It then bursts with the level's damage, knockback and radius and leaves a fire patch `fireRadius` of the burst wide that burns `fireDamage` of it each `tick`. A censer carries the stats it was thrown with.
@@ -88,7 +92,7 @@ The rule numbers and the foe health and damage multipliers are set with the bala
 
 ## Events
 
-Each step returns a bounded list of events: `Shot`, `Hit`, `Kill`, `Ember`, `LevelUp`, `BossSpawn`, `BossPhase`, `Victory`, `Defeat`, `Chest` and `Evolve`. The shell maps them to sounds, flashes, shake and screen changes. Events carry ids and positions, never pointers into run slices.
+Each step returns a bounded list of events: `Shot`, `Hit`, `Kill`, `Ember`, `LevelUp`, `BossSpawn`, `BossPhase`, `Victory`, `Defeat`, `Chest`, `Evolve` and `Magnet`. The shell maps them to sounds, flashes, shake and screen changes. Events carry ids and positions, never pointers into run slices.
 
 ## Invariants
 

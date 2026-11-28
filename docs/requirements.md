@@ -26,7 +26,7 @@ The first version is one playable run on one open arena:
 - Twelve minutes per run. Enemy mixes, surges, elite spawns and stats scale with the clock. The Hollow King appears at 12:00.
 - Defeat the boss to win; reach zero health to lose. Results show the outcome, elapsed time, kills, level and whether a record was set.
 - Title, run, level-up, pause, results and settings screens.
-- Settings keep master, music and SFX volume, screen shake, quality, language and whether anonymous usage statistics are sent. Records keep best time, most kills, highest level and wins.
+- Settings keep master, music and SFX volume, screen shake, quality, language, whether anonymous usage statistics are sent and whether the frame rate shows. Records keep best time, most kills, highest level and wins.
 - Keyboard, gamepad and touch input. English and Simplified Chinese strings.
 - Stylized 2D hand-painted sprite sheets, frame animations, arena environment tiles/forest props and upgrade card icons (drawn by 彩叶 under `assets/`), paired with lightweight procedural particles, a readable moonlit lantern lighting layer and screen shake. Procedural sprites and ground remain in code as fallback until every asset is wired. Audio starts from the game layer's CC0 placeholder pack.
 

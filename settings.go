@@ -20,7 +20,7 @@ const (
 	settingsToggleW     = 104
 	settingsOptionGap   = 4
 	settingsLabelFontPt = 14
-	settingsRowCount    = 7
+	settingsRowCount    = 8
 )
 
 // settingsRow is one row of the settings panel: its whole width, its label, and its controls left to right.
@@ -31,7 +31,7 @@ type settingsRow struct {
 	value rect
 }
 
-// settingsLayout places the settings panel: its heading, the volumes, shake, quality, language and statistics rows, and Apply and Back.
+// settingsLayout places the settings panel: its heading, the volumes, shake, quality, language, statistics and frame rate rows, and Apply and Back.
 type settingsLayout struct {
 	scale          float32
 	panel, heading rect
@@ -71,7 +71,7 @@ func layoutSettings(size core.Size, safe core.Edges) settingsLayout {
 	return l
 }
 
-// settingsRowAt places row i's label and controls in r: three volumes' steps, the shake and statistics toggles, the four quality tiers and the two languages.
+// settingsRowAt places row i's label and controls in r: three volumes' steps, the shake, statistics and frame rate toggles, the four quality tiers and the two languages.
 func settingsRowAt(r rect, i int, u float32) settingsRow {
 	s := settingsRow{row: r, label: rect{r.x + 8*u, r.y, settingsLabelW * u, r.h}}
 	x := r.x + r.w - settingsControlW*u
@@ -87,7 +87,7 @@ func settingsRowAt(r rect, i int, u float32) settingsRow {
 		step := settingsStepW * u
 		s.controls = []rect{{inner.x, inner.y, step, inner.h}, {inner.x + step + settingsValueW*u, inner.y, step, inner.h}}
 		s.value = rect{inner.x + step, inner.y, settingsValueW * u, inner.h}
-	case i == 3 || i == 6:
+	case i == 3 || i >= 6:
 		s.controls = []rect{{inner.x, inner.y, settingsToggleW * u, inner.h}}
 	case i == 4:
 		options(len(qualityTiers))
@@ -139,6 +139,12 @@ func (g *emberVigil) settingsControls(tr evstrings.Table, cfg Settings, i int) [
 			text = tr.On
 		}
 		return []settingsControl{{id: "settings-stats", text: text, label: tr.Stats + ", " + text, selected: cfg.Stats, press: g.toggleStats}}
+	case 7:
+		text := tr.Off
+		if cfg.ShowFPS {
+			text = tr.On
+		}
+		return []settingsControl{{id: "settings-fps", text: text, label: tr.ShowFPS + ", " + text, selected: cfg.ShowFPS, press: g.toggleFPS}}
 	default:
 		return []settingsControl{
 			{id: "settings-lang-en", text: tr.LanguageEN, label: tr.LanguageEN, selected: cfg.Language == evstrings.EN, press: func() { g.setLanguage(evstrings.EN) }},
@@ -149,7 +155,7 @@ func (g *emberVigil) settingsControls(tr evstrings.Table, cfg Settings, i int) [
 
 // settingsRowName is row i's label.
 func settingsRowName(tr evstrings.Table, i int) string {
-	return [settingsRowCount]string{tr.MasterVolume, tr.MusicVolume, tr.SFXVolume, tr.ScreenShake, tr.Quality, tr.Language, tr.Stats}[i]
+	return [settingsRowCount]string{tr.MasterVolume, tr.MusicVolume, tr.SFXVolume, tr.ScreenShake, tr.Quality, tr.Language, tr.Stats, tr.ShowFPS}[i]
 }
 
 // volumeText is a volume's readout as a percentage.

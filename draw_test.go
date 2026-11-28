@@ -456,14 +456,16 @@ func TestFrameDrawsNewEnemiesPickupsAndBossTelegraph(t *testing.T) {
 	r.addEnemyShot(r.keeper.pos.Add(Vec2{X: -40}), Vec2{X: 10}, 5, 4, 2, enemyShotThorn)
 	r.addEnemyShot(r.keeper.pos.Add(Vec2{Y: -40}), Vec2{Y: 10}, 5, 5, 2, enemyShotBone)
 	r.pickups = append(r.pickups, pickup{id: r.takeID(), pos: r.keeper.pos.Add(Vec2{X: -24, Y: 24}), healFraction: 0.3})
+	r.pickups = append(r.pickups, pickup{id: r.takeID(), kind: PickupPotion, pos: r.keeper.pos.Add(Vec2{X: -36, Y: 24}), healFraction: 0.1})
+	r.pickups = append(r.pickups, pickup{id: r.takeID(), kind: PickupMagnet, pos: r.keeper.pos.Add(Vec2{X: -48, Y: 24})})
 	a := newTestArena(t, r, 13)
 
 	stepOnce(r, Controls{})
 	a.sync(r.Snapshot(), r.Events(), stepSeconds)
 	d := &core.Drawing{}
 	a.draw(d, 0.5, runView)
-	if got := countSprites(d.Ops); got < 11 {
-		t.Fatalf("frame drew %d sprites, want keeper + 7 enemies + 2 enemy shots + 1 heal cache", got)
+	if got := countSprites(d.Ops); got < 13 {
+		t.Fatalf("frame drew %d sprites, want keeper + 7 enemies + 2 enemy shots + a heal cache, a potion and a magnet", got)
 	}
 
 	// Render a Hollow King charge telegraph.

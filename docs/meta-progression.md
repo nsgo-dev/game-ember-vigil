@@ -79,6 +79,7 @@ A run was too easy and left nothing behind: the balance bot won 9 of 10 seeds wi
 The user wants a win to take both skill and luck: a skilled player still loses on a bad seed. The sharpest balance bot stands for the skilled player and the seed (spawns, cards and drops) for luck; the bot reacting three times a second stands for a weaker player.
 
 - Tier 1 is set for a skilled player with nothing bought: from 2:00 on, foes have ×1.25 the health and ×1.2 the damage of the first version's late run, and the Hollow King has 32000 health.
+- The potions and magnets that turn up on the ground lift every player, the magnets most as they level the keeper faster; every span's foe damage in `data/waves.yaml` rose ×1.12 to offset them. Only the full-power row below was measured again after.
 - The shop is the largest source of power. On its own a full shop lifts that player's tier 1 from 37% to 96%, against 58% for evolution and both new weapons together; Lure is the strongest item, as a wider pull levels the keeper faster. The tiers are tuned for a player who has bought everything.
 
 Over seeds 1–100:
@@ -88,7 +89,7 @@ Over seeds 1–100:
 | Skilled, nothing unlocked or bought | 37% | | | | |
 | Skilled, evolution and both weapons | 58% | 6% | | | 0% |
 | Skilled, nothing unlocked, full shop | 96% | | 48% | | |
-| Skilled, everything unlocked and bought | 99% | 89% | 64% | 33% | 14% |
+| Skilled, everything unlocked and bought | 100% | 84% | 60% | 38% | 13% |
 | Weaker, nothing bought | 0% | | | | |
 | Weaker, everything unlocked and bought | 80% | | | | 0% |
 

@@ -104,6 +104,7 @@ var enTable = Table{
 	LanguageEN:     "English",
 	LanguageZhCN:   "简体中文",
 	Stats:          "Usage Stats",
+	ShowFPS:        "Show FPS",
 	DecreasePrefix: "Decrease ",
 	IncreasePrefix: "Increase ",
 	Apply:          "Apply",

@@ -95,7 +95,7 @@ const (
 	EventHit
 	// EventKill is an enemy dying.
 	EventKill
-	// EventEmber is an ember or heal cache reaching the keeper.
+	// EventEmber is an ember, heal cache or potion reaching the keeper.
 	EventEmber
 	// EventLevelUp is the run stopping for a card.
 	EventLevelUp
@@ -111,6 +111,8 @@ const (
 	EventChest
 	// EventEvolve is a chest evolving the weapon whose position in data/weapons.yaml is Value.
 	EventEvolve
+	// EventMagnet is the keeper picking up a magnet, which pulls in every ember within its pull.
+	EventMagnet
 )
 
 // Event is one thing a step did, which the shell turns into a sound, a flash or a screen. It names entities by id and positions in world units, never by pointers into the run.
@@ -189,9 +191,17 @@ type enemyShot struct {
 	kind   uint8
 }
 
-// pickup is a healing cache dropped by an elite enemy.
+// Pickup kinds: an elite's healing cache, and the potions and magnets that turn up on the ground.
+const (
+	PickupCache uint8 = iota
+	PickupPotion
+	PickupMagnet
+)
+
+// pickup is something on the ground the keeper collects: an elite's healing cache, a potion or a magnet.
 type pickup struct {
 	id           uint64
+	kind         uint8
 	pos          Vec2
 	healFraction float64
 	attracted    bool
@@ -350,6 +360,10 @@ type Run struct {
 	spawns *random.Stream
 	offers *random.Stream
 	drops  *random.Stream
+	// finds rolls the potions and magnets that turn up on the ground, and potionClock and magnetClock count toward their next roll.
+	finds       *random.Stream
+	potionClock float64
+	magnetClock float64
 
 	phase Phase
 	time  float64
@@ -423,6 +437,7 @@ func newRunWith(d *gameData, seed uint64, tier int) *Run {
 		spawns:          streams.Stream("spawns"),
 		offers:          streams.Stream("offers"),
 		drops:           streams.Stream("drops"),
+		finds:           streams.Stream("finds"),
 		phase:           PhasePlaying,
 		level:           1,
 		weaponLevels:    make([]int, len(d.weapons.Weapons)),
@@ -566,6 +581,7 @@ func (r *Run) Step(dt time.Duration, controls Controls) {
 	if r.phase == PhaseVictory {
 		return
 	}
+	r.stepFinds()
 	r.gatherEmbers()
 	r.gatherPickups()
 
@@ -1466,6 +1482,11 @@ func (r *Run) reap() {
 				healFraction: dead.healDrop,
 			})
 		}
+		if !dead.isBoss && r.data.enemies.Enemies[dead.kind].Magnet && len(r.pickups) < maxPickups {
+			// The magnet lies just above the chest and cache, so all three show.
+			pos := dead.pos.Add(Vec2{Y: -dead.radius})
+			r.pickups = append(r.pickups, pickup{id: r.takeID(), kind: PickupMagnet, pos: r.clampField(pos, r.data.run.Finds.Radius)})
+		}
 		last := len(r.enemies) - 1
 		r.enemies[i] = r.enemies[last]
 		r.enemies = r.enemies[:last]
@@ -1527,7 +1548,42 @@ func (r *Run) gatherEmbers() {
 	}
 }
 
-// gatherPickups pulls healing caches near the keeper in and restores health when collected.
+// stepFinds rolls, every so often, for a potion or a magnet to turn up on the ground near the keeper, while fewer than the most of it lie there.
+func (r *Run) stepFinds() {
+	f := &r.data.run.Finds
+	r.potionClock = r.rollFind(r.potionClock, &f.Potion, PickupPotion)
+	r.magnetClock = r.rollFind(r.magnetClock, &f.Magnet, PickupMagnet)
+}
+
+// rollFind advances one kind's clock by a step and, each time it passes def.Every, places one of that kind with def.Chance. It returns the clock.
+func (r *Run) rollFind(clock float64, def *findDef, kind uint8) float64 {
+	clock += stepSeconds
+	if clock < def.Every {
+		return clock
+	}
+	clock -= def.Every
+	// The roll is drawn whether or not the find fits, so a full ground never shifts the stream.
+	roll := r.finds.Float64()
+	angle := r.finds.Range(0, 2*math.Pi)
+	dist := r.finds.Range(r.data.run.Finds.Near, r.data.run.Finds.Far)
+	if roll >= def.Chance || len(r.pickups) >= maxPickups {
+		return clock
+	}
+	n := 0
+	for i := range r.pickups {
+		if r.pickups[i].kind == kind {
+			n++
+		}
+	}
+	if n >= def.Most {
+		return clock
+	}
+	pos := r.keeper.pos.Add(Vec2{X: math.Cos(angle), Y: math.Sin(angle)}.Scale(dist))
+	r.pickups = append(r.pickups, pickup{id: r.takeID(), kind: kind, pos: r.clampField(pos, r.data.run.Finds.Radius), healFraction: def.Heal})
+	return clock
+}
+
+// gatherPickups pulls the caches, potions and magnets near the keeper in: a cache or potion restores health when collected, and a magnet sets every ember within its pull flying to the keeper.
 func (r *Run) gatherPickups() {
 	em := r.data.run.Embers
 	magnet := r.stats.pickupRadius
@@ -1539,10 +1595,24 @@ func (r *Run) gatherPickups() {
 			p.attracted = true
 		}
 		if p.attracted {
-			if dist <= r.data.run.Keeper.Radius+6 {
-				heal := r.stats.maxHealth * p.healFraction
-				r.keeper.health = math.Min(r.stats.maxHealth, r.keeper.health+heal)
-				r.emit(Event{Kind: EventEmber, ID: p.id, Pos: p.pos, Value: heal})
+			reach := r.data.run.Keeper.Radius + 6
+			if p.kind != PickupCache {
+				reach = r.data.run.Keeper.Radius + r.data.run.Finds.Radius
+			}
+			if dist <= reach {
+				if p.kind == PickupMagnet {
+					pull := r.data.run.Finds.Magnet.Pull
+					for j := range r.embers {
+						if r.embers[j].pos.Sub(r.keeper.pos).LenSq() <= pull*pull {
+							r.embers[j].attracted = true
+						}
+					}
+					r.emit(Event{Kind: EventMagnet, ID: p.id, Pos: p.pos})
+				} else {
+					heal := r.stats.maxHealth * p.healFraction
+					r.keeper.health = math.Min(r.stats.maxHealth, r.keeper.health+heal)
+					r.emit(Event{Kind: EventEmber, ID: p.id, Pos: p.pos, Value: heal})
+				}
 				last := len(r.pickups) - 1
 				r.pickups[i] = r.pickups[last]
 				r.pickups = r.pickups[:last]
@@ -1721,10 +1791,11 @@ type EmberView struct {
 	Value int  `json:"value"`
 }
 
-// PickupView is one healing cache dropped by an elite enemy.
+// PickupView is one healing cache, potion or magnet on the ground; Kind is one of the Pickup kinds.
 type PickupView struct {
-	ID  uint64 `json:"id"`
-	Pos Vec2   `json:"pos"`
+	ID   uint64 `json:"id"`
+	Kind uint8  `json:"kind,omitempty"`
+	Pos  Vec2   `json:"pos"`
 }
 
 // ChestView is one chest waiting on the ground.
@@ -1895,7 +1966,7 @@ func (r *Run) Snapshot() Snapshot {
 	}
 	s.Pickups = s.Pickups[:0]
 	for i := range r.pickups {
-		s.Pickups = append(s.Pickups, PickupView{ID: r.pickups[i].id, Pos: r.pickups[i].pos})
+		s.Pickups = append(s.Pickups, PickupView{ID: r.pickups[i].id, Kind: r.pickups[i].kind, Pos: r.pickups[i].pos})
 	}
 	s.Chests = s.Chests[:0]
 	for i := range r.chestDrops {

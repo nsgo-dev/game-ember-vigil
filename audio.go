@@ -133,7 +133,7 @@ func mapRunEventsToCues(events []Event, keeperDamaged bool) []soundCue {
 			}
 		case EventKill:
 			add(cueKill)
-		case EventEmber:
+		case EventEmber, EventMagnet:
 			add(cueEmber)
 		case EventLevelUp:
 			add(cueLevelUp)

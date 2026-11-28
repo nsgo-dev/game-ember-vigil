@@ -44,6 +44,8 @@ type Settings struct {
 	Language     evstrings.Lang `json:"language"`
 	// Stats is whether the game reports its use to Umami.
 	Stats bool `json:"stats"`
+	// ShowFPS is whether the canvas shows the frame rate in its corner.
+	ShowFPS bool `json:"showFPS"`
 }
 
 // Records holds lifetime best stats persisted across sessions.

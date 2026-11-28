@@ -629,9 +629,20 @@ func TestGloomwardenDropsHealCachePickup(t *testing.T) {
 	r.keeper.health = 40
 	r.enemies[0].hp = 0
 	stepOnce(r, Controls{})
-	if len(r.pickups) != 1 {
-		t.Fatalf("Gloomwarden left %d heal caches, want 1", len(r.pickups))
+	caches, magnets := 0, 0
+	for _, p := range r.pickups {
+		switch p.kind {
+		case PickupCache:
+			caches++
+		case PickupMagnet:
+			magnets++
+		}
 	}
+	if caches != 1 || magnets != 1 || len(r.pickups) != 2 {
+		t.Fatalf("Gloomwarden left %d heal caches and %d magnets of %d pickups, want 1 and 1 of 2", caches, magnets, len(r.pickups))
+	}
+	// Its embers would open a level-up before both are collected.
+	r.embers = r.embers[:0]
 	for range 60 {
 		stepOnce(r, Controls{})
 		if len(r.pickups) == 0 {
@@ -639,10 +650,61 @@ func TestGloomwardenDropsHealCachePickup(t *testing.T) {
 		}
 	}
 	if len(r.pickups) != 0 {
-		t.Fatal("keeper did not collect the heal cache")
+		t.Fatal("keeper did not collect the heal cache and the magnet")
 	}
 	if r.keeper.health <= 40 {
 		t.Fatalf("heal cache did not restore health: got %v, want > 40", r.keeper.health)
+	}
+}
+
+// TestFindsTurnUpNearTheKeeper checks that potions and magnets turn up near the keeper as data/run.yaml rolls them, never more of a kind than its most, and that a potion heals and a magnet pulls every ember in.
+func TestFindsTurnUpNearTheKeeper(t *testing.T) {
+	r := quietRun(t)
+	r.weaponLevels[r.data.starterWeapon] = 0
+	f := r.data.run.Finds
+	potions, magnets := 0, 0
+	// Stand still far from where the finds land, so none is collected while they are counted.
+	for range 30 * 60 * 60 {
+		r.keeper.health = r.stats.maxHealth
+		stepOnce(r, Controls{})
+		potions, magnets = 0, 0
+		for _, p := range r.pickups {
+			if d := p.pos.Sub(r.keeper.pos).Len(); d < f.Near-1e-9 || d > f.Far+1e-9 {
+				t.Fatalf("a find lies %v from the keeper, want %v to %v", d, f.Near, f.Far)
+			}
+			switch p.kind {
+			case PickupPotion:
+				potions++
+			case PickupMagnet:
+				magnets++
+			}
+		}
+		if potions > f.Potion.Most || magnets > f.Magnet.Most {
+			t.Fatalf("%d potions and %d magnets on the ground, want at most %d and %d", potions, magnets, f.Potion.Most, f.Magnet.Most)
+		}
+		if potions == f.Potion.Most && magnets == f.Magnet.Most {
+			break
+		}
+	}
+	if potions != f.Potion.Most || magnets != f.Magnet.Most {
+		t.Fatalf("after waiting, %d potions and %d magnets turned up, want %d and %d", potions, magnets, f.Potion.Most, f.Magnet.Most)
+	}
+
+	// A far ember waits until the magnet is picked up, then flies in.
+	r.embers = append(r.embers[:0], ember{pos: r.clampField(r.keeper.pos.Add(Vec2{X: 300}), 1), value: 1})
+	r.keeper.health = r.stats.maxHealth / 2
+	for range 2 * (f.Potion.Most + f.Magnet.Most) {
+		if len(r.pickups) == 0 {
+			break
+		}
+		r.keeper.pos = r.pickups[0].pos
+		stepOnce(r, Controls{})
+	}
+	if r.keeper.health <= r.stats.maxHealth/2 {
+		t.Fatalf("potions did not heal: health %v of %v", r.keeper.health, r.stats.maxHealth)
+	}
+	if len(r.embers) != 1 || !r.embers[0].attracted {
+		t.Fatal("the magnet did not set the far ember flying to the keeper")
 	}
 }
 

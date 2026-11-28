@@ -117,6 +117,8 @@ type emberVigil struct {
 	menuFocus      *core.Signal[int]
 	// stats reports the game's use while the saved settings allow it.
 	stats *usageStats
+	// fps measures the display's frame rate, which the canvas shows while the settings ask for it.
+	fps fpsMeter
 
 	// Per-run record guard so a finished run updates persisted records at most once.
 	runRecorded   bool
@@ -203,6 +205,7 @@ func newEmberVigil(cx *core.Scope) *emberVigil {
 		Rate:   rate,
 		Update: g.update,
 		FrameTime: func(dt time.Duration) {
+			g.fps.observe(dt)
 			if g.quality != nil && g.phase.GetUntracked() == phaseArena && g.run != nil && g.run.Snapshot().Phase == PhasePlaying {
 				g.quality.Observe(dt)
 			}
@@ -432,6 +435,8 @@ func (g *emberVigil) adjustFocusedSetting(delta int) {
 		g.cycleLanguage(delta)
 	case 6:
 		g.toggleStats()
+	case 7:
+		g.toggleFPS()
 	case settingsRowCount:
 		g.menuFocus.Set(settingsRowCount + 1)
 	case settingsRowCount + 1:
@@ -815,6 +820,10 @@ func (g *emberVigil) toggleStats() {
 	g.updateDraft(func(s *Settings) { s.Stats = !s.Stats })
 }
 
+func (g *emberVigil) toggleFPS() {
+	g.updateDraft(func(s *Settings) { s.ShowFPS = !s.ShowFPS })
+}
+
 func (g *emberVigil) setQuality(q Quality) {
 	g.updateDraft(func(s *Settings) { s.Quality = q })
 }
@@ -936,6 +945,8 @@ func (g *emberVigil) confirm() {
 			g.cycleLanguage(1)
 		case 6:
 			g.toggleStats()
+		case 7:
+			g.toggleFPS()
 		case settingsRowCount:
 			g.applySettings()
 		case settingsRowCount + 1:
@@ -1109,6 +1120,9 @@ func (g *emberVigil) draw(d *core.Drawing, size core.Size) {
 	if ph == phaseShop {
 		shop := &mustGameData().progression.Shop
 		drawShop(p, layoutShop(size, safe, len(shop.Items)), shopEntries(p.tr, shop, g.progress), g.progress.Embers, g.menuFocus.GetUntracked())
+	}
+	if g.settings.GetUntracked().ShowFPS {
+		drawFPS(p, size, safe, &g.fps)
 	}
 }
 
