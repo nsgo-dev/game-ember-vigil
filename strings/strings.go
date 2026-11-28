@@ -33,6 +33,13 @@ type CardCopy struct {
 	Description string
 }
 
+// EvolutionCopy holds the localized name and description of an evolved weapon, and the collection's hint at its recipe before it is made.
+type EvolutionCopy struct {
+	Name        string
+	Description string
+	Hint        string
+}
+
 // Table holds every player-facing string for one language.
 type Table struct {
 	// Title & app
@@ -41,6 +48,7 @@ type Table struct {
 	ArenaLabel    string
 	Start         string
 	Settings      string
+	Collection    string
 	Quit          string
 	BestRecords   string
 	NoRecordsYet  string
@@ -67,6 +75,15 @@ type Table struct {
 	KindPassive string
 	KindHeal    string
 	Cards       map[string]CardCopy
+
+	// Chests and evolution: the flourish's words, the collection's heading, an unmade recipe's name, how many are made and the sign joining a weapon and its passive.
+	Evolved           string
+	FreeCard          string
+	CollectionTitle   string
+	CollectionUnknown string
+	CollectionMadeFmt string
+	RecipeSeparator   string
+	Evolutions        map[string]EvolutionCopy
 
 	// Pause & quit confirmation
 	Paused           string
@@ -200,6 +217,19 @@ func (t Table) Card(id, fallbackName, fallbackDesc string) CardCopy {
 		return c
 	}
 	return CardCopy{Name: fallbackName, Description: fallbackDesc}
+}
+
+// Evolution returns the localized copy of an evolution id, falling back to the raw strings.
+func (t Table) Evolution(id, fallbackName, fallbackDesc, fallbackHint string) EvolutionCopy {
+	if c, ok := t.Evolutions[id]; ok {
+		return c
+	}
+	return EvolutionCopy{Name: fallbackName, Description: fallbackDesc, Hint: fallbackHint}
+}
+
+// CollectionMade formats how many recipes of total are made, such as "Made 1/4".
+func (t Table) CollectionMade(n, total int) string {
+	return t.CollectionMadeFmt + strconv.Itoa(n) + "/" + strconv.Itoa(total)
 }
 
 // DecreaseLabel builds an accessible label for decreasing a setting value.

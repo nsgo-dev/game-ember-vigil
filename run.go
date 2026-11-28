@@ -18,6 +18,7 @@ const (
 	maxPickups    = 32
 	maxPatches    = 64
 	maxPulses     = 16
+	maxChests     = 16
 	maxEvents     = 256
 	maxShotHits   = 8
 )
@@ -75,6 +76,8 @@ const (
 	PhaseVictory
 	// PhaseDefeat is a finished run where the keeper ran out of health.
 	PhaseDefeat
+	// PhaseChest holds the run still while an opened chest shows what it gave, then plays on or offers its free card.
+	PhaseChest
 )
 
 // EventKind is what an event reports.
@@ -99,6 +102,10 @@ const (
 	EventVictory
 	// EventDefeat is the keeper running out of health.
 	EventDefeat
+	// EventChest is the keeper opening a chest.
+	EventChest
+	// EventEvolve is a chest evolving the weapon whose position in data/weapons.yaml is Value.
+	EventEvolve
 )
 
 // Event is one thing a step did, which the shell turns into a sound, a flash or a screen. It names entities by id and positions in world units, never by pointers into the run.
@@ -155,6 +162,9 @@ type enemy struct {
 	// Per-target weapon cooldowns so lingering weapons do not tick every step.
 	haloHit  float64
 	trailHit float64
+	// chest is whether it drops a chest, and stun how many seconds Dawn Bell still holds it still.
+	chest bool
+	stun  float64
 }
 
 // Enemy projectile kinds, which art.go draws distinctly.
@@ -180,6 +190,22 @@ type pickup struct {
 	pos          Vec2
 	healFraction float64
 	attracted    bool
+}
+
+// chest is a chest an elite left, which the keeper opens by walking over it.
+type chest struct {
+	id  uint64
+	pos Vec2
+}
+
+// chestOpening is the chest the run holds still for, and the weapon it evolved, or -1 when it gives a free card instead.
+type chestOpening struct {
+	id     uint64
+	pos    Vec2
+	weapon int
+	card   bool
+	left   float64
+	max    float64
 }
 
 // bossAction is the Hollow King's current state in its attack cycle.
@@ -221,6 +247,9 @@ type shot struct {
 	pierceLeft int
 	hitIDs     [maxShotHits]uint64
 	hitCount   int
+	// split is how many small shots a Starfall Volley shot breaks into on each hit, 0 for a shot that does not, and small whether it is one of them.
+	split int
+	small bool
 }
 
 func (s *shot) alreadyHit(id uint64) bool {
@@ -255,6 +284,8 @@ type patch struct {
 	tick   float64
 	life   float64
 	max    float64
+	// wild marks a Wildfire Path patch, which merges with the wild patches it touches.
+	wild bool
 }
 
 // pulse is one expanding shockwave ring from Bell Toll.
@@ -264,6 +295,7 @@ type pulse struct {
 	radius float64
 	life   float64
 	max    float64
+	dawn   bool
 }
 
 // Run is one run of the game, simulated headlessly: no views, devices, sound or storage, and no wall clock. The shell steps it one fixed step at a time and draws what its snapshot and events say.
@@ -281,7 +313,9 @@ type Run struct {
 	phase Phase
 	time  float64
 
-	keeper          keeper
+	keeper keeper
+	// heading is the last direction the keeper moved, which Wildfire Path spreads across.
+	heading         Vec2
 	stats           stats
 	weaponCooldowns []float64
 	haloAngle       float64
@@ -296,6 +330,7 @@ type Run struct {
 	shadows    []shadow
 	// shadowTick is how long until a shadow zone the keeper stands in hurts again.
 	shadowTick float64
+	chestDrops []chest
 
 	boss     bossState
 	director director
@@ -305,6 +340,11 @@ type Run struct {
 	weaponLevels  []int
 	passiveLevels []int
 	offersNow     []offer
+	// evolution is whether chests may evolve weapons, evolved which weapons have, in weapons order, and made the evolution ids this run made, in order.
+	evolution bool
+	evolved   []bool
+	made      []string
+	opening   chestOpening
 
 	xp     float64
 	level  int
@@ -350,6 +390,9 @@ func newRunWith(d *gameData, seed uint64, tier int) *Run {
 		patches:         make([]patch, 0, maxPatches),
 		pulses:          make([]pulse, 0, maxPulses),
 		shadows:         make([]shadow, 0, maxShadows),
+		chestDrops:      make([]chest, 0, maxChests),
+		evolved:         make([]bool, len(d.weapons.Weapons)),
+		heading:         Vec2{X: 1},
 	}
 	if len(r.weaponLevels) > 0 {
 		r.weaponLevels[d.starterWeapon] = 1
@@ -366,9 +409,19 @@ func newRunWith(d *gameData, seed uint64, tier int) *Run {
 	return r
 }
 
+// EnableEvolution lets the run's chests evolve weapons, as the player's first win unlocks. The shell calls it before the first step; a replay must call it the same way.
+func (r *Run) EnableEvolution() { r.evolution = true }
+
+// Evolutions returns the ids of the evolutions this run has made, in the order it made them.
+func (r *Run) Evolutions() []string { return r.made }
+
 // Step advances the run by exactly one 60 Hz step. dt is the loop's step length: a run never scales with it, and a step that is not positive does nothing, so a display frame cannot change the simulation. While a level-up waits for a Choose the run holds still.
 func (r *Run) Step(dt time.Duration, controls Controls) {
 	r.events = r.events[:0]
+	if dt > 0 && r.phase == PhaseChest {
+		r.holdChest()
+		return
+	}
 	if dt <= 0 || r.phase != PhasePlaying {
 		return
 	}
@@ -380,6 +433,9 @@ func (r *Run) Step(dt time.Duration, controls Controls) {
 	}
 	if l2 := move.LenSq(); l2 > 1 {
 		move = move.Scale(1 / math.Sqrt(l2))
+	}
+	if move.LenSq() > 1e-6 {
+		r.heading = move.Normalized()
 	}
 	r.keeper.pos = r.clampField(r.keeper.pos.Add(move.Scale(r.stats.moveSpeed*stepSeconds)), r.data.run.Keeper.Radius)
 	r.keeper.invuln = math.Max(0, r.keeper.invuln-stepSeconds)
@@ -393,6 +449,7 @@ func (r *Run) Step(dt time.Duration, controls Controls) {
 		e := &r.enemies[i]
 		e.haloHit = math.Max(0, e.haloHit-stepSeconds)
 		e.trailHit = math.Max(0, e.trailHit-stepSeconds)
+		e.stun = math.Max(0, e.stun-stepSeconds)
 	}
 	r.tickPulses()
 
@@ -425,8 +482,80 @@ func (r *Run) Step(dt time.Duration, controls Controls) {
 		r.defeat()
 		return
 	}
+	if r.openChests() {
+		r.time += stepSeconds
+		return
+	}
 	r.fillLevel()
 	r.time += stepSeconds
+}
+
+// openChests opens the first chest the keeper touches and holds the run for it: it evolves the first eligible weapon, or else offers a free card when the hold ends. It reports whether a chest opened.
+func (r *Run) openChests() bool {
+	reach := r.data.run.Keeper.Radius + r.data.run.Chest.Radius
+	for i := range r.chestDrops {
+		c := r.chestDrops[i]
+		if c.pos.Sub(r.keeper.pos).LenSq() > reach*reach {
+			continue
+		}
+		last := len(r.chestDrops) - 1
+		r.chestDrops[i] = r.chestDrops[last]
+		r.chestDrops = r.chestDrops[:last]
+		r.chests++
+		cfg := r.data.run.Chest
+		r.opening = chestOpening{id: c.id, pos: c.pos, weapon: r.evolvable(), left: cfg.Hold}
+		r.emit(Event{Kind: EventChest, ID: c.id, Pos: c.pos})
+		if w := r.opening.weapon; w >= 0 {
+			r.evolved[w] = true
+			r.made = append(r.made, r.data.weapons.Weapons[w].Evolution.ID)
+			r.opening.left = cfg.EvolveHold
+			r.emit(Event{Kind: EventEvolve, ID: c.id, Pos: c.pos, Value: float64(w)})
+		} else {
+			r.opening.card = true
+		}
+		r.opening.max = r.opening.left
+		r.phase = PhaseChest
+		return true
+	}
+	return false
+}
+
+// evolvable returns the first weapon, in data order, that a chest may evolve now: evolution is unlocked, the weapon is at its last level and not yet evolved, and the keeper holds its paired passive. It returns -1 when none is.
+func (r *Run) evolvable() int {
+	if !r.evolution {
+		return -1
+	}
+	for i := range r.data.weapons.Weapons {
+		w := &r.data.weapons.Weapons[i]
+		p := r.data.evolutionPassive[i]
+		if w.Evolution != nil && !r.evolved[i] && r.weaponLevels[i] == len(w.Levels) && p >= 0 && r.passiveLevels[p] > 0 {
+			return i
+		}
+	}
+	return -1
+}
+
+// holdChest counts an opened chest's hold down, then plays on, or offers the free card of a chest that evolved nothing.
+func (r *Run) holdChest() {
+	r.opening.left -= stepSeconds
+	if r.opening.left > 0 {
+		return
+	}
+	r.phase = PhasePlaying
+	if r.opening.card {
+		r.offersNow = r.drawOffers()
+		r.phase = PhaseLevelUp
+		r.emit(Event{Kind: EventLevelUp, Value: float64(r.level)})
+	}
+	r.opening = chestOpening{}
+}
+
+// evolutionOf returns weapon i's evolution when the run has evolved it, or nil.
+func (r *Run) evolutionOf(i int) *evolutionDef {
+	if !r.evolved[i] {
+		return nil
+	}
+	return r.data.weapons.Weapons[i].Evolution
 }
 
 // Choose takes one of the three cards a level-up offered, applies it and resumes the run.
@@ -465,6 +594,12 @@ func (r *Run) emit(e Event) {
 // moveEnemy walks e according to its motion kind, fires ranged or orbiting shots when ready, and lets its knockback fade.
 func (r *Run) moveEnemy(e *enemy) {
 	if e.isBoss {
+		return
+	}
+	if e.stun > 0 {
+		// A stunned foe stands still, sliding only as its knockback fades.
+		e.pos = r.clamp(e.pos.Add(e.knockback.Scale(stepSeconds)), e.radius)
+		e.knockback = e.knockback.Scale(math.Exp(-r.data.weapons.KnockbackDrag * stepSeconds))
 		return
 	}
 	to := r.keeper.pos.Sub(e.pos)
@@ -791,6 +926,9 @@ func (r *Run) moveShots() {
 			}
 			r.hitEnemy(j, s.damage, s.knockback, e.pos.Sub(s.pos), s.vel)
 			s.recordHit(e.id)
+			if s.split > 0 {
+				r.splitShot(s, e.pos, e.id)
+			}
 			if s.pierceLeft > 0 {
 				s.pierceLeft--
 				return true
@@ -806,6 +944,45 @@ func (r *Run) moveShots() {
 		r.shots[i] = r.shots[last]
 		r.shots = r.shots[:last]
 	}
+}
+
+// splitShot breaks a Starfall Volley shot into its small shots where it struck the enemy id at pos, fanned around its heading; they never strike that enemy, nor split again. The shots slice keeps its capacity, so s stays valid.
+func (r *Run) splitShot(s *shot, pos Vec2, id uint64) {
+	i := r.boltIndex()
+	evo := r.evolutionOf(i)
+	if evo == nil {
+		return
+	}
+	w := &r.data.weapons.Weapons[i]
+	dir := s.vel.Normalized()
+	for k := range s.split {
+		if len(r.shots) >= maxShots {
+			return
+		}
+		angle := (float64(k) - float64(s.split-1)/2) * evo.SplitSpread
+		small := shot{
+			id:        r.takeID(),
+			pos:       pos,
+			vel:       dir.Rotated(angle).Scale(w.ShotSpeed),
+			damage:    s.damage * evo.SplitDamage,
+			radius:    evo.SplitRadius * r.stats.areaMul,
+			knockback: s.knockback * evo.SplitDamage,
+			life:      evo.SplitLife,
+			small:     true,
+		}
+		small.recordHit(id)
+		r.shots = append(r.shots, small)
+	}
+}
+
+// boltIndex returns the position of the first bolt weapon in data/weapons.yaml.
+func (r *Run) boltIndex() int {
+	for i := range r.data.weapons.Weapons {
+		if r.data.weapons.Weapons[i].Kind == weaponBolt {
+			return i
+		}
+	}
+	return 0
 }
 
 // moveEnemyShots flies enemy projectiles, hurts the keeper on contact when not invulnerable, and removes spent shots.
@@ -875,15 +1052,20 @@ func (r *Run) stepWeapons() {
 		}
 		w := &r.data.weapons.Weapons[i]
 		lvl := &w.Levels[level-1]
+		evo := r.evolutionOf(i)
 		switch w.Kind {
 		case weaponBolt:
-			r.stepBolt(i, w, lvl)
+			r.stepBolt(i, w, lvl, evo)
 		case weaponHalo:
-			r.stepHalo(w, lvl)
+			if evo != nil {
+				r.stepRing(w, lvl, evo)
+			} else {
+				r.stepHalo(w, lvl)
+			}
 		case weaponTrail:
-			r.stepTrail(i, w, lvl)
+			r.stepTrail(i, w, lvl, evo)
 		case weaponBell:
-			r.stepBell(i, w, lvl)
+			r.stepBell(i, w, lvl, evo)
 		}
 	}
 }
@@ -894,7 +1076,7 @@ func (r *Run) weaponCooldown(w *weaponDef, base float64) float64 {
 }
 
 // stepBolt fires Ember Bolt at the nearest enemy in range once its cooldown has run out.
-func (r *Run) stepBolt(index int, w *weaponDef, lvl *weaponLevelDef) {
+func (r *Run) stepBolt(index int, w *weaponDef, lvl *weaponLevelDef, evo *evolutionDef) {
 	if r.weaponCooldowns[index] > 0 || len(r.shots) >= maxShots {
 		return
 	}
@@ -907,6 +1089,11 @@ func (r *Run) stepBolt(index int, w *weaponDef, lvl *weaponLevelDef) {
 		dir = Vec2{X: 1}
 	}
 	damage := lvl.Damage * r.stats.damageMul
+	split := 0
+	if evo != nil {
+		damage *= evo.Damage
+		split = evo.Split
+	}
 	radius := w.ShotRadius * r.stats.areaMul
 	fired := false
 	for k := range lvl.Count {
@@ -925,6 +1112,7 @@ func (r *Run) stepBolt(index int, w *weaponDef, lvl *weaponLevelDef) {
 			knockback:  lvl.Knockback,
 			life:       w.ShotLife,
 			pierceLeft: lvl.Pierce,
+			split:      split,
 		})
 		r.emit(Event{Kind: EventShot, ID: id, Pos: r.keeper.pos})
 		fired = true
@@ -961,21 +1149,90 @@ func (r *Run) stepHalo(w *weaponDef, lvl *weaponLevelDef) {
 	}
 }
 
-// stepTrail drops a burning patch at the keeper's feet when Cinder Trail's cooldown is ready.
-func (r *Run) stepTrail(index int, w *weaponDef, lvl *weaponLevelDef) {
+// stepRing burns every enemy inside Sun Ring's band around the keeper, the halo's orbs joined into one ring at their orbit.
+func (r *Run) stepRing(w *weaponDef, lvl *weaponLevelDef, evo *evolutionDef) {
+	r.haloAngle = math.Mod(r.haloAngle+w.OrbitSpeed*stepSeconds, 2*math.Pi)
+	orbit := lvl.Radius * r.stats.areaMul
+	half := evo.Width * r.stats.areaMul / 2
+	damage := lvl.Damage * r.stats.damageMul * evo.Damage
+	perTarget := r.weaponCooldown(w, lvl.Cooldown)
+	r.grid.nearby(r.keeper.pos, orbit+half+r.maxRadius, func(j int) bool {
+		e := &r.enemies[j]
+		if e.haloHit > 0 {
+			return true
+		}
+		d := e.pos.Sub(r.keeper.pos)
+		if math.Abs(d.Len()-orbit) > half+e.radius {
+			return true
+		}
+		r.hitEnemy(j, damage, lvl.Knockback, d, Vec2{X: 1})
+		e.haloHit = perTarget
+		return true
+	})
+}
+
+// stepTrail drops a burning patch at the keeper's feet when Cinder Trail's cooldown is ready; Wildfire Path drops one to each side as well, merging each with the wild patches it touches.
+func (r *Run) stepTrail(index int, w *weaponDef, lvl *weaponLevelDef, evo *evolutionDef) {
 	if r.weaponCooldowns[index] > 0 || len(r.patches) >= maxPatches {
 		return
 	}
-	r.patches = append(r.patches, patch{
-		id:     r.takeID(),
+	p := patch{
 		pos:    r.keeper.pos,
 		radius: lvl.Radius * r.stats.areaMul,
 		damage: lvl.Damage * r.stats.damageMul,
 		tick:   r.weaponCooldown(w, lvl.Tick),
 		life:   lvl.Duration,
 		max:    lvl.Duration,
-	})
+	}
+	if evo == nil {
+		p.id = r.takeID()
+		r.patches = append(r.patches, p)
+	} else {
+		p.damage *= evo.Damage
+		p.wild = true
+		side := Vec2{X: -r.heading.Y, Y: r.heading.X}.Scale(evo.Spread * r.stats.areaMul)
+		maxRadius := evo.MaxRadius * r.stats.areaMul
+		for _, at := range [3]Vec2{r.keeper.pos, r.keeper.pos.Add(side), r.keeper.pos.Sub(side)} {
+			p.pos = r.clamp(at, 0)
+			r.spreadPatch(p, maxRadius)
+		}
+	}
 	r.weaponCooldowns[index] = r.weaponCooldown(w, lvl.Cooldown)
+}
+
+// spreadPatch merges a Wildfire Path patch into the first wild patch it touches when the circle around both stays within maxRadius, or else lays it down on its own.
+func (r *Run) spreadPatch(p patch, maxRadius float64) {
+	for i := range r.patches {
+		q := &r.patches[i]
+		if !q.wild {
+			continue
+		}
+		to := p.pos.Sub(q.pos)
+		d := to.Len()
+		if d > p.radius+q.radius {
+			continue
+		}
+		outer := math.Max(math.Max(q.radius, p.radius), (d+p.radius+q.radius)/2)
+		if outer > maxRadius {
+			continue
+		}
+		switch {
+		case d+p.radius <= q.radius:
+		case d+q.radius <= p.radius:
+			q.pos = p.pos
+		default:
+			q.pos = q.pos.Add(to.Scale((outer - q.radius) / d))
+		}
+		q.radius = outer
+		q.damage = math.Max(q.damage, p.damage)
+		q.life = math.Max(q.life, p.life)
+		q.max = math.Max(q.max, p.max)
+		return
+	}
+	if len(r.patches) < maxPatches {
+		p.id = r.takeID()
+		r.patches = append(r.patches, p)
+	}
 }
 
 // stepPatches burns enemies standing in active ground patches and removes expired ones.
@@ -1007,12 +1264,16 @@ func (r *Run) stepPatches() {
 }
 
 // stepBell rings Bell Toll, damaging and knocking back every enemy within its pulse radius.
-func (r *Run) stepBell(index int, w *weaponDef, lvl *weaponLevelDef) {
+func (r *Run) stepBell(index int, w *weaponDef, lvl *weaponLevelDef, evo *evolutionDef) {
 	if r.weaponCooldowns[index] > 0 {
 		return
 	}
 	radius := lvl.Radius * r.stats.areaMul
 	damage := lvl.Damage * r.stats.damageMul
+	if evo != nil {
+		damage *= evo.Damage
+		r.keeper.health = math.Min(r.stats.maxHealth, r.keeper.health+evo.Heal)
+	}
 	r.grid.nearby(r.keeper.pos, radius+r.maxRadius, func(j int) bool {
 		e := &r.enemies[j]
 		reach := radius + e.radius
@@ -1021,6 +1282,9 @@ func (r *Run) stepBell(index int, w *weaponDef, lvl *weaponLevelDef) {
 			return true
 		}
 		r.hitEnemy(j, damage, lvl.Knockback, d, Vec2{X: 1})
+		if evo != nil && !e.isBoss {
+			e.stun = math.Max(e.stun, evo.Stun)
+		}
 		return true
 	})
 	id := r.takeID()
@@ -1031,6 +1295,7 @@ func (r *Run) stepBell(index int, w *weaponDef, lvl *weaponLevelDef) {
 			radius: radius,
 			life:   w.Duration,
 			max:    w.Duration,
+			dawn:   evo != nil,
 		})
 	}
 	r.emit(Event{Kind: EventShot, ID: id, Pos: r.keeper.pos, Value: radius})
@@ -1096,6 +1361,9 @@ func (r *Run) reap() {
 			r.leaveShadow(dead.pos)
 		}
 		r.dropEmbers(&dead)
+		if dead.chest && len(r.chestDrops) < maxChests {
+			r.chestDrops = append(r.chestDrops, chest{id: r.takeID(), pos: r.clampField(dead.pos, r.data.run.Chest.Radius)})
+		}
 		if dead.healDrop > 0 && len(r.pickups) < maxPickups {
 			r.pickups = append(r.pickups, pickup{
 				id:           r.takeID(),
@@ -1305,14 +1573,18 @@ type Snapshot struct {
 	EnemyShots []EnemyShotView `json:"enemyShots"`
 	Embers     []EmberView     `json:"embers"`
 	Pickups    []PickupView    `json:"pickups"`
-	Halo       []HaloOrbView   `json:"halo"`
-	Patches    []PatchView     `json:"patches"`
-	Pulses     []PulseView     `json:"pulses"`
-	Shadows    []ShadowView    `json:"shadows"`
-	Boss       BossView        `json:"boss"`
-	Weapons    []SlotView      `json:"weapons"`
-	Passives   []SlotView      `json:"passives"`
-	Offers     []OfferView     `json:"offers"`
+	Chests     []ChestView     `json:"chests"`
+	// Opening is the chest the run holds still for while its phase is PhaseChest.
+	Opening  OpeningView   `json:"opening"`
+	Halo     []HaloOrbView `json:"halo"`
+	Ring     RingView      `json:"ring"`
+	Patches  []PatchView   `json:"patches"`
+	Pulses   []PulseView   `json:"pulses"`
+	Shadows  []ShadowView  `json:"shadows"`
+	Boss     BossView      `json:"boss"`
+	Weapons  []SlotView    `json:"weapons"`
+	Passives []SlotView    `json:"passives"`
+	Offers   []OfferView   `json:"offers"`
 }
 
 // EnemyView is one enemy as a snapshot shows it.
@@ -1321,17 +1593,19 @@ type EnemyView struct {
 	Kind      string  `json:"kind"`
 	Elite     bool    `json:"elite,omitempty"`
 	Boss      bool    `json:"boss,omitempty"`
+	Stunned   bool    `json:"stunned,omitempty"`
 	Pos       Vec2    `json:"pos"`
 	Radius    float64 `json:"radius"`
 	Health    float64 `json:"health"`
 	MaxHealth float64 `json:"maxHealth"`
 }
 
-// ShotView is one shot as a snapshot shows it.
+// ShotView is one shot as a snapshot shows it; Small marks one of the small shots a Starfall Volley shot splits into.
 type ShotView struct {
 	ID     uint64  `json:"id"`
 	Pos    Vec2    `json:"pos"`
 	Radius float64 `json:"radius"`
+	Small  bool    `json:"small,omitempty"`
 }
 
 // EnemyShotView is one enemy projectile as a snapshot shows it.
@@ -1352,6 +1626,31 @@ type EmberView struct {
 type PickupView struct {
 	ID  uint64 `json:"id"`
 	Pos Vec2   `json:"pos"`
+}
+
+// ChestView is one chest waiting on the ground.
+type ChestView struct {
+	ID  uint64 `json:"id"`
+	Pos Vec2   `json:"pos"`
+}
+
+// OpeningView is the chest being opened: how far its hold has run, from 0 to 1, and the weapon it evolved, whose evolved name it carries, or none when it gives a free card.
+type OpeningView struct {
+	Active   bool    `json:"active,omitempty"`
+	ID       uint64  `json:"id,omitempty"`
+	Pos      Vec2    `json:"pos,omitempty"`
+	Progress float64 `json:"progress,omitempty"`
+	Evolved  string  `json:"evolved,omitempty"`
+	Name     string  `json:"name,omitempty"`
+}
+
+// RingView is Sun Ring's burning ring around the keeper, at the halo's orbit, Width wide and turned by Angle.
+type RingView struct {
+	Active bool    `json:"active,omitempty"`
+	Pos    Vec2    `json:"pos,omitempty"`
+	Radius float64 `json:"radius,omitempty"`
+	Width  float64 `json:"width,omitempty"`
+	Angle  float64 `json:"angle,omitempty"`
 }
 
 // BossView is the Hollow King's status and active attack telegraph for the HUD and arena renderer.
@@ -1385,6 +1684,7 @@ type PatchView struct {
 	Radius float64 `json:"radius"`
 	Life   float64 `json:"life"`
 	Max    float64 `json:"max"`
+	Wild   bool    `json:"wild,omitempty"`
 }
 
 // PulseView is one expanding Bell Toll shockwave ring.
@@ -1394,14 +1694,16 @@ type PulseView struct {
 	Radius float64 `json:"radius"`
 	Life   float64 `json:"life"`
 	Max    float64 `json:"max"`
+	Dawn   bool    `json:"dawn,omitempty"`
 }
 
-// SlotView is one owned weapon or passive slot in the keeper's build.
+// SlotView is one owned weapon or passive slot in the keeper's build; an evolved weapon shows its evolution's id and name.
 type SlotView struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
 	Level    int    `json:"level"`
 	MaxLevel int    `json:"maxLevel"`
+	Evolved  bool   `json:"evolved,omitempty"`
 }
 
 // OfferView is one level-up card as a snapshot shows it.
@@ -1448,6 +1750,7 @@ func (r *Run) Snapshot() Snapshot {
 			Kind:      name,
 			Elite:     e.elite,
 			Boss:      e.isBoss,
+			Stunned:   e.stun > 0,
 			Pos:       e.pos,
 			Radius:    e.radius,
 			Health:    e.hp,
@@ -1457,7 +1760,7 @@ func (r *Run) Snapshot() Snapshot {
 	s.Shots = s.Shots[:0]
 	for i := range r.shots {
 		sh := &r.shots[i]
-		s.Shots = append(s.Shots, ShotView{ID: sh.id, Pos: sh.pos, Radius: sh.radius})
+		s.Shots = append(s.Shots, ShotView{ID: sh.id, Pos: sh.pos, Radius: sh.radius, Small: sh.small})
 	}
 	s.EnemyShots = s.EnemyShots[:0]
 	for i := range r.enemyShots {
@@ -1471,6 +1774,19 @@ func (r *Run) Snapshot() Snapshot {
 	s.Pickups = s.Pickups[:0]
 	for i := range r.pickups {
 		s.Pickups = append(s.Pickups, PickupView{ID: r.pickups[i].id, Pos: r.pickups[i].pos})
+	}
+	s.Chests = s.Chests[:0]
+	for i := range r.chestDrops {
+		s.Chests = append(s.Chests, ChestView{ID: r.chestDrops[i].id, Pos: r.chestDrops[i].pos})
+	}
+	s.Opening = OpeningView{}
+	if r.phase == PhaseChest {
+		o := &r.opening
+		s.Opening = OpeningView{Active: true, ID: o.id, Pos: o.pos, Progress: 1 - math.Max(0, o.left)/math.Max(o.max, 1e-9)}
+		if o.weapon >= 0 {
+			evo := r.data.weapons.Weapons[o.weapon].Evolution
+			s.Opening.Evolved, s.Opening.Name = evo.ID, evo.Name
+		}
 	}
 	s.Boss = BossView{}
 	if r.boss.active {
@@ -1512,6 +1828,7 @@ func (r *Run) Snapshot() Snapshot {
 		}
 	}
 	s.Halo = s.Halo[:0]
+	s.Ring = RingView{}
 	for i := range r.data.weapons.Weapons {
 		level := r.weaponLevels[i]
 		if level <= 0 || r.data.weapons.Weapons[i].Kind != weaponHalo {
@@ -1520,6 +1837,10 @@ func (r *Run) Snapshot() Snapshot {
 		w := &r.data.weapons.Weapons[i]
 		lvl := &w.Levels[level-1]
 		orbit := lvl.Radius * r.stats.areaMul
+		if evo := r.evolutionOf(i); evo != nil {
+			s.Ring = RingView{Active: true, Pos: r.keeper.pos, Radius: orbit, Width: evo.Width * r.stats.areaMul, Angle: r.haloAngle}
+			continue
+		}
 		orbRadius := w.OrbRadius * r.stats.areaMul
 		step := 2 * math.Pi / float64(lvl.Count)
 		for k := range lvl.Count {
@@ -1531,12 +1852,12 @@ func (r *Run) Snapshot() Snapshot {
 	s.Patches = s.Patches[:0]
 	for i := range r.patches {
 		p := &r.patches[i]
-		s.Patches = append(s.Patches, PatchView{ID: p.id, Pos: p.pos, Radius: p.radius, Life: p.life, Max: p.max})
+		s.Patches = append(s.Patches, PatchView{ID: p.id, Pos: p.pos, Radius: p.radius, Life: p.life, Max: p.max, Wild: p.wild})
 	}
 	s.Pulses = s.Pulses[:0]
 	for i := range r.pulses {
 		p := &r.pulses[i]
-		s.Pulses = append(s.Pulses, PulseView{ID: p.id, Pos: p.pos, Radius: p.radius, Life: p.life, Max: p.max})
+		s.Pulses = append(s.Pulses, PulseView{ID: p.id, Pos: p.pos, Radius: p.radius, Life: p.life, Max: p.max, Dawn: p.dawn})
 	}
 	s.Shadows = s.Shadows[:0]
 	for i := range r.shadows {
@@ -1547,7 +1868,11 @@ func (r *Run) Snapshot() Snapshot {
 	for i := range r.data.weapons.Weapons {
 		if lvl := r.weaponLevels[i]; lvl > 0 {
 			w := &r.data.weapons.Weapons[i]
-			s.Weapons = append(s.Weapons, SlotView{ID: w.ID, Name: w.Name, Level: lvl, MaxLevel: len(w.Levels)})
+			slot := SlotView{ID: w.ID, Name: w.Name, Level: lvl, MaxLevel: len(w.Levels)}
+			if evo := r.evolutionOf(i); evo != nil {
+				slot.ID, slot.Name, slot.Evolved = evo.ID, evo.Name, true
+			}
+			s.Weapons = append(s.Weapons, slot)
 		}
 	}
 	s.Passives = s.Passives[:0]

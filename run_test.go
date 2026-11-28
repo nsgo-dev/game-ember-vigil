@@ -709,16 +709,6 @@ func TestHollowKingPhasesAttacksAndVictory(t *testing.T) {
 	}
 }
 
-// hasEvent reports whether events holds one of kind.
-func hasEvent(events []Event, kind EventKind) bool {
-	for _, e := range events {
-		if e.Kind == kind {
-			return true
-		}
-	}
-	return false
-}
-
 // TestKeeperAndDropsStayOutOfTheFog checks that the keeper cannot walk into the fog of war, while enemies may roam it and leave their embers inside the field.
 func TestKeeperAndDropsStayOutOfTheFog(t *testing.T) {
 	r := quietRun(t)

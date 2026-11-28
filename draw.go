@@ -224,6 +224,7 @@ type arenaRenderer struct {
 	enemyShots []actor
 	embers     []actor
 	pickups    []actor
+	chests     []actor
 	halo       []actor
 	patches    []PatchView
 	pulses     []PulseView
@@ -231,6 +232,10 @@ type arenaRenderer struct {
 	boss       BossView
 	// sight is how far the keeper sees through the fog, as a fraction of the base run's, which a Long Night tier shortens.
 	sight float64
+	// opening is the chest the run holds still for, ring Sun Ring's burning ring, and stunned the stunned enemies' indices in enemies.
+	opening OpeningView
+	ring    RingView
+	stunned []int
 
 	// before holds where each id was last step so a frame between steps can blend; spare is the map the next step fills, swapped in when it is done.
 	before, spare map[uint64]prevState
@@ -255,6 +260,8 @@ type arenaRenderer struct {
 	sheetBatch   sprite.Batch
 	patchBatch   sprite.Batch
 	pulseBatch   sprite.Batch
+	ringBatch    sprite.Batch
+	ringSprites  []*sprite.Sprite
 	sheetSprites []*sprite.Sprite
 	patchSprites []*sprite.Sprite
 	pulseSprites []*sprite.Sprite
@@ -302,6 +309,10 @@ func (r *arenaRenderer) startRun(seed uint64) {
 	r.enemyShots = r.enemyShots[:0]
 	r.embers = r.embers[:0]
 	r.pickups = r.pickups[:0]
+	r.chests = r.chests[:0]
+	r.opening = OpeningView{}
+	r.ring = RingView{}
+	r.stunned = r.stunned[:0]
 	r.halo = r.halo[:0]
 	r.patches = r.patches[:0]
 	r.pulses = r.pulses[:0]
@@ -406,6 +417,7 @@ func (r *arenaRenderer) sync(s Snapshot, events []Event, dt float64) {
 	r.trackShots(s)
 	r.trackEnemyShots(s)
 	r.trackPickups(s)
+	r.trackChests(s)
 	r.before, r.spare = r.spare, r.before
 	r.trackEmbers(s)
 	r.trackHalo(s)
@@ -414,6 +426,14 @@ func (r *arenaRenderer) sync(s Snapshot, events []Event, dt float64) {
 	r.shadows = append(r.shadows[:0], s.Shadows...)
 	r.sight = s.Sight
 	r.boss = s.Boss
+	r.opening = s.Opening
+	r.ring = s.Ring
+	r.stunned = r.stunned[:0]
+	for i := range s.Enemies {
+		if s.Enemies[i].Stunned {
+			r.stunned = append(r.stunned, i)
+		}
+	}
 	if s.Phase == PhasePlaying && dt > 0 {
 		stepDur := time.Duration(math.Round(dt * float64(time.Second)))
 		r.animTime += stepDur
@@ -483,7 +503,12 @@ func (r *arenaRenderer) trackEnemies(s Snapshot) {
 func (r *arenaRenderer) trackShots(s Snapshot) {
 	r.shots = growActors(r.shots, len(s.Shots))
 	for i, sh := range s.Shots {
-		r.shots[i] = r.tracked(r.shots[i], sh.ID, 0, sh.Radius, sh.Pos, true)
+		// A small Starfall Volley shot draws as kind shotSmall.
+		kind := 0
+		if sh.Small {
+			kind = shotSmall
+		}
+		r.shots[i] = r.tracked(r.shots[i], sh.ID, kind, sh.Radius, sh.Pos, true)
 	}
 }
 
@@ -492,6 +517,14 @@ func (r *arenaRenderer) trackEnemyShots(s Snapshot) {
 	r.enemyShots = growActors(r.enemyShots, len(s.EnemyShots))
 	for i, sh := range s.EnemyShots {
 		r.enemyShots[i] = r.tracked(r.enemyShots[i], sh.ID, int(sh.Kind), sh.Radius, sh.Pos, true)
+	}
+}
+
+// trackChests copies the chests waiting on the ground, which stay where they fell.
+func (r *arenaRenderer) trackChests(s Snapshot) {
+	r.chests = growActors(r.chests, len(s.Chests))
+	for i, c := range s.Chests {
+		r.chests[i] = r.tracked(r.chests[i], c.ID, 0, 0, c.Pos, true)
 	}
 }
 
@@ -678,6 +711,18 @@ func (r *arenaRenderer) stepEffects(events []Event, keeperDamaged bool, dt float
 			if r.shakeEnabled {
 				fx.shake = 1
 			}
+		case EventChest:
+			r.burst(e.Pos, particleSpark, 14, 54, sparkSeconds*1.4)
+			if r.shakeEnabled {
+				fx.shake = math.Min(1, fx.shake+0.3)
+			}
+		case EventEvolve:
+			fx.levelFlash = levelFlashSeconds
+			r.burst(e.Pos, particleSpark, 28, 80, sparkSeconds*1.8)
+			r.burst(r.keeper.pos, particleSpark, 16, 62, sparkSeconds*1.6)
+			if r.shakeEnabled {
+				fx.shake = math.Min(1, fx.shake+0.6)
+			}
 		}
 	}
 }
@@ -754,6 +799,7 @@ func (r *arenaRenderer) draw(d *core.Drawing, alpha float64, view core.Size) {
 	r.pixelSprites = r.pixelSprites[:0]
 	r.addEmbers(ox, oy)
 	r.addPickups(ox, oy)
+	r.addChests(ox, oy)
 	r.addEnemies(ox, oy)
 	r.addShots(ox, oy)
 	r.addEnemyShots(ox, oy)
@@ -772,10 +818,13 @@ func (r *arenaRenderer) draw(d *core.Drawing, alpha float64, view core.Size) {
 		r.batch.Sprites = r.pixelSprites
 		r.batch.Draw(d)
 	}
+	r.drawRing(d, ox, oy)
 	r.drawPulses(d, ox, oy)
 	d.SetImageSmoothing(false)
+	r.drawStuns(d, ox, oy)
 	r.drawEliteBars(d, ox, oy)
 	r.drawLevelFlourish(d, ox, oy)
+	r.drawChestFlourish(d, ox, oy)
 
 	r.drawLight(d, w, h)
 	r.drawFog(d, ox, oy, w, h)
@@ -865,6 +914,33 @@ func (r *arenaRenderer) addPickups(ox, oy float32) {
 	}
 }
 
+// addChests adds the chests waiting on the ground, glowing, and the one being opened, which plays its opening as the hold runs.
+func (r *arenaRenderer) addChests(ox, oy float32) {
+	sa := r.art.sheets.chest
+	for i := range r.chests {
+		var s *sprite.Sprite
+		if sa.loaded {
+			s = r.addSheet(sampleAnimation(sa, r.chests[i].id, r.animTime), sa.scale, r.chests[i], ox, oy, 1, 1)
+		} else {
+			s = r.add(r.art.frames.chest, r.chests[i], ox, oy, 1, 1)
+		}
+		if s != nil {
+			s.Y += float32(math.Round(math.Sin(r.fx.time*4+float64(r.chests[i].id)) * 0.8))
+		}
+	}
+	if !r.opening.Active {
+		return
+	}
+	at := actor{id: r.opening.ID, pos: r.opening.Pos, was: r.opening.Pos}
+	if sa.loaded && len(sa.action.Frames) > 0 {
+		frames := sa.action.Frames
+		idx := min(int(r.opening.Progress*2*float64(len(frames))), len(frames)-1)
+		r.addSheet(frames[idx].Frame, sa.scale, at, ox, oy, 1, 1)
+		return
+	}
+	r.add(r.art.frames.chest, at, ox, oy, float32(max(0.2, 1-r.opening.Progress)), 1)
+}
+
 // enemySheet returns the stylized sheetActor and procedural fallback frame for an enemy kind.
 func (r *arenaRenderer) enemyVisual(kind int) (sheetActor, sprite.Frame) {
 	s, f := &r.art.sheets, &r.art.frames
@@ -938,16 +1014,22 @@ func (r *arenaRenderer) enemyFrame(sa sheetActor, e *actor) sprite.Frame {
 	return sampleAnimation(sa, e.id, r.animTime)
 }
 
-// addShots adds the Ember Bolts in flight above the enemies they are about to hit, rotated along their travel direction.
+// shotSmall is the drawn kind of a small Starfall Volley shot.
+const shotSmall = 1
+
+// addShots adds the Ember Bolts in flight above the enemies they are about to hit, rotated along their travel direction, and Starfall Volley's small shots as falling stars.
 func (r *arenaRenderer) addShots(ox, oy float32) {
-	sa := r.art.sheets.bolt
 	for i := range r.shots {
+		sa, fallback := r.art.sheets.bolt, r.art.frames.bolt
+		if r.shots[i].kind == shotSmall {
+			sa, fallback = r.art.sheets.starfall, r.art.frames.spark
+		}
 		var s *sprite.Sprite
 		if sa.loaded {
 			frame := sampleAnimation(sa, r.shots[i].id, r.animTime)
 			s = r.addSheet(frame, sa.scale, r.shots[i], ox, oy, 1, 3)
 		} else {
-			s = r.add(r.art.frames.bolt, r.shots[i], ox, oy, 1, 3)
+			s = r.add(fallback, r.shots[i], ox, oy, 1, 3)
 		}
 		if s != nil {
 			s.Rotation = r.shots[i].angle
@@ -1135,7 +1217,11 @@ func (r *arenaRenderer) drawPatches(d *core.Drawing, ox, oy float32) {
 			if x+rad < 0 || x-rad > vw || y+rad < 0 || y-rad > vh {
 				continue
 			}
-			frame := sampleAnimation(sa, p.ID, r.animTime)
+			sheet := sa
+			if p.Wild && r.art.sheets.wildfire.loaded {
+				sheet = r.art.sheets.wildfire
+			}
+			frame := sampleAnimation(sheet, p.ID, r.animTime)
 			fade := float32(math.Min(1, p.Life/0.5))
 			flicker := float32(1 + 0.05*math.Sin(r.fx.time*14+float64(p.ID)))
 			scale := (rad * 2.15 * flicker) / max(frame.W, 1)
@@ -1162,9 +1248,13 @@ func (r *arenaRenderer) drawPatches(d *core.Drawing, ox, oy float32) {
 		}
 		fade := float32(math.Min(1, p.Life/0.5))
 		flicker := float32(1 + 0.06*math.Sin(r.fx.time*14+float64(p.ID)))
-		d.SetFillColor(core.RGBA(0xa3341a, 0.42*fade)).
+		outer, inner := uint32(0xa3341a), uint32(0xff7a1a)
+		if p.Wild {
+			outer, inner = 0xff7a1a, 0xffd166
+		}
+		d.SetFillColor(core.RGBA(outer, 0.42*fade)).
 			BeginPath().Arc(x, y, rad*flicker, 0, 2*math.Pi, false).Fill()
-		d.SetFillColor(core.RGBA(0xff7a1a, 0.55*fade)).
+		d.SetFillColor(core.RGBA(inner, 0.55*fade)).
 			BeginPath().Arc(x, y, rad*0.58*flicker, 0, 2*math.Pi, false).Fill()
 	}
 }
@@ -1180,9 +1270,12 @@ func (r *arenaRenderer) drawPulses(d *core.Drawing, ox, oy float32) {
 	sa := r.art.sheets.bellToll
 	if sa.loaded && r.art.sheetAtlas != nil && len(sa.move.Frames) > 0 {
 		r.pulseSprites = r.pulseSprites[:0]
-		frames := sa.move.Frames
 		for i := range r.pulses {
 			p := &r.pulses[i]
+			frames := sa.move.Frames
+			if dawn := r.art.sheets.dawnBell; p.Dawn && dawn.loaded && len(dawn.move.Frames) > 0 {
+				frames = dawn.move.Frames
+			}
 			x, y := float32(p.Pos.X)-ox, float32(p.Pos.Y)-oy
 			t := float32(min(max(1-p.Life/max(p.Max, 0.001), 0), 1))
 			rad := float32(p.Radius) * (0.45 + 0.65*t)
@@ -1216,12 +1309,93 @@ func (r *arenaRenderer) drawPulses(d *core.Drawing, ox, oy float32) {
 			continue
 		}
 		alpha := float32(math.Max(0, 1-float64(t)))
-		d.SetFillColor(core.RGBA(0xffb347, 0.16*alpha)).
+		fill, stroke := uint32(0xffb347), uint32(0xffd166)
+		if p.Dawn {
+			fill, stroke = 0xfff1d6, 0xfff1d6
+		}
+		d.SetFillColor(core.RGBA(fill, 0.16*alpha)).
 			BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Fill()
-		d.SetStrokeColor(core.RGBA(0xffd166, 0.85*alpha)).
+		d.SetStrokeColor(core.RGBA(stroke, 0.85*alpha)).
 			SetLineWidth(2).
 			BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Stroke()
 	}
+}
+
+// sunRingBand is where sun_ring.png's burning band runs, as a share of the frame's half width.
+const sunRingBand = 0.66
+
+// drawRing paints Sun Ring's burning ring around the keeper over the sprites, turning with the halo's angle: the sun_ring sheet when loaded, a glowing band otherwise.
+func (r *arenaRenderer) drawRing(d *core.Drawing, ox, oy float32) {
+	g := r.ring
+	if !g.Active {
+		return
+	}
+	x, y := toScreen(r.blend(r.keeper), ox, oy)
+	rad, width := float32(g.Radius), float32(g.Width)
+	if sa := r.art.sheets.sunRing; sa.loaded && r.art.sheetAtlas != nil {
+		frame := sampleAnimation(sa, 1, r.animTime)
+		scale := 2 * rad / sunRingBand / max(frame.W, 1)
+		s := r.next(frame)
+		s.X, s.Y, s.ScaleX, s.ScaleY, s.Rotation, s.Alpha, s.Z = x, y, scale, scale, float32(g.Angle), 0.95, 6
+		r.ringSprites = append(r.ringSprites[:0], s)
+		d.SetImageSmoothing(true)
+		r.ringBatch.Atlas = r.art.sheetAtlas
+		r.ringBatch.Sprites = r.ringSprites
+		r.ringBatch.Draw(d)
+		return
+	}
+	flicker := float32(0.85 + 0.15*math.Sin(r.fx.time*11))
+	d.SetStrokeColor(core.RGBA(0xff7a1a, 0.45*flicker)).SetLineWidth(width).
+		BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Stroke()
+	d.SetStrokeColor(core.RGBA(0xffd166, 0.85*flicker)).SetLineWidth(max(1.5, width/3)).
+		BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Stroke()
+}
+
+// drawStuns rings each foe Dawn Bell holds still with a small pale-gold halo above its head.
+func (r *arenaRenderer) drawStuns(d *core.Drawing, ox, oy float32) {
+	for _, i := range r.stunned {
+		if i >= len(r.enemies) {
+			continue
+		}
+		e := &r.enemies[i]
+		x, y := toScreen(r.blend(*e), ox, oy)
+		if !r.inView(x, y) {
+			continue
+		}
+		top := y - float32(e.radius) - 3
+		spin := float32(r.fx.time * 6)
+		d.SetStrokeColor(core.RGBA(0xfff1d6, 0.85)).SetLineWidth(1.2).
+			BeginPath().Ellipse(x, top, 5, 2).Stroke()
+		d.SetFillColor(core.RGB(0xffd166)).
+			BeginPath().Arc(x+5*float32(math.Cos(float64(spin))), top+2*float32(math.Sin(float64(spin))), 1.2, 0, 2*math.Pi, false).Fill()
+	}
+}
+
+// drawChestFlourish paints the column of light over an opening chest, brighter and wider when it evolves a weapon, and a ring that spreads from it.
+func (r *arenaRenderer) drawChestFlourish(d *core.Drawing, ox, oy float32) {
+	o := r.opening
+	if !o.Active {
+		return
+	}
+	x, y := toScreen(o.Pos, ox, oy)
+	t := float32(o.Progress)
+	fade := min(1, (1-t)*4, t*8)
+	w := float32(10)
+	color := uint32(0xffb347)
+	if o.Evolved != "" {
+		w, color = 18, 0xffd166
+	}
+	grad := core.CanvasLinear(x, y-90, x, y,
+		core.GradientStop{Offset: 0, Color: core.RGBA(color, 0)},
+		core.GradientStop{Offset: 1, Color: core.RGBA(color, 0.55*fade)},
+	)
+	d.Save()
+	d.SetFillGradient(grad)
+	d.FillRect(x-w/2, y-90, w, 90)
+	d.Restore()
+	rad := 6 + 60*t
+	d.SetStrokeColor(core.RGBA(0xfff1d6, 0.8*fade)).SetLineWidth(2).
+		BeginPath().Arc(x, y, rad, 0, 2*math.Pi, false).Stroke()
 }
 
 // addKeeper adds the keeper above its enemies, blinking off while contact leaves it invulnerable.
@@ -1373,6 +1547,27 @@ func (r *arenaRenderer) drawLight(d *core.Drawing, w, h float32) {
 
 	glowLimit := min(r.quality.maxGlowLights, len(r.glows))
 	glow := 0
+	// Chests glow first, so a crowd's lights never hide one.
+	for i := range r.chests {
+		if glow >= glowLimit {
+			break
+		}
+		x, y := toScreen(r.blend(r.chests[i]), ox, oy)
+		if !r.inView(x, y) {
+			continue
+		}
+		l := r.glows[glow]
+		glow++
+		*l = lights2d.Light{X: x, Y: y, Radius: 34, Color: core.RGBA(0xffd166, 0.85), Intensity: 0.6, Falloff: 1.5, Enabled: true}
+		r.lights = append(r.lights, l)
+	}
+	if r.ring.Active && glow < glowLimit {
+		x, y := toScreen(r.blend(r.keeper), ox, oy)
+		l := r.glows[glow]
+		glow++
+		*l = lights2d.Light{X: x, Y: y, Radius: float32(r.ring.Radius * 1.5), Color: core.RGBA(0xffb347, 0.7), Intensity: 0.45, Falloff: 1.4, Enabled: true}
+		r.lights = append(r.lights, l)
+	}
 	for i := range r.halo {
 		if glow >= glowLimit {
 			break

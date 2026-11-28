@@ -348,3 +348,16 @@ func applyRunProgression(prev Progression, won bool, tier, maxTier, embers int, 
 	}
 	return next, reward
 }
+
+// addEvolutions records in prev's collection the evolution ids it does not hold yet, in order, and returns them.
+func addEvolutions(prev Progression, ids []string) (Progression, []string) {
+	next := normalizeProgression(prev)
+	var added []string
+	for _, id := range ids {
+		if id != "" && !slices.Contains(next.Collection, id) {
+			next.Collection = append(next.Collection, id)
+			added = append(added, id)
+		}
+	}
+	return next, added
+}

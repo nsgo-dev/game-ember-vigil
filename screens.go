@@ -31,6 +31,7 @@ type hudSlot struct {
 	name     string
 	level    int
 	maxLevel int
+	evolved  bool
 }
 
 // hudCard is one level-up card shown in the level-up modal.
@@ -106,6 +107,7 @@ func (g *emberVigil) view() core.Node {
 			g.when(phaseTitle, func() core.Node { return dynamic(g.title) }),
 			g.when(phasePaused, func() core.Node { return dynamic(g.paused) }),
 			g.when(phaseSettings, func() core.Node { return dynamic(g.settingsView) }),
+			g.when(phaseCollection, func() core.Node { return dynamic(g.collectionView) }),
 		},
 	}
 }

@@ -34,6 +34,8 @@ const (
 	cueKeeperHurt
 	cueUIClick
 	cueUISelect
+	cueChest
+	cueEvolve
 	cueCount
 )
 
@@ -64,6 +66,10 @@ func (c soundCue) String() string {
 		return "ui_click"
 	case cueUISelect:
 		return "ui_select"
+	case cueChest:
+		return "chest"
+	case cueEvolve:
+		return "evolve"
 	default:
 		return "none"
 	}
@@ -94,6 +100,8 @@ var cueSpecs = [cueCount]cueSpec{
 	cueKeeperHurt: {asset: "hit", group: audioGroupSFX, limit: 2, volume: 0.82, rate: 0.72, cooldown: 120 * time.Millisecond},
 	cueUIClick:    {asset: "click", group: audioGroupUI, limit: 3, volume: 0.55, rate: 1.00, cooldown: 35 * time.Millisecond},
 	cueUISelect:   {asset: "select", group: audioGroupUI, limit: 3, volume: 0.68, rate: 1.00, cooldown: 45 * time.Millisecond},
+	cueChest:      {asset: "coin", group: audioGroupUI, limit: 1, volume: 0.9, rate: 0.7, cooldown: 250 * time.Millisecond},
+	cueEvolve:     {asset: "powerup", group: audioGroupUI, limit: 1, volume: 0.95, rate: 0.8, cooldown: 250 * time.Millisecond},
 }
 
 // mapRunEventsToCues translates one simulation step's events (plus whether the
@@ -137,6 +145,10 @@ func mapRunEventsToCues(events []Event, keeperDamaged bool) []soundCue {
 			add(cueVictory)
 		case EventDefeat:
 			add(cueDefeat)
+		case EventChest:
+			add(cueChest)
+		case EventEvolve:
+			add(cueEvolve)
 		}
 	}
 	return out

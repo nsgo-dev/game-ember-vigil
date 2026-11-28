@@ -341,6 +341,18 @@ var pictures = []picture{
 		"..666...",
 		"........",
 	}},
+	{name: "chest", rows: []string{
+		"..11111111..",
+		".1ffffffff1.",
+		"1ffffffffff1",
+		"1bbbbbbbbbb1",
+		"1ffffbbffff1",
+		"1fffbaabfff1",
+		"1ffffbbffff1",
+		"1ffffffffff1",
+		"1bbbbbbbbbb1",
+		".1111111111.",
+	}},
 	{name: "cache", rows: []string{
 		"...bbbb...",
 		"..b7777b..",
@@ -367,6 +379,7 @@ type frames struct {
 	thornling, wisp, shade                sprite.Frame
 	gloomwarden, hollowking               sprite.Frame
 	ember, bolt, halo, thorn, bone, cache sprite.Frame
+	chest                                 sprite.Frame
 	spark, puff, trail                    sprite.Frame
 	grass, fern, stone                    sprite.Frame
 	mushroom, twig                        sprite.Frame
@@ -409,6 +422,12 @@ type sheetFrames struct {
 	thorn       sheetActor
 	bone        sheetActor
 	cache       sheetActor
+	// chest is row 0's closed chest glowing and row 1's opening; the rest are the evolved weapons' looks.
+	chest    sheetActor
+	starfall sheetActor
+	sunRing  sheetActor
+	wildfire sheetActor
+	dawnBell sheetActor
 }
 
 // sheetSpec describes one uniform-grid PNG sprite sheet under assets/sprites/.
@@ -530,6 +549,36 @@ var sheetSpecs = []sheetSpec{
 		rows: 1, cols: 4, moveFrameTime: 130 * time.Millisecond,
 		worldHeight: 16,
 		target:      func(s *sheetFrames) *sheetActor { return &s.cache },
+	},
+	{
+		name: "chest", file: "assets/sprites/chest.png",
+		rows: 2, cols: 4, moveFrameTime: 140 * time.Millisecond, actionFrameTime: 110 * time.Millisecond,
+		worldHeight: 20,
+		target:      func(s *sheetFrames) *sheetActor { return &s.chest },
+	},
+	{
+		name: "starfall_volley", file: "assets/sprites/starfall_volley.png",
+		rows: 1, cols: 4, moveFrameTime: 70 * time.Millisecond,
+		worldHeight: 9,
+		target:      func(s *sheetFrames) *sheetActor { return &s.starfall },
+	},
+	{
+		name: "sun_ring", file: "assets/sprites/sun_ring.png",
+		rows: 1, cols: 4, moveFrameTime: 100 * time.Millisecond,
+		worldHeight: 64,
+		target:      func(s *sheetFrames) *sheetActor { return &s.sunRing },
+	},
+	{
+		name: "wildfire_path", file: "assets/sprites/wildfire_path.png",
+		rows: 1, cols: 4, moveFrameTime: 110 * time.Millisecond,
+		worldHeight: 64,
+		target:      func(s *sheetFrames) *sheetActor { return &s.wildfire },
+	},
+	{
+		name: "dawn_bell", file: "assets/sprites/dawn_bell.png",
+		rows: 1, cols: 4, moveFrameTime: 90 * time.Millisecond,
+		worldHeight: 64,
+		target:      func(s *sheetFrames) *sheetActor { return &s.dawnBell },
 	},
 }
 
@@ -871,6 +920,7 @@ func framesOf(m map[string]sprite.Frame) frames {
 		thorn:       get("thorn"),
 		bone:        get("bone"),
 		cache:       get("cache"),
+		chest:       get("chest"),
 		spark:       get("spark"),
 		puff:        get("puff"),
 		trail:       get("trail"),

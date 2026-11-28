@@ -6,6 +6,7 @@ var enTable = Table{
 	ArenaLabel:    "Ember Vigil arena",
 	Start:         "Start",
 	Settings:      "Settings",
+	Collection:    "Collection",
 	Quit:          "Quit",
 	BestRecords:   "Best Records",
 	NoRecordsYet:  "No runs recorded yet",
@@ -42,6 +43,19 @@ var enTable = Table{
 		"gathering":    {Name: "Gathering", Description: "+14 ember pickup radius per level."},
 		"glow":         {Name: "Glow", Description: "+15% XP from embers per level."},
 		"ember-heal":   {Name: "Ember", Description: "Restore 35% of max health."},
+	},
+
+	Evolved:           "EVOLVED",
+	FreeCard:          "A free card",
+	CollectionTitle:   "Evolutions",
+	CollectionUnknown: "???",
+	CollectionMadeFmt: "Made ",
+	RecipeSeparator:   " + ",
+	Evolutions: map[string]EvolutionCopy{
+		"starfall-volley": {Name: "Starfall Volley", Description: "Each shot splits into three small shots on hit.", Hint: "The bolt longs to burn faster."},
+		"sun-ring":        {Name: "Sun Ring", Description: "The orbs join into one continuous burning ring.", Hint: "The halo longs for a wider light."},
+		"wildfire-path":   {Name: "Wildfire Path", Description: "Fire spreads sideways and touching patches merge.", Hint: "The trail longs for swifter feet."},
+		"dawn-bell":       {Name: "Dawn Bell", Description: "The pulse briefly stuns foes and heals you a little.", Hint: "The bell longs for a warmer heart."},
 	},
 
 	Paused:           "Paused",
@@ -84,7 +98,7 @@ var enTable = Table{
 	EmberBalanceFmt: "Balance ",
 	UnlockedPrefix:  "Unlocked: ",
 	UnlockSeparator: ", ",
-	Unlocks:         map[string]string{},
+	Unlocks:         map[string]string{"evolution": "Weapon evolution"},
 	PlayAgain:       "Play Again",
 	TitleButton:     "Title",
 }

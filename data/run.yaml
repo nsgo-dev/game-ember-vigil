@@ -17,3 +17,7 @@ embers:
 level:
   first: 4
   step: 4
+chest:
+  radius: 8
+  hold: 0.6
+  evolveHold: 1.4

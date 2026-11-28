@@ -204,7 +204,7 @@ func TestWinningOpensTheNextTierToChoose(t *testing.T) {
 	g.run.bossEnemy().hp = 0
 	app.Advance(8 * frame)
 	en := evstrings.For(evstrings.EN)
-	if got, want := app.Find("id:results-unlocked").Props.Label, en.UnlockedList([]string{"Long Night 2"}); got != want {
+	if got, want := app.Find("id:results-unlocked").Props.Label, en.UnlockedList([]string{"Long Night 2", en.Unlocks[unlockEvolution]}); got != want {
 		t.Fatalf("results after the first win say %q, want %q", got, want)
 	}
 	if g.progress.TierWon != 1 || g.tier.Get() != 2 {

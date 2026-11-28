@@ -18,11 +18,18 @@ type botResult struct {
 	bossPhases   int
 	eventCount   int
 	seenEnemies  map[string]bool
+	// bossTime is how long the Hollow King lived, and evolved the evolutions the run made.
+	bossTime float64
+	evolved  []string
 }
 
-// playBot runs a deterministic kiting and upgrade-picking bot until Victory, Defeat, or maxMinutes. It steers afresh every react steps and holds its last heading in between, so a larger react plays a slower player.
-func playBot(seed uint64, tier, maxMinutes, react int) (*Run, botResult) {
+// playBot runs a deterministic kiting and upgrade-picking bot until Victory, Defeat, or maxMinutes. It steers afresh every react steps and holds its last heading in between, so a larger react plays a slower player; evolve plays a player who has won once.
+func playBot(seed uint64, tier, maxMinutes, react int, evolve bool) (*Run, botResult) {
 	r := NewRun(seed, tier)
+	if evolve {
+		r.EnableEvolution()
+	}
+	bossAt := 0.0
 	res := botResult{
 		minHealthPct: 1,
 		seenEnemies:  map[string]bool{},
@@ -45,6 +52,10 @@ func playBot(seed uint64, tier, maxMinutes, react int) (*Run, botResult) {
 			res.time = snap.Time
 			res.kills = snap.Kills
 			res.level = snap.Level
+			res.evolved = r.Evolutions()
+			if res.bossSpawned {
+				res.bossTime = snap.Time - bossAt
+			}
 			return r, res
 		case PhaseLevelUp:
 			r.Choose(botChoose(snap))
@@ -59,6 +70,7 @@ func playBot(seed uint64, tier, maxMinutes, react int) (*Run, botResult) {
 			switch ev.Kind {
 			case EventBossSpawn:
 				res.bossSpawned = true
+				bossAt = r.Snapshot().Time
 			case EventBossPhase:
 				res.bossPhases++
 			}
@@ -145,6 +157,28 @@ func botControls(s Snapshot) Controls {
 		}
 		if bestIdx >= 0 && bestDist > 1 {
 			steer = steer.Add(s.Pickups[bestIdx].Pos.Sub(pos).Normalized().Scale(1.6))
+		}
+	}
+
+	// Open the nearest chest, as a player always would, unless a shadow zone covers it.
+	if len(s.Chests) > 0 {
+		bestIdx := -1
+		bestDist := 400.0
+	chests:
+		for i, c := range s.Chests {
+			// A chest in a shadow zone waits for the zone to fade.
+			for _, sh := range s.Shadows {
+				if c.Pos.Sub(sh.Pos).Len() < sh.Radius+24 {
+					continue chests
+				}
+			}
+			if dist := c.Pos.Sub(pos).Len(); dist < bestDist {
+				bestDist = dist
+				bestIdx = i
+			}
+		}
+		if bestIdx >= 0 && bestDist > 1 {
+			steer = steer.Add(s.Chests[bestIdx].Pos.Sub(pos).Normalized().Scale(1.2))
 		}
 	}
 
@@ -247,12 +281,13 @@ func botChoose(s Snapshot) int {
 	return best
 }
 
-// TestTwelveMinuteBotBalanceAndDeterminism verifies that sharp movement wins most runs but not all and sees every enemy and boss phase, that slow movement loses most of the same runs, that standing still loses, and that a run replays deterministically.
+// TestTwelveMinuteBotBalanceAndDeterminism verifies that sharp movement wins most runs but not all and sees every enemy and boss phase, that evolution kills the Hollow King faster without winning more than that, that slow movement loses most of the same runs, that standing still loses, and that a run replays deterministically.
 func TestTwelveMinuteBotBalanceAndDeterminism(t *testing.T) {
 	const seeds = 10
-	wins, slowWins := 0, 0
+	wins, slowWins, evolvedWins := 0, 0, 0
+	var bossTime, evolvedBossTime float64
 	for seed := uint64(1); seed <= seeds; seed++ {
-		r, res := playBot(seed, 1, 16, 1)
+		r, res := playBot(seed, 1, 16, 1, false)
 		t.Logf("seed=%d phase=%v time=%.1fs kills=%d level=%d minHP=%.0f%% boss=%v phases=%d events=%d enemies=%d embers=%d",
 			seed, res.phase, res.time, res.kills, res.level, res.minHealthPct*100, res.bossSpawned, res.bossPhases, res.eventCount, len(res.seenEnemies), r.Payout())
 		if res.phase == PhaseVictory {
@@ -266,13 +301,29 @@ func TestTwelveMinuteBotBalanceAndDeterminism(t *testing.T) {
 				}
 			}
 		}
+		// The same bot after its first win, which unlocks evolution.
+		if _, evolved := playBot(seed, 1, 16, 1, true); evolved.phase == PhaseVictory {
+			evolvedWins++
+			t.Logf("seed=%d evolved %v and felled the Hollow King in %.1fs", seed, evolved.evolved, evolved.bossTime)
+			// The fight is compared on the seeds both won, so a hard seed only evolution survives cannot weigh on it.
+			if res.phase == PhaseVictory {
+				bossTime += res.bossTime
+				evolvedBossTime += evolved.bossTime
+			}
+		}
 		// The same bot steering only three times a second stands in for a player who does not dodge well.
-		if _, slow := playBot(seed, 1, 16, 20); slow.phase == PhaseVictory {
+		if _, slow := playBot(seed, 1, 16, 20, false); slow.phase == PhaseVictory {
 			slowWins++
 		}
 	}
 	if wins < 6 || wins > 8 {
 		t.Fatalf("sharp bot won %d/%d seeds, want 6 to 8: good movement should usually win, but not always", wins, seeds)
+	}
+	if evolvedWins < 6 || evolvedWins > 8 {
+		t.Fatalf("sharp bot with evolution won %d/%d seeds, want 6 to 8: evolution should not lift the win rate", evolvedWins, seeds)
+	}
+	if evolvedBossTime >= bossTime*0.9 {
+		t.Fatalf("on the seeds both won, evolved runs fought the Hollow King %.1fs in all and plain runs %.1fs; evolution should clear at least 10%% faster", evolvedBossTime, bossTime)
 	}
 	if slowWins > 3 {
 		t.Fatalf("slow bot won %d/%d seeds, want at most 3: the run should demand movement", slowWins, seeds)
@@ -294,8 +345,8 @@ func TestTwelveMinuteBotBalanceAndDeterminism(t *testing.T) {
 	}
 
 	// Confirm full 12-minute determinism on a fixed seed.
-	r1, res1 := playBot(42, 1, 16, 1)
-	r2, res2 := playBot(42, 1, 16, 1)
+	r1, res1 := playBot(42, 1, 16, 1, false)
+	r2, res2 := playBot(42, 1, 16, 1, false)
 	if res1.eventCount != res2.eventCount || !reflect.DeepEqual(r1.Snapshot(), r2.Snapshot()) || r1.Payout() != r2.Payout() {
 		t.Fatalf("fixed seed 42 did not replay identically: events %d vs %d, embers %d vs %d", res1.eventCount, res2.eventCount, r1.Payout(), r2.Payout())
 	}
@@ -314,7 +365,7 @@ func TestLongNightTiersGetHarder(t *testing.T) {
 	for tier := 1; tier <= tiers; tier++ {
 		for seed := uint64(1); seed <= seeds; seed++ {
 			wg.Go(func() {
-				if _, res := playBot(seed, tier, 16, 1); res.phase == PhaseVictory {
+				if _, res := playBot(seed, tier, 16, 1, false); res.phase == PhaseVictory {
 					mu.Lock()
 					wins[tier]++
 					mu.Unlock()
@@ -336,8 +387,8 @@ func TestLongNightTiersGetHarder(t *testing.T) {
 		t.Fatalf("tier %d won %d/%d seeds, want 20 to 30%%", tiers, wins[tiers], seeds)
 	}
 
-	r1, res1 := playBot(42, tiers, 16, 1)
-	r2, res2 := playBot(42, tiers, 16, 1)
+	r1, res1 := playBot(42, tiers, 16, 1, false)
+	r2, res2 := playBot(42, tiers, 16, 1, false)
 	if res1.eventCount != res2.eventCount || !reflect.DeepEqual(r1.Snapshot(), r2.Snapshot()) || r1.Payout() != r2.Payout() {
 		t.Fatalf("seed 42 at tier %d did not replay identically: events %d vs %d", tiers, res1.eventCount, res2.eventCount)
 	}

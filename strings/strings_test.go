@@ -22,6 +22,14 @@ func TestTablesAreComplete(t *testing.T) {
 				t.Errorf("lang %q: field %s is empty", lang, typ.Field(i).Name)
 			}
 		}
+		for _, id := range []string{"starfall-volley", "sun-ring", "wildfire-path", "dawn-bell"} {
+			if c := tbl.Evolutions[id]; c.Name == "" || c.Description == "" || c.Hint == "" {
+				t.Errorf("lang %q: evolution %q is incomplete: %+v", lang, id, c)
+			}
+		}
+		if tbl.Unlocks["evolution"] == "" {
+			t.Errorf("lang %q: the evolution unlock has no name", lang)
+		}
 		for _, id := range cardIDs {
 			c, ok := tbl.Cards[id]
 			if !ok {

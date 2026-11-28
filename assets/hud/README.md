@@ -69,7 +69,7 @@ Unified carved ivory-gold fantasy serif numerals with dark outlines for readabil
 
 ## Progression Art Kit
 
-Art for the progression in [docs/meta-progression.md](../../docs/meta-progression.md), not yet drawn by the game; each file waits for the issue that wires its feature, and the procedural fallback stays until then. Icons and sprite sheets are 1× like the rest of `assets/icons/` and `assets/sprites/`; the screen pieces here are 2× like the HUD kit above.
+Art for the progression in [docs/meta-progression.md](../../docs/meta-progression.md), wired as each feature lands, with a procedural fallback kept for every file. The chest, the evolved forms' icons and sheets and the collection slots are drawn; the new weapons, shop and tier pieces still wait. Icons and sprite sheets are 1× like the rest of `assets/icons/` and `assets/sprites/`; the screen pieces here are 2× like the HUD kit above.
 
 ### Card Icons (`assets/icons/`, 64×64)
 

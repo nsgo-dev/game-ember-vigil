@@ -491,6 +491,12 @@ func (p *hudPainter) drawSlots() {
 		default:
 			frameName = hudSlotFilled
 		}
+		if slot.evolved {
+			// An evolved weapon's slot burns with a dawn glow behind its frame.
+			pulse := 0.7 + 0.3*float32(math.Sin(p.m.clock*4))
+			cx, cy := r.center()
+			p.d.SetFillColor(core.RGBA(0xffd166, 0.35*pulse)).BeginPath().Ellipse(cx, cy, r.w*0.62, r.h*0.62).Fill()
+		}
 		if img, ok := p.art.image(frameName); ok {
 			p.d.DrawImageIn(img, r.x, r.y, r.w, r.h)
 		} else {

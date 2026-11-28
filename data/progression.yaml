@@ -5,4 +5,7 @@ payout:
   perChest: 15
   win: 50
   tierBonus: 0.25
-unlocks: []
+unlocks:
+  - id: evolution
+    name: Evolution
+    win: true
