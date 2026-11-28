@@ -12,19 +12,19 @@ A run was too easy and left nothing behind: the balance bot won 9 of 10 seeds wi
 - Structure is a mix, led by unlocks and difficulty:
   - **Unlocks.** In-run challenges unlock new content: weapons and evolution first, passives and keepers in later batches.
   - **Long Night tiers.** Each win opens the next tier, and each tier makes the run harder. This is the long-term goal and keeps permanent power from flattening the game.
-  - **Ember shop.** Each run pays embers for a small shop of permanent bonuses with a low total cap (for example at most +15% damage), mainly to help weaker players; higher tiers weaken those bonuses.
+  - **Ember shop.** Each run pays embers for a small shop of permanent bonuses with a low total cap (for example at most +15% damage), mainly to help weaker players. Bonuses count in full on every tier; the tiers are made harder instead.
 - Each Long Night tier adds one fixed rule on top of the tiers below it, so every tier brings a new kind of pressure, not only bigger numbers. The player picks a single tier number. Self-chosen rule mixes may come later, above tier 5. Built in `data/tiers.yaml`:
 
   | Tier | Adds | Numbers |
   | --- | --- | --- |
-  | 1 | The base run, made harder first (see below) | — |
-  | 2 | One more elite per run; a dead elite leaves a shadow zone behind | A Gloomwarden at 6:50; a zone of radius 48 for 14 s, 12 damage every 0.5 s inside; shop bonuses ×0.8 |
-  | 3 | A smaller lantern light and a shorter view | Embers drawn from 90% as far; sight, spawn ring and spawn view at 80%; shop bonuses ×0.75 |
-  | 4 | Fewer healing cards, half regeneration and half shop bonuses | At most one healing card per level-up; regeneration and shop bonuses ×0.5 |
-  | 5 | Faster enemies; the Hollow King arrives a minute early with one more attack | Foes ×1.1 speed and ×1.15 damage; the King at 11:00, adding a 13-bone fan 1 rad wide at ×1.4 bone speed; shop bonuses ×0.67 |
+  | 1 | The base run | See [Difficulty](#difficulty) |
+  | 2 | One more elite per run; a dead elite leaves a shadow zone behind | A Gloomwarden at 6:50; a zone of radius 48 for 14 s, 12 damage every 0.5 s inside; foes ×1.45 health and ×1.2 damage |
+  | 3 | A smaller lantern light and a shorter view | Embers drawn from 90% as far; sight, spawn ring and spawn view at 80%; foes ×1.2 health and ×1.1 damage |
+  | 4 | Fewer healing cards and half regeneration | At most one healing card per level-up; regeneration ×0.5; foes ×1.15 health and ×1.05 damage |
+  | 5 | Faster enemies; the Hollow King arrives a minute early with one more attack | Foes ×1.1 speed, ×1.15 health and ×1.15 damage; the King at 11:00, adding a 13-bone fan 1 rad wide at ×1.4 bone speed |
 
   Winning a tier opens the next, saved as the highest tier won; tier 1 is always open. The title offers a tier button once a second tier is open, defaulting to the highest; a win that opens a tier picks it for Play Again. The HUD and the results name the tier.
-- Over seeds 1–100 the sharp bot wins 67%, 53%, 43%, 26% and 22% from tier 1 to tier 5 (over 200 seeds 67%, 53%, 46%, 27% and 25%), and `bot_test.go` holds the fall. With chests, which the bot opens unless a shadow zone covers them, and the harder waves they brought, seeds 1–100 give 73%, 65%, 49%, 32% and 28%. The rules alone barely moved the bot: the early Hollow King skips the last minute's hardest waves and clears the field, and faster foes die sooner on the halo and the trail, so tier 5 also raises foe damage. Tier 3's view alone changes nothing for a bot that reads every foe, which is why its light also shortens the ember pull.
+- The multipliers stack, so tier 5's foes have ×2.3 health and ×1.6 damage. The tier rules alone barely moved the bot (the early Hollow King skips the last minute's hardest waves, and faster foes die sooner on the halo and the trail), which is why every tier also thickens its foes. Win rates are in [Difficulty](#difficulty).
 
 - The first unlocks are two new weapons and weapon evolution. A weapon at max level, held with its paired passive, evolves into a stronger form when the keeper opens a chest dropped by an elite. Evolution itself is unlocked, and each recipe joins a collection the first time it is made in a run. New keepers wait for a later batch.
 - The two new weapons fill the play styles the current four miss (single shots, orbit, ground fire, knockback pulse):
@@ -60,21 +60,39 @@ A run was too easy and left nothing behind: the balance bot won 9 of 10 seeds wi
   | Win | 50 |
 
   A tier-1 win earns about 270, a death at 3:00 about 20.
-- The shop has six items of five levels each, costing 100, 150, 250, 350 and 450 (7800 in all), so a player who pays about 330 a run fills it in about 25 runs, around the time they reach tier 5. Every tier above 1 weakens the bonuses (×0.8, 0.6, 0.3 and 0.2 from tier 2 to 5, redraws rounded down). Item names differ from the passives so the two are never confused.
+- The shop has six items of five levels each, costing 100, 150, 250, 350 and 450 (7800 in all), so a player who pays about 330 a run fills it in about 25 runs, around the time they reach tier 5. The bonuses count in full on every tier: the user chose to make the tiers harder rather than weaken what players bought. Item names differ from the passives so the two are never confused.
 
   | Item | Per level | At max |
   | --- | --- | --- |
   | Banked Fire | +3% damage | +15% |
   | Lamp Oil | −2% cooldown | −10% |
-  | Hearth | +6 max health | +30 |
-  | Light Foot | +2 move speed | +10 |
-  | Lure | +2 pickup radius | +10 |
+  | Hearth | +10 max health | +50 |
+  | Light Foot | +3 move speed | +15 |
+  | Lure | +5 pickup radius | +25 |
   | Redraw | One more redraw of the level-up cards per run (new mechanic) | 5 per run |
 
-- Tier 1 is the base run, made harder in `data/waves.yaml` before any tier exists: enemy damage from 4:30 on rises by 13–20% and the Hollow King's health from 20000 to 32000. Over 30 seeds the sharp bot now wins 67% with a median minimum health of about 36% among its wins, and the boss fight lasts about 70 seconds; the bot test holds its wins on seeds 1–10 between 6 and 8. Chests then gave the bot a free card from each Gloomwarden, so enemy damage from 2:00 on rose by another 30% and from 7:30 on by 15% more; over 120 seeds the sharp bot wins about 73%, and about 82% with evolution unlocked, which shortens the Hollow King fight by about 15%. The evolutions' numbers live in `data/weapons.yaml`.
-- Spark Chain and Ash Censer, also in `data/weapons.yaml`, are tuned to widen the choice, not the power: over seeds 1–100 the evolved bot with them wins 84% at tier 1 and 42% at tier 5, against 82% and 38% without them. Each alone barely moves tier 1, but together they lifted tier 5 from 38% to 56% before Spark Chain lost about a fifth of its damage and Ember Storm its extra damage fell from ×1.25 to ×1.2.
-- The shop was first built at 50 to 250 a level (4500 in all), +10 health, +3 speed and +5 pickup a level, halved only at tiers 4 and 5. Over seeds 1–100 a full shop then took the evolved bot from 84%, 80%, 62%, 46% and 42% at tiers 1–5 to 100% at tiers 1–3, so tiers stopped mattering, and at about 300 embers a run it filled in about 15 runs. Lure alone lifted tier 3 from 60% to 98%: a wider pull levels the keeper faster. The bot's runs turn on small margins, so even a fifth of the bonuses still moves it: with the current shop, a full shop gives 100%, 93%, 94%, 80% and 68%. Its real aim is the weaker player: the slow bot wins none of 40 tier-1 runs without the shop and 13 with it full. A person plays with more margin than the bot; check the shop's pull in a manual run before tuning further.
+- Spark Chain and Ash Censer, in `data/weapons.yaml` like the evolutions, are tuned to widen the choice, not the power: together they lifted the evolved bot's tier 5 from 38% to 56% until Spark Chain lost about a fifth of its damage and Ember Storm's extra damage fell from ×1.25 to ×1.2.
 - First version scope: the ember currency and shop, Long Night tiers 1–5, two new weapons, and six evolutions (one for each weapon).
+
+## Difficulty
+
+The user wants a win to take both skill and luck: a skilled player still loses on a bad seed. The sharpest balance bot stands for the skilled player and the seed (spawns, cards and drops) for luck; the bot reacting three times a second stands for a weaker player.
+
+- Tier 1 is set for a skilled player with nothing bought: from 2:00 on, foes have ×1.25 the health and ×1.2 the damage of the first version's late run, and the Hollow King has 32000 health.
+- The shop is the largest source of power. On its own a full shop lifts that player's tier 1 from 37% to 96%, against 58% for evolution and both new weapons together; Lure is the strongest item, as a wider pull levels the keeper faster. The tiers are tuned for a player who has bought everything.
+
+Over seeds 1–100:
+
+| Player | Tier 1 | Tier 2 | Tier 3 | Tier 4 | Tier 5 |
+| --- | --- | --- | --- | --- | --- |
+| Skilled, nothing unlocked or bought | 37% | | | | |
+| Skilled, evolution and both weapons | 58% | 6% | | | 0% |
+| Skilled, nothing unlocked, full shop | 96% | | 48% | | |
+| Skilled, everything unlocked and bought | 99% | 89% | 64% | 33% | 14% |
+| Weaker, nothing bought | 0% | | | | |
+| Weaker, everything unlocked and bought | 80% | | | | 0% |
+
+So a new player climbs by buying, and the top tiers stay a test of skill and luck even with everything bought. `bot_test.go` holds tier 1 at 2 to 5 wins in 10 for the plain bot, and the full-power bot's win rate falling with every tier, from at least 90% to 5–25% at tier 5. On the higher tiers most losses come early, between 2:00 and 3:00, before the build is strong; a manual run should check that this feels fair.
 
 ## Open questions
 

@@ -36,18 +36,18 @@ shop:
     - id: hearth
       name: Hearth
       stat: maxHealth
-      description: +6 max health per level.
-      amount: 6
+      description: +10 max health per level.
+      amount: 10
     - id: light-foot
       name: Light Foot
       stat: moveSpeed
-      description: +2 move speed per level.
-      amount: 2
+      description: +3 move speed per level.
+      amount: 3
     - id: lure
       name: Lure
       stat: pickup
-      description: +2 ember pickup radius per level.
-      amount: 2
+      description: +5 ember pickup radius per level.
+      amount: 5
     - id: redraw
       name: Redraw
       stat: redraw

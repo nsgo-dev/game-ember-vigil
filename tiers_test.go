@@ -75,18 +75,19 @@ func TestTiersStackTheirRules(t *testing.T) {
 		light, sight, regen  float64
 		healCards            int
 		speed, earlier, harm float64
+		health               float64
 	}{
-		1: {elites: base, light: 1, sight: 1, regen: 1, speed: 1, harm: 1},
-		2: {elites: base + 1, shadow: true, light: 1, sight: 1, regen: 1, speed: 1, harm: 1},
-		3: {elites: base + 1, shadow: true, light: 0.9, sight: 0.8, regen: 1, speed: 1, harm: 1},
-		4: {elites: base + 1, shadow: true, light: 0.9, sight: 0.8, regen: 0.5, healCards: 1, speed: 1, harm: 1},
-		5: {elites: base + 1, shadow: true, volley: true, light: 0.9, sight: 0.8, regen: 0.5, healCards: 1, speed: 1.1, earlier: 60, harm: 1.15},
+		1: {elites: base, light: 1, sight: 1, regen: 1, speed: 1, harm: 1, health: 1},
+		2: {elites: base + 1, shadow: true, light: 1, sight: 1, regen: 1, speed: 1, harm: 1.2, health: 1.45},
+		3: {elites: base + 1, shadow: true, light: 0.9, sight: 0.8, regen: 1, speed: 1, harm: 1.32, health: 1.74},
+		4: {elites: base + 1, shadow: true, light: 0.9, sight: 0.8, regen: 0.5, healCards: 1, speed: 1, harm: 1.386, health: 2.001},
+		5: {elites: base + 1, shadow: true, volley: true, light: 0.9, sight: 0.8, regen: 0.5, healCards: 1, speed: 1.1, earlier: 60, harm: 1.5939, health: 2.30115},
 	} {
 		r := NewRun(1, tier)
 		got := r.rules
 		if r.Tier() != tier || len(got.elites) != want.elites || (got.shadow.Life > 0) != want.shadow || (got.volley.Count > 0) != want.volley ||
 			got.light != want.light || got.sight != want.sight || got.regen != want.regen || got.healCards != want.healCards ||
-			math.Abs(got.enemySpeed-want.speed) > 1e-9 || got.bossEarlier != want.earlier || math.Abs(got.damage-want.harm) > 1e-9 {
+			math.Abs(got.enemySpeed-want.speed) > 1e-9 || got.bossEarlier != want.earlier || math.Abs(got.damage-want.harm) > 1e-9 || math.Abs(got.health-want.health) > 1e-9 {
 			t.Errorf("tier %d plays %+v, want %+v", tier, got, want)
 		}
 		for i := 1; i < len(got.elites); i++ {

@@ -36,7 +36,7 @@ func TestShopFollowsTheDesign(t *testing.T) {
 	if len(shop.Items) != 6 || total != 7800 {
 		t.Fatalf("the shop has %d items costing %d in all, want 6 and 7800", len(shop.Items), total)
 	}
-	want := map[string]string{"banked-fire": "+15%", "lamp-oil": "-10%", "hearth": "+30", "light-foot": "+10", "lure": "+10", "redraw": "+5"}
+	want := map[string]string{"banked-fire": "+15%", "lamp-oil": "-10%", "hearth": "+50", "light-foot": "+15", "lure": "+25", "redraw": "+5"}
 	for i := range shop.Items {
 		it := &shop.Items[i]
 		if got := shopBonus(it, shop.maxLevel()); got != want[it.ID] {
@@ -45,8 +45,8 @@ func TestShopFollowsTheDesign(t *testing.T) {
 	}
 }
 
-// TestShopLevelsFoldIntoTheRunAndWeakenByTier checks that bought levels raise the run's derived stats and redraws, start the keeper at the higher health, and count for less on every Long Night tier above 1, down to a fifth at tier 5.
-func TestShopLevelsFoldIntoTheRunAndWeakenByTier(t *testing.T) {
+// TestShopLevelsFoldIntoTheRunInFull checks that bought levels raise the run's derived stats and redraws, start the keeper at the higher health, and count in full on every Long Night tier.
+func TestShopLevelsFoldIntoTheRunInFull(t *testing.T) {
 	gain := func(tier int) (stats, int, float64) {
 		base := NewRun(3, tier)
 		r := NewRun(3, tier)
@@ -61,32 +61,28 @@ func TestShopLevelsFoldIntoTheRunAndWeakenByTier(t *testing.T) {
 		}, r.Snapshot().Redraws, r.keeper.health - b.maxHealth
 	}
 	full, redraws, missing := gain(1)
-	want := stats{damageMul: 0.15, cooldownMul: 0.10, moveSpeed: 10, maxHealth: 30, pickupRadius: 10}
+	want := stats{damageMul: 0.15, cooldownMul: 0.10, moveSpeed: 15, maxHealth: 50, pickupRadius: 25}
 	near := func(a, b stats, k float64) bool {
 		return math.Abs(a.damageMul-b.damageMul*k) < 1e-9 && math.Abs(a.cooldownMul-b.cooldownMul*k) < 1e-9 &&
 			math.Abs(a.moveSpeed-b.moveSpeed*k) < 1e-9 && math.Abs(a.maxHealth-b.maxHealth*k) < 1e-9
 	}
-	if !near(full, want, 1) || math.Abs(full.pickupRadius-10) > 1e-9 || redraws != 5 || missing != 0 {
+	if !near(full, want, 1) || math.Abs(full.pickupRadius-25) > 1e-9 || redraws != 5 || missing != 0 {
 		t.Fatalf("a full shop at tier 1 adds %+v and %d redraws, %v health short; want %+v and 5", full, redraws, missing, want)
 	}
-	for _, c := range []struct {
-		tier    int
-		k       float64
-		redraws int
-	}{{2, 0.8, 4}, {3, 0.6, 3}, {4, 0.3, 1}, {5, 0.201, 1}} {
-		got, n, _ := gain(c.tier)
-		// Tier 3's light also shortens the pull, so from tier 3 on pickup gains its share at 90%.
+	for tier := 2; tier <= 5; tier++ {
+		got, n, _ := gain(tier)
+		// Tier 3's light also shortens the pull, so from tier 3 on pickup gains its 25 at 90%.
 		light := 1.0
-		if c.tier >= 3 {
+		if tier >= 3 {
 			light = 0.9
 		}
-		if !near(got, want, c.k) || math.Abs(got.pickupRadius-10*c.k*light) > 1e-9 || n != c.redraws {
-			t.Fatalf("a full shop at tier %d adds %+v and %d redraws, want %.3f of it and %d", c.tier, got, n, c.k, c.redraws)
+		if !near(got, want, 1) || math.Abs(got.pickupRadius-25*light) > 1e-9 || n != 5 {
+			t.Fatalf("a full shop at tier %d adds %+v and %d redraws, want all of it and 5", tier, got, n)
 		}
 	}
 	r := NewRun(3, 1)
 	r.SetShop(map[string]int{"hearth": 99, "redraw": -2, "unknown": 3})
-	if r.stats.maxHealth != NewRun(3, 1).stats.maxHealth+30 || r.redraws != 0 {
+	if r.stats.maxHealth != NewRun(3, 1).stats.maxHealth+50 || r.redraws != 0 {
 		t.Fatalf("levels out of range give %v max health and %d redraws", r.stats.maxHealth, r.redraws)
 	}
 }
@@ -140,7 +136,7 @@ func TestRedrawDealsNewCardsUntilSpent(t *testing.T) {
 // TestShopAndRedrawsReplayIdentically plays two runs with one seed, one full shop and one control script that redraws at every level-up, and compares their events and snapshots.
 func TestShopAndRedrawsReplayIdentically(t *testing.T) {
 	play := func() (*Run, []Event, int) {
-		r := NewRun(4242, 4)
+		r := NewRun(4242, 1)
 		r.SetShop(fullShop())
 		var events []Event
 		redrew := 0
@@ -158,8 +154,8 @@ func TestShopAndRedrawsReplayIdentically(t *testing.T) {
 	}
 	first, firstEvents, n := play()
 	second, secondEvents, _ := play()
-	if n != 1 {
-		t.Fatalf("the run redrew %d times at tier 4, want its 1", n)
+	if n < 2 {
+		t.Fatalf("the run redrew %d times, want at least 2 to replay", n)
 	}
 	if !reflect.DeepEqual(firstEvents, secondEvents) || !reflect.DeepEqual(first.Snapshot(), second.Snapshot()) {
 		t.Fatal("the same seed, shop and controls ended in different runs")
@@ -284,7 +280,7 @@ func TestShopBuysByEveryInputAndTheNextRunTakesIt(t *testing.T) {
 	press(t, app2, "id:shop-back")
 	press(t, app2, "id:title-start")
 	base := NewRun(1, 1)
-	if s := g2.run.Snapshot(); s.MaxHealth != base.stats.maxHealth+30 || s.Health != s.MaxHealth || s.Redraws != 2 {
+	if s := g2.run.Snapshot(); s.MaxHealth != base.stats.maxHealth+50 || s.Health != s.MaxHealth || s.Redraws != 2 {
 		t.Fatalf("the next run starts with %v of %v health and %d redraws", s.Health, s.MaxHealth, s.Redraws)
 	}
 
@@ -372,7 +368,7 @@ func TestShopDrawsWithoutTheKit(t *testing.T) {
 		d := &core.Drawing{}
 		entries := shopEntries(tr, shop, Progression{Embers: 120, Shop: map[string]int{"hearth": 5}})
 		drawShop(testPainter(d, size, newHUDArt(nil), settled(0), lang), layoutShop(size, core.Edges{}, len(entries)), entries, 120, 0)
-		for _, want := range []string{tr.ShopTitle, tr.ShopItem("lure", "", "").Name, tr.ShopMax, "100", tr.ShopNow("+30"), tr.Back} {
+		for _, want := range []string{tr.ShopTitle, tr.ShopItem("lure", "", "").Name, tr.ShopMax, "100", tr.ShopNow("+50"), tr.Back} {
 			if !drewText(d.Ops, want) {
 				t.Fatalf("%s: the shop without the kit did not write %q", lang, want)
 			}
