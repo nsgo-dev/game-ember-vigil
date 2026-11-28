@@ -33,13 +33,10 @@ type titleArt struct {
 
 // newTitleArt decodes every PNG under assets/title/ in fsys and packs them: the mist at half size, as it is soft anyway, the keeper and the canopy cut to their painted parts, and the rest in one atlas.
 func newTitleArt(fsys fs.FS) *titleArt {
-	raw := loadKit(fsys, "assets/title")
+	raw := decodeKit(fsys, "assets/title")
 	a := &titleArt{pieces: map[string][]piece{}}
 	rgba := func(name string) *image.RGBA {
-		if img, ok := raw[name]; ok {
-			return img.Pixels
-		}
-		return nil
+		return raw[name]
 	}
 	if img := rgba(titleBG); img != nil {
 		a.pieces[titleBG] = []piece{wholePiece(img, image.Rectangle{Max: img.Bounds().Max})}

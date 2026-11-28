@@ -181,7 +181,7 @@ func (p *overlayPainter) balance(r rect, embers int, u float32) {
 	cx, cy := r.center()
 	side := shopEmblemPt * u
 	if img, ok := p.art.image(hudEmberEmblem); ok {
-		p.d.DrawImageIn(img, cx-side-4*u, cy-side/2, side, side)
+		img.drawIn(p.d, cx-side-4*u, cy-side/2, side, side)
 	} else {
 		p.d.SetFillColor(overlayEmber).BeginPath().Ellipse(cx-side/2-4*u, cy, side/2.4, side/2.4).Fill()
 	}
@@ -212,7 +212,7 @@ func (p *overlayPainter) shopRow(r rect, e shopEntry, focused bool, u float32) {
 	wx, wy := r.x+shopWellX*u, r.y+r.h/2
 	icon := shopIcon * u
 	if img, ok := p.icons.cardIcon(e.id); ok {
-		p.d.DrawImageIn(img, wx-icon/2, wy-icon/2, icon, icon)
+		img.drawIn(p.d, wx-icon/2, wy-icon/2, icon, icon)
 	} else {
 		p.d.SetFillColor(overlayEmber).BeginPath().Ellipse(wx, wy, icon/3, icon/3).Fill()
 	}
@@ -236,7 +236,7 @@ func (p *overlayPainter) shopRow(r rect, e shopEntry, focused bool, u float32) {
 		costW = textW + side + 3*u
 		p.text(cost, right-textW, nameY, shopCostPt*u, true, color, core.TextAlignLeft)
 		if img, ok := p.art.image(hudEmberEmblem); ok {
-			p.d.DrawImageIn(img, right-costW, nameY-side/2, side, side)
+			img.drawIn(p.d, right-costW, nameY-side/2, side, side)
 		}
 	}
 	tx := r.x + shopTextX*u

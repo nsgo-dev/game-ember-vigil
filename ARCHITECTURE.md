@@ -22,7 +22,7 @@ Ember Vigil is an NSGo app with one fixed-step game loop. A run is simulated hea
 | `collection.go`, `chest.go` | The canvas evolution collection reached from the title, and the banner naming what an opened chest gave |
 | `shop.go` | The canvas ember shop reached from the title: its rows, focus and the native buttons that buy |
 | `screens.go` | The invisible native buttons over the canvas title and overlays |
-| `audio.go`, `save.go`, `strings/` | Mixer and cues; settings, records, progression and the shop's buy rule; English and Chinese strings |
+| `audio.go`, `sfx.go`, `save.go`, `strings/` | Mixer and cues, and the software mixer Apple targets play effects through; settings, records, progression and the shop's buy rule; English and Chinese strings |
 | `stats*.go` | Anonymous usage statistics sent to Umami while the settings allow it |
 | `*_test.go` | Headless shell, run and project tests |
 

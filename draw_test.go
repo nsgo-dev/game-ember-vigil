@@ -53,7 +53,7 @@ func isGround(img *core.ImageSource) bool {
 		return false
 	}
 	b := img.Pixels.Bounds()
-	return b.Dx() > 1000 || b.Dy() > 1000
+	return b.Dx() > 1000 && b.Dy() > 1000
 }
 
 // TestArtPacksEveryPictureInsideItsAtlas checks that every picture has a frame inside the atlas image and that no two frames touch.
@@ -229,15 +229,53 @@ func TestFrameDrawsTheRunAndItsGround(t *testing.T) {
 		t.Fatal("drawing changed the run")
 	}
 
-	// The frame also lays the fog of war's crop over the world.
-	fog := 0
-	for _, op := range d.Ops {
+	// In the middle of the field the fog mask is clear, so the frame draws none of it.
+	if a.fog == nil {
+		t.Fatal("the run painted no fog of war")
+	}
+	if got := countFogCrops(d.Ops, a); got != 0 {
+		t.Fatalf("the frame drew %d fog crops in the middle of the field, want none", got)
+	}
+}
+
+// countFogCrops counts the frame's draws of the fog of war's mask.
+func countFogCrops(ops []core.DrawOp, a *arenaRenderer) int {
+	n := 0
+	for _, op := range ops {
 		if op.Kind == core.DrawImage && op.Image != nil && op.Image.Pixels == a.fog {
-			fog++
+			n++
 		}
 	}
-	if a.fog == nil || fog != 1 {
-		t.Fatalf("the frame drew %d fog crops, want 1", fog)
+	return n
+}
+
+// TestTheFogCropCoversTheMaskThatIsNotClear checks that a frame near the arena's edge draws the fog mask over the part of the view outside the field's clear inside, and that no pixel it leaves out holds any fog.
+func TestTheFogCropCoversTheMaskThatIsNotClear(t *testing.T) {
+	r := quietRun(t)
+	a := newTestArena(t, r, 7)
+	stepOnce(r, Controls{})
+	a.sync(r.Snapshot(), r.Events(), stepSeconds)
+	w, h := float32(viewWidth), float32(viewHeight)
+	for _, at := range []Vec2{{X: 0, Y: 0}, {X: 300, Y: 700}, {X: a.arena.X - float64(w), Y: a.arena.Y - float64(h)}, {X: 900, Y: 300}, {X: 900, Y: 750}} {
+		ox, oy := float32(at.X), float32(at.Y)
+		x, y, cw, ch, ok := a.fogCrop(ox, oy, w, h)
+		if ok && (x < 0 || y < 0 || x+cw > w+1e-3 || y+ch > h+1e-3) {
+			t.Fatalf("the fog crop at %v reaches outside the view: %v,%v %vx%v", at, x, y, cw, ch)
+		}
+		for py := float32(0); py < h; py += 2 {
+			for px := float32(0); px < w; px += 2 {
+				if ok && px >= x && px <= x+cw && py >= y && py <= y+ch {
+					continue
+				}
+				mx, my := int((ox+px)/fogScale), int((oy+py)/fogScale)
+				if alpha := a.fog.Pix[a.fog.PixOffset(mx, my)+3]; alpha != 0 {
+					t.Fatalf("the frame at %v leaves out fog of alpha %d at %v,%v", at, alpha, px, py)
+				}
+			}
+		}
+	}
+	if _, _, _, _, ok := a.fogCrop(0, 0, w, h); !ok {
+		t.Fatal("a frame in the arena's corner drew no fog")
 	}
 }
 
@@ -971,12 +1009,11 @@ func TestUpgradeCardIconsLoadAndFallback(t *testing.T) {
 		if !ok {
 			t.Fatalf("missing embedded card icon for %q", id)
 		}
-		if src.Pixels == nil {
+		if src.src.Pixels == nil {
 			t.Fatalf("card icon %q has nil Pixels", id)
 		}
-		b := src.Pixels.Bounds()
-		if b.Dx() != 64 || b.Dy() != 64 {
-			t.Fatalf("card icon %q size = %dx%d, want 64x64", id, b.Dx(), b.Dy())
+		if src.w != 64 || src.h != 64 {
+			t.Fatalf("card icon %q size = %vx%v, want 64x64", id, src.w, src.h)
 		}
 	}
 	if _, ok := a.cardIcon("ember-heal"); ok {
@@ -1100,6 +1137,60 @@ func TestQualityLimitsParticlesAndGlowLights(t *testing.T) {
 	a.draw(d, 1, runView)
 	if got := len(a.lights); got <= low.maxGlowLights {
 		t.Fatalf("high quality emitted %d lights, want more than low cap (%d)", got, low.maxGlowLights)
+	}
+}
+
+// TestACrowdedFrameKeepsWithinTheCanvasImageCache checks that a crowded, struck arena under a full HUD and the level-up cards draws few pixel images, few enough pixels and no new ones between frames: Apple's canvas keeps eight images made from pixels, eight mebipixels in all, and makes again on every frame whatever falls out, the arena's ground among them.
+func TestACrowdedFrameKeepsWithinTheCanvasImageCache(t *testing.T) {
+	r := NewRun(29, 1)
+	r.director.nextSpawn = math.Inf(1)
+	for i := range r.weaponLevels {
+		r.weaponLevels[i] = 5
+	}
+	r.recomputeStats()
+	for i := range 150 {
+		ang := float64(i) * 2 * math.Pi / 150
+		r.addEnemy(i%len(r.data.enemies.Enemies), r.keeper.pos.Add(Vec2{X: math.Cos(ang), Y: math.Sin(ang)}.Scale(48+float64(i%10)*20)), 1e6, 1)
+	}
+	art := newArt()
+	a := newArenaRenderer(art)
+	a.startRun(29)
+	size := core.Size{Width: 874, Height: 402}
+	kit, l := newHUDArt(embeddedHUD), layoutHUD(size, core.Edges{})
+	tr := evstrings.For(evstrings.EN)
+	var motion hudMotion
+	var first map[*image.RGBA]bool
+	for f := range 30 {
+		r.Step(stepTime, Controls{Move: Vec2{X: 1}})
+		a.sync(r.Snapshot(), r.Events(), stepSeconds)
+		d := &core.Drawing{}
+		viewport.Draw(d, size, func(d *core.Drawing, view core.Size) { a.draw(d, 0.5, view) })
+		st := hudStateOf(r.Snapshot(), 0, false)
+		drawHUD(d, l, st, &motion, kit, art, tr, string(evstrings.EN), true, false)
+		p := &overlayPainter{d: d, size: size, art: kit, icons: art, m: &overlayMotion{}, tr: tr, lang: string(evstrings.EN)}
+		drawCards(p, layoutCards(size, core.Edges{}, 3, true), st, 0)
+		seen, px := map[*image.RGBA]bool{}, 0
+		for _, op := range d.Ops {
+			if op.Image != nil && op.Image.Pixels != nil && !seen[op.Image.Pixels] {
+				seen[op.Image.Pixels] = true
+				px += op.Image.Pixels.Rect.Dx() * op.Image.Pixels.Rect.Dy()
+			}
+		}
+		if len(seen) > 8 || px > 1<<23 {
+			t.Fatalf("frame %d drew %d pixel images of %d pixels, want at most 8 of %d", f, len(seen), px, 1<<23)
+		}
+		if first == nil {
+			first = seen
+			continue
+		}
+		for img := range seen {
+			if !first[img] {
+				t.Fatalf("frame %d drew a pixel image the first frame did not: %v", f, img.Rect)
+			}
+		}
+	}
+	if len(a.fx.flash) == 0 {
+		t.Fatal("no enemy was struck, so the frames drew no flash")
 	}
 }
 
