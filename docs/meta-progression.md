@@ -1,6 +1,6 @@
 # Meta progression design
 
-Status: structure agreed with the user; the ember payout and the Long Night tiers are built, and the open questions below remain for the rest.
+Status: structure agreed with the user; the ember payout, the Long Night tiers, chests with evolution and the ember shop are built, and the open questions below remain for the rest.
 
 ## Why
 
@@ -20,7 +20,7 @@ A run was too easy and left nothing behind: the balance bot won 9 of 10 seeds wi
   | 1 | The base run, made harder first (see below) | — |
   | 2 | One more elite per run; a dead elite leaves a shadow zone behind | A Gloomwarden at 6:50; a zone of radius 48 for 14 s, 12 damage every 0.5 s inside |
   | 3 | A smaller lantern light and a shorter view | Embers drawn from 90% as far; sight, spawn ring and spawn view at 80% |
-  | 4 | Fewer healing cards and half regeneration | At most one healing card per level-up; regeneration ×0.5 |
+  | 4 | Fewer healing cards, half regeneration and half shop bonuses | At most one healing card per level-up; regeneration and every shop bonus ×0.5, redraws rounded down |
   | 5 | Faster enemies; the Hollow King arrives a minute early with one more attack | Foes ×1.1 speed and ×1.15 damage; the King at 11:00, adding a 13-bone fan 1 rad wide at ×1.4 bone speed |
 
   Winning a tier opens the next, saved as the highest tier won; tier 1 is always open. The title offers a tier button once a second tier is open, defaulting to the highest; a win that opens a tier picks it for Play Again. The HUD and the results name the tier.
@@ -75,4 +75,4 @@ A run was too easy and left nothing behind: the balance bot won 9 of 10 seeds wi
 ## Open questions
 
 - Exact numbers of the new weapons.
-- Screens: where the shop lives; the collection opens from the title. The results show the embers a run earned, the new balance and what it unlocked.
+- Screens: the shop and the collection open from the title. The results show the embers a run earned, the new balance and what it unlocked.

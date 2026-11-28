@@ -40,6 +40,7 @@ const (
 	actionCard1   = "card_1"
 	actionCard2   = "card_2"
 	actionCard3   = "card_3"
+	actionRedraw  = "redraw"
 	axisMoveX     = "move_x"
 	axisMoveY     = "move_y"
 )
@@ -53,6 +54,7 @@ const (
 	phasePaused
 	phaseSettings
 	phaseCollection
+	phaseShop
 )
 
 // Menu item counts for directional keyboard/gamepad traversal.
@@ -104,8 +106,9 @@ type emberVigil struct {
 	// Persisted settings and lifetime records, plus reactive menu state.
 	settings *core.Signal[Settings]
 	records  *core.Signal[Records]
-	// progress is the saved progression; it changes only as a run ends, before the HUD publishes the results it shows on.
-	progress Progression
+	// progress is the saved progression; it changes as a run ends, before the HUD publishes the results it shows on, and as the shop sells, which bumps shopVersion so the shop's native layer reads it again.
+	progress    Progression
+	shopVersion *core.Signal[int]
 	// tier is the Long Night tier the next run plays, which the title chooses among the open ones.
 	tier           *core.Signal[int]
 	savedSettings  Settings
@@ -155,6 +158,7 @@ func newEmberVigil(cx *core.Scope) *emberVigil {
 		settings:       core.NewSignal(cx, saved),
 		records:        core.NewSignal(cx, recs),
 		progress:       prog,
+		shopVersion:    core.NewSignal(cx, 0),
 		tier:           core.NewSignal(cx, prog.openTier(mustGameData().tiers.maxTier())),
 		savedSettings:  saved,
 		settingsReturn: phaseTitle,
@@ -267,6 +271,8 @@ func (g *emberVigil) update(dt time.Duration) {
 		case g.actions.JustPressed(actionCard3):
 			g.choose(2)
 			return
+		case g.actions.JustPressed(actionRedraw):
+			g.redraw()
 		case g.actions.JustPressed(actionLeft):
 			n := max(1, len(g.run.Snapshot().Offers))
 			g.focusCard((g.cardFocus + n - 1) % n)
@@ -343,6 +349,24 @@ func (g *emberVigil) handleMenuNavigation() {
 	case phaseCollection:
 		if g.actions.JustPressed(actionConfirm) {
 			g.closeCollection()
+		}
+	case phaseShop:
+		n, focus := len(mustGameData().progression.Shop.Items), g.menuFocus.GetUntracked()
+		next := focus
+		switch {
+		case g.actions.JustPressed(actionUp):
+			next = shopFocusMove(focus, n, 0, -1)
+		case g.actions.JustPressed(actionDown):
+			next = shopFocusMove(focus, n, 0, 1)
+		case g.actions.JustPressed(actionLeft):
+			next = shopFocusMove(focus, n, -1, 0)
+		case g.actions.JustPressed(actionRight):
+			next = shopFocusMove(focus, n, 1, 0)
+		case g.actions.JustPressed(actionConfirm):
+			g.confirm()
+		}
+		if next != focus {
+			g.hoverMenu(next)
 		}
 	case phaseSettings:
 		g.stepVerticalFocus(settingsMenuCount)
@@ -444,6 +468,7 @@ func hudStateOf(s Snapshot, cardFocus int, newRecord bool) hudState {
 		bossPhase:     s.Boss.Phase,
 		newRecord:     newRecord,
 		tier:          s.Tier,
+		redraws:       s.Redraws,
 	}
 	for i := range st.weapons {
 		if i < len(s.Weapons) {
@@ -540,6 +565,7 @@ func hasEvent(events []Event, kind EventKind) bool {
 func (g *emberVigil) start() {
 	g.seed = uint64(time.Now().UnixNano())
 	g.run = NewRun(g.seed, g.tier.GetUntracked())
+	g.run.SetShop(g.progress.Shop)
 	if g.progress.has(unlockEvolution) {
 		g.run.EnableEvolution()
 	}
@@ -582,6 +608,18 @@ func (g *emberVigil) commitChoice(index int) {
 		g.actions.Reset()
 		g.publishHUD()
 	}
+}
+
+// redraw deals the level-up a new hand while the run has redraws left, unless a chosen card is already burning.
+func (g *emberVigil) redraw() {
+	if g.run == nil || g.overlay.burning || !g.run.Redraw() {
+		return
+	}
+	g.cardFocus = 0
+	g.overlay.dealCards()
+	g.actions.Reset()
+	g.audio.playCue(cueUISelect)
+	g.publishHUD()
 }
 
 // focusCard moves the level-up's focus to card index.
@@ -638,6 +676,8 @@ func (g *emberVigil) togglePause() {
 		g.closeSettings()
 	case phaseCollection:
 		g.closeCollection()
+	case phaseShop:
+		g.closeShop()
 	}
 }
 
@@ -658,6 +698,45 @@ func (g *emberVigil) closeCollection() {
 	}
 	g.audio.playCue(cueUIClick)
 	g.setPhase(phaseTitle)
+}
+
+// openShop opens the ember shop from the title.
+func (g *emberVigil) openShop() {
+	if g.phase.GetUntracked() != phaseTitle {
+		return
+	}
+	g.overlay.openPanel()
+	g.setPhase(phaseShop)
+	g.audio.playCue(cueUISelect)
+}
+
+// closeShop returns from the shop to the title.
+func (g *emberVigil) closeShop() {
+	if g.phase.GetUntracked() != phaseShop {
+		return
+	}
+	g.audio.playCue(cueUIClick)
+	g.setPhase(phaseTitle)
+}
+
+// buy buys the next level of shop item id and saves the progression at once, so the next run starts with it; an item maxed or too dear only clicks.
+func (g *emberVigil) buy(id string) {
+	if g.phase.GetUntracked() != phaseShop {
+		return
+	}
+	shop := &mustGameData().progression.Shop
+	if i := shop.item(id); i >= 0 && g.menuFocus.GetUntracked() != i {
+		g.menuFocus.Set(i)
+	}
+	prog, ok := buyShopItem(g.progress, shop, id)
+	if !ok {
+		g.audio.playCue(cueUIClick)
+		return
+	}
+	g.progress = prog
+	_ = saveProgression(g.storage, prog)
+	g.shopVersion.Update(func(n int) int { return n + 1 })
+	g.audio.playCue(cueUISelect)
 }
 
 // requestQuitRun asks for confirmation before abandoning an active run.
@@ -812,6 +891,13 @@ func (g *emberVigil) confirm() {
 	case phaseTitle:
 		items := g.titleItems(g.tr())
 		items[max(0, min(len(items)-1, focus))].press()
+	case phaseShop:
+		shop := &mustGameData().progression.Shop
+		if focus < len(shop.Items) {
+			g.buy(shop.Items[focus].ID)
+		} else {
+			g.closeShop()
+		}
 	case phaseArena:
 		if g.run != nil {
 			if p := g.run.Snapshot().Phase; p == PhaseVictory || p == PhaseDefeat {
@@ -1002,7 +1088,7 @@ func (g *emberVigil) draw(d *core.Drawing, size core.Size) {
 	lang := g.settings.GetUntracked().Language
 	tr := evstrings.For(lang)
 	p := &overlayPainter{d: d, size: size, art: g.hudArt, icons: g.art, m: &g.overlay, tr: tr, lang: string(lang), pressed: g.pressed}
-	if ph == phaseTitle || ph == phaseCollection || (ph == phaseSettings && g.settingsReturn == phaseTitle) {
+	if ph == phaseTitle || ph == phaseCollection || ph == phaseShop || (ph == phaseSettings && g.settingsReturn == phaseTitle) {
 		g.drawTitle(p, size, safe, ph != phaseTitle)
 	} else {
 		g.drawArena(d, p, size, safe, alpha)
@@ -1018,6 +1104,10 @@ func (g *emberVigil) draw(d *core.Drawing, size core.Size) {
 	if ph == phaseCollection {
 		entries := collectionEntries(p.tr, recipes(mustGameData()), g.progress.Collection)
 		drawCollection(p, layoutCollection(size, safe, len(entries)), entries)
+	}
+	if ph == phaseShop {
+		shop := &mustGameData().progression.Shop
+		drawShop(p, layoutShop(size, safe, len(shop.Items)), shopEntries(p.tr, shop, g.progress), g.progress.Embers, g.menuFocus.GetUntracked())
 	}
 }
 
@@ -1042,7 +1132,7 @@ func (g *emberVigil) drawArena(d *core.Drawing, p *overlayPainter, size core.Siz
 		drawPause(p, layoutPause(size, safe, confirm), confirm, g.menuFocus.GetUntracked())
 	case ph != phaseArena:
 	case st.phase == PhaseLevelUp:
-		drawCards(p, layoutCards(size, safe, len(g.run.Snapshot().Offers)), st, g.cardFocus)
+		drawCards(p, layoutCards(size, safe, len(g.run.Snapshot().Offers), st.redraws > 0), st, g.cardFocus)
 	case st.phase == PhaseVictory || st.phase == PhaseDefeat:
 		txt := resultsTextOf(tr, st, g.records.GetUntracked(), g.lastReward, g.progress.Embers)
 		drawResults(p, layoutResults(size, safe, txt.unlocked != ""), st, txt, g.menuFocus.GetUntracked())

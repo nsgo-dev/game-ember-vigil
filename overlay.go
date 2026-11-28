@@ -29,6 +29,7 @@ const (
 	cardInsetBottom      = 56
 	cardGapPt            = 16
 	cardLiftPt           = 14
+	cardRedrawGap        = 14
 	overlayMargin        = 16
 	overlayHeadingPt     = 52
 	overlayButtonW       = 176
@@ -154,20 +155,24 @@ func overlayScale(size core.Size, area rect, needW, needH float32) float32 {
 	return max(0.5, u)
 }
 
-// cardLayout places the level-up heading and its cards.
+// cardLayout places the level-up heading, its cards and, while redraws remain, the Redraw button under them.
 type cardLayout struct {
 	scale   float32
 	heading rect
 	cards   [offerCount]rect
+	redraw  rect
 }
 
-// layoutCards sets n cards in a row under their heading, centred in the safe area and as large as fits, up to a little more than the HUD's scale.
-func layoutCards(size core.Size, safe core.Edges, n int) cardLayout {
+// layoutCards sets n cards in a row under their heading, and the Redraw button below them when redraw is set, centred in the safe area and as large as fits, up to a little more than the HUD's scale.
+func layoutCards(size core.Size, safe core.Edges, n int, redraw bool) cardLayout {
 	area := overlayArea(size, safe)
 	n = max(1, min(offerCount, n))
 	cardH := float32(cardBaseW * cardKitH / cardKitW)
 	needW := float32(n)*cardBaseW + float32(n-1)*cardGapPt
 	needH := overlayHeadingPt + cardLiftPt + cardH
+	if redraw {
+		needH += cardRedrawGap + overlayButtonH
+	}
 	s := min(float32(size.Width)/hudRefWidth, float32(size.Height)/hudRefHeight)
 	cs := min(area.w/needW, area.h/needH, max(1, cardMaxScaleOfHUD*s))
 	cs = max(0.5, cs)
@@ -179,6 +184,11 @@ func layoutCards(size core.Size, safe core.Edges, n int) cardLayout {
 	l := cardLayout{scale: cs, heading: rect{area.x, top, area.w, overlayHeadingPt * cs}}
 	for i := range n {
 		l.cards[i] = rect{left + float32(i)*(w+cardGapPt*cs), top + (overlayHeadingPt+cardLiftPt)*cs, w, h}
+	}
+	if redraw {
+		// The button scales with the cards to fit; its native button still grows to a thumb's size.
+		bw := overlayButtonW * cs
+		l.redraw = rect{area.x + (area.w-bw)/2, l.cards[0].y + h + cardRedrawGap*cs, bw, overlayButtonH * cs}
 	}
 	return l
 }
@@ -568,6 +578,9 @@ func drawCards(p *overlayPainter, l cardLayout, st hudState, focus int) {
 	p.d.Save()
 	p.d.SetAlpha(float32(m.dealt(0)) * (1 - burn))
 	p.heading(p.tr.Level(st.level), l.heading, l.scale)
+	if st.redraws > 0 && l.redraw.w > 0 {
+		p.button("level-up-redraw", p.tr.Redraw(st.redraws), l.redraw, l.scale, buttonPlain, false)
+	}
 	p.d.Restore()
 	n := 0
 	for i, c := range st.offers {

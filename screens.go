@@ -70,8 +70,9 @@ type hudState struct {
 	// tier is the Long Night tier the run plays.
 	tier    int
 	weapons [maxHUDWeapons]hudSlot
-	// offers are the cards a level-up offers, empty when none is open.
-	offers [offerCount]hudCard
+	// offers are the cards a level-up offers, empty when none is open, and redraws how many times they may still be redrawn.
+	offers  [offerCount]hudCard
+	redraws int
 }
 
 // view is the game's whole screen: the arena canvas, and over it the native views of the current screen.
@@ -108,6 +109,7 @@ func (g *emberVigil) view() core.Node {
 			g.when(phasePaused, func() core.Node { return dynamic(g.paused) }),
 			g.when(phaseSettings, func() core.Node { return dynamic(g.settingsView) }),
 			g.when(phaseCollection, func() core.Node { return dynamic(g.collectionView) }),
+			g.when(phaseShop, func() core.Node { return dynamic(g.shopView) }),
 		},
 	}
 }
@@ -145,7 +147,7 @@ func (g *emberVigil) levelUp() core.Node {
 			n++
 		}
 	}
-	l := layoutCards(g.viewSize.Get(), g.cx.Env().SafeArea(), n)
+	l := layoutCards(g.viewSize.Get(), g.cx.Env().SafeArea(), n, st.redraws > 0)
 	var cards []core.Node
 	for i, c := range st.offers {
 		if c.name == "" {
@@ -155,6 +157,9 @@ func (g *emberVigil) levelUp() core.Node {
 		copyText := tr.Card(c.id, c.name, c.description)
 		cards = append(cards, g.hitButton("level-up-card-"+strconv.Itoa(i), copyText.Name, copyText.Description, l.cards[i],
 			func() { g.choose(idx) }, func() { g.focusCard(idx) }))
+	}
+	if st.redraws > 0 {
+		cards = append(cards, g.hitButton("level-up-redraw", tr.Redraw(st.redraws), tr.RedrawHint, l.redraw, g.redraw, func() {}))
 	}
 	return overlayLayer("level-up", tr.Level(st.level), cards...)
 }

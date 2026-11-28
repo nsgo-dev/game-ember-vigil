@@ -58,7 +58,7 @@ At 12:00 the director stops normal spawns, clears space and spawns the Hollow Ki
 
 `upgrades.go` owns four weapon slots and four passive slots. The starter Ember Bolt fills one weapon slot at the start. The offer pool is every owned weapon and passive below level five plus every new weapon or passive that still fits a slot.
 
-Three distinct cards are drawn from the pool on the offer stream. If fewer than three remain, the rest are healing cards, up to the limit the run's tier sets. There is no reroll in the first version. Applying a card raises a level and recomputes one derived stat block: damage, cooldown, area, move speed, max health, regeneration, pickup radius and XP gain. Weapons read the block every step instead of caching a modified copy.
+Three distinct cards are drawn from the pool on the offer stream. If fewer than three remain, the rest are healing cards, up to the limit the run's tier sets. `Redraw` spends one of the run's redraws on a new hand from the same stream, putting the cards it replaces after the rest of the pool so they return only when nothing else is left. Applying a card raises a level and recomputes one derived stat block: damage, cooldown, area, move speed, max health, regeneration, pickup radius and XP gain. Weapons read the block every step instead of caching a modified copy.
 
 ## Chests and evolution
 
@@ -67,6 +67,10 @@ An enemy marked `chest` in `data/enemies.yaml` (the Gloomwarden) drops a chest i
 An evolution keeps the weapon's last level and adds its own behaviour from `data/weapons.yaml`: Starfall Volley splits each bolt into small shots on hit, Sun Ring burns a whole band at the halo's orbit, Wildfire Path drops patches to the sides and merges wild patches that touch while the circle around both stays within `maxRadius`, and Dawn Bell stuns struck foes (never the Hollow King) and heals the keeper. `Evolutions()` lists the recipes a run made; the shell records each one in the collection as `EventEvolve` reports it.
 
 The balance bot plays tier 1 with and without evolution. Over 120 seeds the sharp bot wins about 73% without it and 82% with it, and evolution shortens the Hollow King fight by about 15%; `bot_test.go` holds both within 6 to 8 wins on seeds 1–10 and evolved fights at least 10% shorter on the seeds both won.
+
+## The ember shop
+
+`data/progression.yaml` lists the shop's items, each adding its `amount` per level to a stat the passives use or to the redraws, and the cost of each level. `SetShop` hands the run the levels the progression holds before the first step; a replay must pass the same ones. The levels add to the passives in `recomputeStats`, after which the keeper starts at full health, and give `Redraws` in the snapshot. Tier 4's `shop` rule in `data/tiers.yaml` halves every bonus from that tier on, rounding redraws down. Buying is `buyShopItem` in `save.go`, a pure rule on the progression; the shell saves after each sale.
 
 ## Payout and unlocks
 

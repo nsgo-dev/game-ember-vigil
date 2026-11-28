@@ -1,7 +1,9 @@
 package main
 
 import (
+	"cmp"
 	"math"
+	"slices"
 
 	"github.com/nsgo-dev/game/packages/game/random"
 )
@@ -79,6 +81,24 @@ func (r *Run) recomputeStats() {
 			next.xpMul += amount
 		}
 	}
+	// The shop's bonuses add to the passives', weakened by the run's Long Night tier.
+	shop := &r.data.progression.Shop
+	for i, level := range r.shopLevels {
+		it := &shop.Items[i]
+		amount := it.Amount * float64(level) * r.rules.shop
+		switch it.Stat {
+		case statDamage:
+			next.damageMul += amount
+		case statCooldown:
+			next.cooldownMul -= amount
+		case statMoveSpeed:
+			next.moveSpeed += amount
+		case statMaxHealth:
+			next.maxHealth += amount
+		case statPickup:
+			next.pickupRadius += amount
+		}
+	}
 	next.regen *= r.rules.regen
 	next.pickupRadius *= r.rules.light
 	next.cooldownMul = math.Max(next.cooldownMul, 0.2)
@@ -107,10 +127,15 @@ func (r *Run) ownedPassives() int {
 	return n
 }
 
-// drawOffers takes three distinct cards from the pool on the offer stream, filling what is missing with healing cards.
-func (r *Run) drawOffers() []offer {
+// drawOffers takes three distinct cards from the pool on the offer stream, filling what is missing with healing cards. A redraw passes the cards it replaces, which come only once the rest of the pool is used up.
+func (r *Run) drawOffers(replaced ...offer) []offer {
 	pool := r.offerPool()
 	random.Shuffle(r.offers, pool)
+	if len(replaced) > 0 {
+		slices.SortStableFunc(pool, func(a, b offer) int {
+			return cmp.Compare(offered(replaced, a.id), offered(replaced, b.id))
+		})
+	}
 	out := make([]offer, 0, offerCount)
 	out = append(out, pool[:min(offerCount, len(pool))]...)
 	h := r.data.upgrades.Healing
@@ -130,6 +155,16 @@ func (r *Run) drawOffers() []offer {
 		})
 	}
 	return out
+}
+
+// offered is 1 when cards holds the card id and 0 otherwise, which sorts the cards a redraw replaces last.
+func offered(cards []offer, id string) int {
+	for i := range cards {
+		if cards[i].id == id {
+			return 1
+		}
+	}
+	return 0
 }
 
 // offerPool is every eligible weapon and passive still below its maximum level and fitting within the slot caps, in data order.

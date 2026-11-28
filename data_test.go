@@ -294,6 +294,22 @@ func TestDataLoadersRefuseBrokenFiles(t *testing.T) {
 			_, err := parseProgressionFile(fileProgression, withUnlock("  - id: a\n    name: A\n    win: true\n  - id: a\n    name: B\n    kills: 1\n"))
 			return err
 		}},
+		{"a shop level costing nothing", func() error {
+			_, err := parseProgressionFile(fileProgression, replace(progressionYAML, "    - 50\n", "    - 0\n"))
+			return err
+		}},
+		{"a shop item of an unknown stat", func() error {
+			_, err := parseProgressionFile(fileProgression, replace(progressionYAML, "stat: pickup", "stat: luck"))
+			return err
+		}},
+		{"a shop item defined twice", func() error {
+			_, err := parseProgressionFile(fileProgression, replace(progressionYAML, "id: lure", "id: hearth"))
+			return err
+		}},
+		{"a shop of part redraws", func() error {
+			_, err := parseProgressionFile(fileProgression, replace(progressionYAML, "amount: 1\n", "amount: 0.5\n"))
+			return err
+		}},
 		{"enemies with unknown motion", func() error {
 			_, err := parseEnemyFile(fileEnemies, replace(enemyYAML, "motion: ranged", "motion: teleport"))
 			return err

@@ -34,6 +34,8 @@ type tierDef struct {
 	// HealCards is the most healing cards one level-up offers; Regen multiplies regeneration.
 	HealCards int     `yaml:"healCards,omitempty"`
 	Regen     float64 `yaml:"regen,omitempty"`
+	// Shop multiplies every bonus the ember shop's items give.
+	Shop float64 `yaml:"shop,omitempty"`
 	// EnemySpeed multiplies every foe's speed, BossEarlier brings the Hollow King that many seconds sooner, and Volley is the attack he adds.
 	EnemySpeed  float64   `yaml:"enemySpeed,omitempty"`
 	BossEarlier float64   `yaml:"bossEarlier,omitempty"`
@@ -67,6 +69,7 @@ type tierRules struct {
 	sight       float64
 	healCards   int
 	regen       float64
+	shop        float64
 	enemySpeed  float64
 	bossEarlier float64
 	volley      volleyDef
@@ -82,7 +85,7 @@ func (f *tierFile) clampTier(tier int) int { return max(1, min(tier, f.maxTier()
 
 // rules folds the rules of tiers 2 to tier into one, and merges the added elites into waves' in time order.
 func (f *tierFile) rules(tier int, waves *waveFile) tierRules {
-	r := tierRules{light: 1, sight: 1, regen: 1, enemySpeed: 1, health: 1, damage: 1, elites: waves.Elites}
+	r := tierRules{light: 1, sight: 1, regen: 1, shop: 1, enemySpeed: 1, health: 1, damage: 1, elites: waves.Elites}
 	added := false
 	for i := range f.Tiers[:f.clampTier(tier)-1] {
 		t := &f.Tiers[i]
@@ -107,6 +110,9 @@ func (f *tierFile) rules(tier int, waves *waveFile) tierRules {
 		}
 		if t.Regen > 0 {
 			r.regen *= t.Regen
+		}
+		if t.Shop > 0 {
+			r.shop *= t.Shop
 		}
 		if t.EnemySpeed > 0 {
 			r.enemySpeed *= t.EnemySpeed
@@ -166,7 +172,7 @@ func (f *tierFile) validate() error {
 func (t *tierDef) validate() error {
 	ratio := func(v float64) bool { return v == 0 || positive(v) }
 	switch {
-	case len(t.Elites) == 0 && t.Shadow == (shadowDef{}) && t.Light == 0 && t.Sight == 0 && t.HealCards == 0 && t.Regen == 0 &&
+	case len(t.Elites) == 0 && t.Shadow == (shadowDef{}) && t.Light == 0 && t.Sight == 0 && t.HealCards == 0 && t.Regen == 0 && t.Shop == 0 &&
 		t.EnemySpeed == 0 && t.BossEarlier == 0 && t.Volley == (volleyDef{}):
 		return errors.New("adds no rule")
 	case !ratio(t.Light) || t.Light > 1:
@@ -177,6 +183,8 @@ func (t *tierDef) validate() error {
 		return fmt.Errorf("healCards %d is not from 0 to %d", t.HealCards, offerCount-1)
 	case !ratio(t.Regen):
 		return fmt.Errorf("regen %v is negative", t.Regen)
+	case !ratio(t.Shop) || t.Shop > 1:
+		return fmt.Errorf("shop %v is not in (0, 1]", t.Shop)
 	case !ratio(t.EnemySpeed):
 		return fmt.Errorf("enemySpeed %v is negative", t.EnemySpeed)
 	case !finite(t.BossEarlier) || t.BossEarlier < 0:

@@ -27,6 +27,11 @@ func TestTablesAreComplete(t *testing.T) {
 				t.Errorf("lang %q: evolution %q is incomplete: %+v", lang, id, c)
 			}
 		}
+		for _, id := range []string{"banked-fire", "lamp-oil", "hearth", "light-foot", "lure", "redraw"} {
+			if c := tbl.ShopItems[id]; c.Name == "" || c.Description == "" {
+				t.Errorf("lang %q: shop item %q is incomplete: %+v", lang, id, c)
+			}
+		}
 		if tbl.Unlocks["evolution"] == "" {
 			t.Errorf("lang %q: the evolution unlock has no name", lang)
 		}
