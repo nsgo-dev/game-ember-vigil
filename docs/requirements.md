@@ -19,7 +19,7 @@ Ember Vigil is a survivors-like 2D game: the last keeper of the First Ember walk
 The first version is one playable run on one open arena:
 
 - One keeper and one map, the Cinderwood Grove, roughly 1920×1280 world units. Decor is drawn but never blocks movement.
-- Four weapons, five levels each: Ember Bolt (auto-aimed shots), Lantern Halo (orbiting embers), Cinder Trail (burning ground) and Bell Toll (a knockback pulse).
+- Six weapons, five levels each: Ember Bolt (auto-aimed shots), Lantern Halo (orbiting embers), Cinder Trail (burning ground) and Bell Toll (a knockback pulse), and two a run unlocks, Spark Chain (a spark leaping between foes) and Ash Censer (a burst lobbed at the densest crowd). Four slots cannot hold them all.
 - Eight passives, five levels each: Wick (damage), Oil (cooldown), Reach (area), Step (move speed), Warmth (max health), Mending (regeneration), Gathering (pickup radius) and Glow (XP gain).
 - Six enemy kinds: Ash Mite, Moth, Husk, Thornling, Wisp and Shade, plus the Gloomwarden elite and the Hollow King boss.
 - Embers drop XP. Each level pauses the run and offers three upgrade cards. Four weapon slots and four passive slots fit in a run; a full build falls back to healing.

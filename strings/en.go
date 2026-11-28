@@ -35,6 +35,8 @@ var enTable = Table{
 		"lantern-halo": {Name: "Lantern Halo", Description: "Orbiting embers that scorch nearby foes."},
 		"cinder-trail": {Name: "Cinder Trail", Description: "Leaves burning ash patches along your path."},
 		"bell-toll":    {Name: "Bell Toll", Description: "Rings a shockwave that blasts foes back."},
+		"spark-chain":  {Name: "Spark Chain", Description: "A spark leaps between nearby foes, 3 jumps rising to 6."},
+		"ash-censer":   {Name: "Ash Censer", Description: "Lobs a censer at the densest crowd; it bursts and leaves a small fire."},
 		"wick":         {Name: "Wick", Description: "+15% weapon damage per level."},
 		"oil":          {Name: "Oil", Description: "-8% weapon cooldown per level."},
 		"reach":        {Name: "Reach", Description: "+12% weapon area per level."},
@@ -57,6 +59,8 @@ var enTable = Table{
 		"sun-ring":        {Name: "Sun Ring", Description: "The orbs join into one continuous burning ring.", Hint: "The halo longs for a wider light."},
 		"wildfire-path":   {Name: "Wildfire Path", Description: "Fire spreads sideways and touching patches merge.", Hint: "The trail longs for swifter feet."},
 		"dawn-bell":       {Name: "Dawn Bell", Description: "The pulse briefly stuns foes and heals you a little.", Hint: "The bell longs for a warmer heart."},
+		"ember-storm":     {Name: "Ember Storm", Description: "Every jump forks to one more foe.", Hint: "The spark longs for a hotter wick."},
+		"pyre-censer":     {Name: "Pyre Censer", Description: "Each burst first pulls foes and embers to its centre.", Hint: "The censer longs to gather more."},
 	},
 
 	RedrawPrefix: "Redraw ",
@@ -116,7 +120,7 @@ var enTable = Table{
 	EmberBalanceFmt: "Balance ",
 	UnlockedPrefix:  "Unlocked: ",
 	UnlockSeparator: ", ",
-	Unlocks:         map[string]string{"evolution": "Weapon evolution"},
+	Unlocks:         map[string]string{"evolution": "Weapon evolution", "spark-chain": "Spark Chain", "ash-censer": "Ash Censer"},
 	PlayAgain:       "Play Again",
 	TitleButton:     "Title",
 }

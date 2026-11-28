@@ -569,6 +569,7 @@ func (g *emberVigil) start() {
 	if g.progress.has(unlockEvolution) {
 		g.run.EnableEvolution()
 	}
+	g.run.UnlockWeapons(g.progress.Unlocked)
 	g.scene.startRun(g.seed)
 	g.applyLiveSettings(g.settings.GetUntracked())
 	g.hudClock = 0

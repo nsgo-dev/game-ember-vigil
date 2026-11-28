@@ -35,6 +35,8 @@ var zhCNTable = Table{
 		"lantern-halo": {Name: "提灯火环", Description: "环绕周身的余烬灼烧附近敌人。"},
 		"cinder-trail": {Name: "烬火之径", Description: "在行进路径上留下燃烧的灰烬。"},
 		"bell-toll":    {Name: "钟鸣震波", Description: "敲响冲击波击退周围敌人。"},
+		"spark-chain":  {Name: "火花连锁", Description: "火花在附近敌人间跳跃，跳跃 3 次，最多 6 次。"},
+		"ash-censer":   {Name: "灰烬香炉", Description: "向最密集的敌群抛出香炉，炸开后留下一小片火焰。"},
 		"wick":         {Name: "灯芯", Description: "每级武器伤害 +15%。"},
 		"oil":          {Name: "灯油", Description: "每级武器冷却 -8%。"},
 		"reach":        {Name: "照域", Description: "每级武器范围 +12%。"},
@@ -57,6 +59,8 @@ var zhCNTable = Table{
 		"sun-ring":        {Name: "日轮", Description: "环绕的余烬连成一道持续燃烧的火环。", Hint: "火环渴望更广的光芒。"},
 		"wildfire-path":   {Name: "野火之径", Description: "火焰向两侧蔓延，相触的火堆彼此合并。", Hint: "烬火渴望更轻快的脚步。"},
 		"dawn-bell":       {Name: "破晓之钟", Description: "震波短暂震晕敌人，并为你恢复少许生命。", Hint: "钟声渴望一颗更温暖的心。"},
+		"ember-storm":     {Name: "余烬风暴", Description: "每次跳跃都会分叉，多击中一个敌人。", Hint: "火花渴望更炽热的灯芯。"},
+		"pyre-censer":     {Name: "焚燎香炉", Description: "每次炸开前，先把敌人和余烬吸向中心。", Hint: "香炉渴望聚拢更多。"},
 	},
 
 	RedrawPrefix: "重抽",
@@ -116,7 +120,7 @@ var zhCNTable = Table{
 	EmberBalanceFmt: "余烬总数 ",
 	UnlockedPrefix:  "已解锁：",
 	UnlockSeparator: "、",
-	Unlocks:         map[string]string{"evolution": "武器进化"},
+	Unlocks:         map[string]string{"evolution": "武器进化", "spark-chain": "火花连锁", "ash-censer": "灰烬香炉"},
 	PlayAgain:       "再来一局",
 	TitleButton:     "返回标题",
 }

@@ -175,6 +175,10 @@ func cardAccent(id, kind string) core.Color {
 		return healthColor
 	case "bell-toll":
 		return core.RGB(0x8a93a8)
+	case "spark-chain":
+		return core.RGB(0xffd166)
+	case "ash-censer":
+		return core.RGB(0x9c6b4a)
 	}
 	switch kind {
 	case offerWeapon:
@@ -197,6 +201,10 @@ func cardGlyph(id string) string {
 		return "CT"
 	case "bell-toll":
 		return "BT"
+	case "spark-chain":
+		return "SC"
+	case "ash-censer":
+		return "AC"
 	case "wick":
 		return "WK"
 	case "oil":

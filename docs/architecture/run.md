@@ -2,7 +2,7 @@
 
 `run.go` simulates one run without NSGo: no views, devices, sound, storage or wall clock. The shell steps it at 60 Hz with one `Controls` value and reads back the step's events and a snapshot. Tests step it the same way, so every rule is testable headlessly and a seed plus a list of controls replays a run.
 
-Today the model runs the complete twelve-minute run: the keeper, all four weapons (Ember Bolt, Lantern Halo, Cinder Trail, Bell Toll) and their evolutions, all eight passives with four weapon and four passive slots, all six regular enemies (Ash Mite, Moth, Husk, Thornling, Wisp, Shade), the Gloomwarden elite with healing caches and chests, surges, and the three-phase Hollow King boss at 12:00.
+Today the model runs the complete twelve-minute run: the keeper, all six weapons (Ember Bolt, Lantern Halo, Cinder Trail, Bell Toll and the unlockable Spark Chain and Ash Censer) and their evolutions, all eight passives with four weapon and four passive slots, all six regular enemies (Ash Mite, Moth, Husk, Thornling, Wisp, Shade), the Gloomwarden elite with healing caches and chests, surges, and the three-phase Hollow King boss at 12:00.
 
 ## Time
 
@@ -29,7 +29,7 @@ A generic ECS would fit, but the game has a fixed set of shapes and a hot loop. 
 2. Tick cooldowns, invulnerability and status timers.
 3. Let the wave director spawn; update the boss phase and spawns.
 4. Move enemies and shots; resolve enemy separation, contact and hits.
-5. Apply weapon effects: bolts, the halo, trail patches and bell pulses.
+5. Apply weapon effects: bolts, the halo, trail patches, bell pulses, spark leaps and censers.
 6. Kill, drop embers, pull them toward the keeper, collect XP.
 7. Fill the XP bar; when it passes the threshold, stop and prepare three cards.
 8. Advance the clock; report victory or defeat.
@@ -39,7 +39,7 @@ The run stops between steps while cards are open. `Choose` applies one card, rec
 ## Combat and collision
 
 - A uniform grid of 32-unit cells, rebuilt each step, answers circle queries for shots, the halo, pulses and pickup. Enemy separation uses the same grid.
-- Enemy contact has a short invulnerability window. Each weapon keeps its own per-target cooldown so a lingering patch or halo cannot tick every step.
+- Enemy contact has a short invulnerability window. Each lingering weapon keeps a per-target cooldown so a patch or halo cannot tick every step; Cinder Trail and an Ash Censer's fire are both ground fire and share one, so they do not stack on a foe.
 - Knockback moves enemies along the hit direction; the boss resists it.
 - The arena has no blocking obstacles in the first version. Clamping to the world bounds is the only wall; the keeper, embers and heal caches clamp to the field inside the fog band, while enemies and shots roam the whole arena.
 - Damage, health, speeds and caps come from `data/*.yaml`; the code holds no balance numbers beyond defaults for a missing file.
@@ -56,17 +56,21 @@ At 12:00 the director stops normal spawns, clears space and spawns the Hollow Ki
 
 ## Upgrades
 
-`upgrades.go` owns four weapon slots and four passive slots. The starter Ember Bolt fills one weapon slot at the start. The offer pool is every owned weapon and passive below level five plus every new weapon or passive that still fits a slot.
+`upgrades.go` owns four weapon slots and four passive slots. The starter Ember Bolt fills one weapon slot at the start. The offer pool is every owned weapon and passive below level five plus every new weapon or passive that still fits a slot. A weapon whose `unlock` names an entry in `data/progression.yaml` stays out of the pool until the shell passes that id to `UnlockWeapons` before the first step; a replay must pass the same ids.
 
 Three distinct cards are drawn from the pool on the offer stream. If fewer than three remain, the rest are healing cards, up to the limit the run's tier sets. `Redraw` spends one of the run's redraws on a new hand from the same stream, putting the cards it replaces after the rest of the pool so they return only when nothing else is left. Applying a card raises a level and recomputes one derived stat block: damage, cooldown, area, move speed, max health, regeneration, pickup radius and XP gain. Weapons read the block every step instead of caching a modified copy.
+
+## Spark Chain and Ash Censer
+
+`weapons.go` holds the two weapons a run unlocks. Spark Chain strikes the nearest living foe in `range` and leaps to the nearest foe it has not struck within `jumpRange`, striking the level's `count` foes in all; the hits land in the step it casts, and the snapshot's `Arcs` keep each leap for `duration` so the arena can draw it. Ash Censer picks, among the foes in `range`, the one whose burst would catch the most foes, and flies `flight` seconds to where it stood; the snapshot's `Censers` show it in flight. It then bursts with the level's damage, knockback and radius and leaves a fire patch `fireRadius` of the burst wide that burns `fireDamage` of it each `tick`. A censer carries the stats it was thrown with.
 
 ## Chests and evolution
 
 An enemy marked `chest` in `data/enemies.yaml` (the Gloomwarden) drops a chest inside the field. Walking over one opens it and moves the run to `PhaseChest`, which holds the world still for the chest's `hold` in `data/run.yaml` while the shell plays the flourish; the run clock stops as it does for cards. The chest evolves the first weapon, in data order, that is at its last level, held with the passive its `evolution` names and not yet evolved, but only after the shell calls `EnableEvolution`, which it does once the first win has unlocked `evolution`; a replay must call it the same way. Otherwise the hold ends in a free level-up card that spends no XP. Every chest pays its embers.
 
-An evolution keeps the weapon's last level and adds its own behaviour from `data/weapons.yaml`: Starfall Volley splits each bolt into small shots on hit, Sun Ring burns a whole band at the halo's orbit, Wildfire Path drops patches to the sides and merges wild patches that touch while the circle around both stays within `maxRadius`, and Dawn Bell stuns struck foes (never the Hollow King) and heals the keeper. `Evolutions()` lists the recipes a run made; the shell records each one in the collection as `EventEvolve` reports it.
+An evolution keeps the weapon's last level and adds its own behaviour from `data/weapons.yaml`: Starfall Volley splits each bolt into small shots on hit, Sun Ring burns a whole band at the halo's orbit, Wildfire Path drops patches to the sides and merges wild patches that touch while the circle around both stays within `maxRadius`, Dawn Bell stuns struck foes (never the Hollow King) and heals the keeper, Ember Storm forks from every foe the spark strikes to `fork` more nearby foes that leap no further (at most `maxChainHits` a cast), and Pyre Censer, once it lands, pulls foes (never the Hollow King) and embers within `pullRadius` toward its centre for `pull` seconds before it bursts. `Evolutions()` lists the recipes a run made; the shell records each one in the collection as `EventEvolve` reports it.
 
-The balance bot plays tier 1 with and without evolution. Over 120 seeds the sharp bot wins about 73% without it and 82% with it, and evolution shortens the Hollow King fight by about 15%; `bot_test.go` holds both within 6 to 8 wins on seeds 1–10 and evolved fights at least 10% shorter on the seeds both won.
+The balance bot plays tier 1 with and without evolution. Over 120 seeds the sharp bot wins about 73% without it and 82% with it, and evolution shortens the Hollow King fight by about 15%; `bot_test.go` holds both within 6 to 8 wins on seeds 1–10 and evolved fights at least 10% shorter on the seeds both won. Its evolved bot also unlocks Spark Chain and Ash Censer, which were tuned to add choice rather than power, as [the design](../meta-progression.md) records.
 
 ## The ember shop
 
@@ -74,7 +78,7 @@ The balance bot plays tier 1 with and without evolution. Over 120 seeds the shar
 
 ## Payout and unlocks
 
-A finished run reports what it earned without touching storage. `Payout()` counts whole minutes survived, whole hundreds of kills, chests opened and a win at the rates in `data/progression.yaml`, multiplied by 1 + `tierBonus` for each step the run's Long Night tier is above 1. `Unlocks()` lists the unlocks whose every condition (kills, elites defeated, a win) the run met. The shell adds both to the progression save and names only the unlocks that are new.
+A finished run reports what it earned without touching storage. `Payout()` counts whole minutes survived, whole hundreds of kills, chests opened and a win at the rates in `data/progression.yaml`, multiplied by 1 + `tierBonus` for each step the run's Long Night tier is above 1. `Unlocks()` lists the unlocks whose every condition (kills, elites defeated, a win) the run met: `evolution` for a win, `spark-chain` for 3000 kills and `ash-censer` for three elites. The shell adds both to the progression save and names only the unlocks that are new.
 
 ## Long Night tiers
 

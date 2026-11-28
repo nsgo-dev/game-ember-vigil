@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"math"
+	"slices"
 	"sync"
 
 	"go.yaml.in/yaml/v3"
@@ -40,6 +41,10 @@ const (
 	weaponHalo  = "halo"
 	weaponTrail = "trail"
 	weaponBell  = "bell"
+	// weaponChain strikes a foe and leaps on to the nearest foes it has not struck.
+	weaponChain = "chain"
+	// weaponCenser lobs a censer at the densest crowd, which bursts where it lands and leaves a fire.
+	weaponCenser = "censer"
 )
 
 // unlockEvolution is the id in data/progression.yaml of the unlock that lets chests evolve weapons.
@@ -144,20 +149,28 @@ type weaponFile struct {
 
 // weaponDef is one weapon's identity, kind-specific geometry and per-level scaling.
 type weaponDef struct {
-	ID          string           `yaml:"id"`
-	Name        string           `yaml:"name"`
-	Kind        string           `yaml:"kind"`
-	Description string           `yaml:"description"`
-	CooldownMin float64          `yaml:"cooldownMin"`
-	Range       float64          `yaml:"range,omitempty"`
-	ShotSpeed   float64          `yaml:"shotSpeed,omitempty"`
-	ShotRadius  float64          `yaml:"shotRadius,omitempty"`
-	ShotLife    float64          `yaml:"shotLife,omitempty"`
-	Spread      float64          `yaml:"spread,omitempty"`
-	OrbRadius   float64          `yaml:"orbRadius,omitempty"`
-	OrbitSpeed  float64          `yaml:"orbitSpeed,omitempty"`
-	Duration    float64          `yaml:"duration,omitempty"`
-	Levels      []weaponLevelDef `yaml:"levels"`
+	ID          string  `yaml:"id"`
+	Name        string  `yaml:"name"`
+	Kind        string  `yaml:"kind"`
+	Description string  `yaml:"description"`
+	CooldownMin float64 `yaml:"cooldownMin"`
+	Range       float64 `yaml:"range,omitempty"`
+	ShotSpeed   float64 `yaml:"shotSpeed,omitempty"`
+	ShotRadius  float64 `yaml:"shotRadius,omitempty"`
+	ShotLife    float64 `yaml:"shotLife,omitempty"`
+	Spread      float64 `yaml:"spread,omitempty"`
+	OrbRadius   float64 `yaml:"orbRadius,omitempty"`
+	OrbitSpeed  float64 `yaml:"orbitSpeed,omitempty"`
+	Duration    float64 `yaml:"duration,omitempty"`
+	// Unlock is the id of the unlock in data/progression.yaml a player needs before a run offers the weapon; empty for a weapon always offered.
+	Unlock string `yaml:"unlock,omitempty"`
+	// A chain leaps from foe to foe within JumpRange.
+	JumpRange float64 `yaml:"jumpRange,omitempty"`
+	// A censer flies Flight seconds and leaves a fire FireRadius of its burst's radius wide, dealing FireDamage of the burst's damage each tick.
+	Flight     float64          `yaml:"flight,omitempty"`
+	FireRadius float64          `yaml:"fireRadius,omitempty"`
+	FireDamage float64          `yaml:"fireDamage,omitempty"`
+	Levels     []weaponLevelDef `yaml:"levels"`
 	// Evolution is the form the weapon takes at its last level, held with its paired passive, when the keeper opens a chest; nil when it has none.
 	Evolution *evolutionDef `yaml:"evolution,omitempty"`
 }
@@ -187,6 +200,12 @@ type evolutionDef struct {
 	// A bell stuns each foe it strikes for Stun seconds, the Hollow King excepted, and heals the keeper Heal per pulse.
 	Stun float64 `yaml:"stun,omitempty"`
 	Heal float64 `yaml:"heal,omitempty"`
+	// A chain also forks to Fork more foes near each foe it strikes, and the forks leap no further.
+	Fork int `yaml:"fork,omitempty"`
+	// A censer first pulls the foes and embers within PullRadius of where it lands toward its centre at PullSpeed for Pull seconds, then bursts.
+	Pull       float64 `yaml:"pull,omitempty"`
+	PullRadius float64 `yaml:"pullRadius,omitempty"`
+	PullSpeed  float64 `yaml:"pullSpeed,omitempty"`
 }
 
 // weaponLevelDef is one level of a weapon.
@@ -504,6 +523,18 @@ func (d *gameData) check() error {
 		}
 		d.starterWeapon = starter
 	}
+	for i := range d.weapons.Weapons {
+		w := &d.weapons.Weapons[i]
+		if w.Unlock == "" {
+			continue
+		}
+		if w.Name == d.weapons.Starter {
+			return fmt.Errorf("%s: starter weapon %q cannot be locked", fileWeapons, w.Name)
+		}
+		if !slices.ContainsFunc(d.progression.Unlocks, func(u unlockDef) bool { return u.ID == w.Unlock }) {
+			return fmt.Errorf("%s: weapon %q: no unlock %q in %s", fileWeapons, w.Name, w.Unlock, fileProgression)
+		}
+	}
 	d.evolutionPassive = make([]int, len(d.weapons.Weapons))
 	for i := range d.weapons.Weapons {
 		d.evolutionPassive[i] = -1
@@ -793,6 +824,20 @@ func (w *weaponDef) validate() error {
 	case len(w.Levels) == 0:
 		return fail("has no levels")
 	}
+	// Each kind tunes only its own fields; shared ones are named by every kind that uses them.
+	shot := w.ShotSpeed != 0 || w.ShotRadius != 0 || w.ShotLife != 0 || w.Spread != 0
+	orbit := w.OrbRadius != 0 || w.OrbitSpeed != 0
+	censer := w.Flight != 0 || w.FireRadius != 0 || w.FireDamage != 0
+	other := func(allowed ...bool) bool {
+		// allowed holds, for range, duration, jumpRange, shot, orbit and censer fields, whether this kind may set them.
+		set := [...]bool{w.Range != 0, w.Duration != 0, w.JumpRange != 0, shot, orbit, censer}
+		for i, isSet := range set {
+			if isSet && !allowed[i] {
+				return true
+			}
+		}
+		return false
+	}
 	switch w.Kind {
 	case weaponBolt:
 		switch {
@@ -806,7 +851,7 @@ func (w *weaponDef) validate() error {
 			return fail("shotLife %v is not above 0", w.ShotLife)
 		case !finite(w.Spread) || w.Spread < 0:
 			return fail("spread %v is negative", w.Spread)
-		case w.OrbRadius != 0 || w.OrbitSpeed != 0 || w.Duration != 0:
+		case other(true, false, false, true, false, false):
 			return fail("sets fields for another weapon kind")
 		}
 	case weaponHalo:
@@ -815,22 +860,40 @@ func (w *weaponDef) validate() error {
 			return fail("orbRadius %v is not above 0", w.OrbRadius)
 		case !positive(w.OrbitSpeed):
 			return fail("orbitSpeed %v is not above 0", w.OrbitSpeed)
-		case w.Range != 0 || w.ShotSpeed != 0 || w.ShotRadius != 0 || w.ShotLife != 0 || w.Spread != 0 || w.Duration != 0:
+		case other(false, false, false, false, true, false):
 			return fail("sets fields for another weapon kind")
 		}
 	case weaponTrail:
-		if w.Range != 0 || w.ShotSpeed != 0 || w.ShotRadius != 0 || w.ShotLife != 0 || w.Spread != 0 || w.OrbRadius != 0 || w.OrbitSpeed != 0 || w.Duration != 0 {
+		if other(false, false, false, false, false, false) {
 			return fail("sets fields for another weapon kind")
 		}
 	case weaponBell:
 		switch {
 		case !positive(w.Duration):
 			return fail("duration %v is not above 0", w.Duration)
-		case w.Range != 0 || w.ShotSpeed != 0 || w.ShotRadius != 0 || w.ShotLife != 0 || w.Spread != 0 || w.OrbRadius != 0 || w.OrbitSpeed != 0:
+		case other(false, true, false, false, false, false):
+			return fail("sets fields for another weapon kind")
+		}
+	case weaponChain:
+		switch {
+		case !positive(w.Range) || !positive(w.JumpRange):
+			return fail("range %v and jumpRange %v must be above 0", w.Range, w.JumpRange)
+		case !positive(w.Duration):
+			return fail("duration %v is not above 0", w.Duration)
+		case other(true, true, true, false, false, false):
+			return fail("sets fields for another weapon kind")
+		}
+	case weaponCenser:
+		switch {
+		case !positive(w.Range) || !positive(w.Flight):
+			return fail("range %v and flight %v must be above 0", w.Range, w.Flight)
+		case !positive(w.FireRadius) || !positive(w.FireDamage):
+			return fail("fireRadius %v and fireDamage %v must be above 0", w.FireRadius, w.FireDamage)
+		case other(true, false, false, false, false, true):
 			return fail("sets fields for another weapon kind")
 		}
 	default:
-		return fail("kind %q is not %s, %s, %s or %s", w.Kind, weaponBolt, weaponHalo, weaponTrail, weaponBell)
+		return fail("kind %q is not %s, %s, %s, %s, %s or %s", w.Kind, weaponBolt, weaponHalo, weaponTrail, weaponBell, weaponChain, weaponCenser)
 	}
 	for i := range w.Levels {
 		if err := w.Levels[i].validate(w.Kind, w.CooldownMin); err != nil {
@@ -840,6 +903,9 @@ func (w *weaponDef) validate() error {
 	if w.Evolution != nil {
 		if err := w.Evolution.validate(w.Kind); err != nil {
 			return fmt.Errorf("weapon %q: evolution: %w", w.Name, err)
+		}
+		if last := w.Levels[len(w.Levels)-1].Count; w.Kind == weaponChain && last*(1+w.Evolution.Fork) > maxChainHits {
+			return fail("evolution strikes %d foes a cast, more than %d", last*(1+w.Evolution.Fork), maxChainHits)
 		}
 	}
 	return nil
@@ -860,6 +926,8 @@ func (e *evolutionDef) validate(kind string) error {
 	halo := e.Width != 0
 	trail := e.Spread != 0 || e.MaxRadius != 0
 	bell := e.Stun != 0 || e.Heal != 0
+	chain := e.Fork != 0
+	censer := e.Pull != 0 || e.PullRadius != 0 || e.PullSpeed != 0
 	switch kind {
 	case weaponBolt:
 		switch {
@@ -869,28 +937,42 @@ func (e *evolutionDef) validate(kind string) error {
 			return fmt.Errorf("%q splitSpread %v is negative", e.Name, e.SplitSpread)
 		case !positive(e.SplitRadius) || !positive(e.SplitLife) || !positive(e.SplitDamage):
 			return fmt.Errorf("%q splitRadius, splitLife and splitDamage must be above 0", e.Name)
-		case halo || trail || bell:
+		case halo || trail || bell || chain || censer:
 			return fmt.Errorf("%q sets fields for another weapon kind", e.Name)
 		}
 	case weaponHalo:
 		switch {
 		case !positive(e.Width):
 			return fmt.Errorf("%q width %v is not above 0", e.Name, e.Width)
-		case bolt || trail || bell:
+		case bolt || trail || bell || chain || censer:
 			return fmt.Errorf("%q sets fields for another weapon kind", e.Name)
 		}
 	case weaponTrail:
 		switch {
 		case !positive(e.Spread) || !positive(e.MaxRadius):
 			return fmt.Errorf("%q spread %v and maxRadius %v must be above 0", e.Name, e.Spread, e.MaxRadius)
-		case bolt || halo || bell:
+		case bolt || halo || bell || chain || censer:
 			return fmt.Errorf("%q sets fields for another weapon kind", e.Name)
 		}
 	case weaponBell:
 		switch {
 		case !finite(e.Stun) || e.Stun < 0 || !finite(e.Heal) || e.Heal < 0 || e.Stun+e.Heal == 0:
 			return fmt.Errorf("%q stun %v and heal %v must not be negative, and one above 0", e.Name, e.Stun, e.Heal)
-		case bolt || halo || trail:
+		case bolt || halo || trail || chain || censer:
+			return fmt.Errorf("%q sets fields for another weapon kind", e.Name)
+		}
+	case weaponChain:
+		switch {
+		case e.Fork < 1:
+			return fmt.Errorf("%q fork %d is not at least 1", e.Name, e.Fork)
+		case bolt || halo || trail || bell || censer:
+			return fmt.Errorf("%q sets fields for another weapon kind", e.Name)
+		}
+	case weaponCenser:
+		switch {
+		case !positive(e.Pull) || !positive(e.PullRadius) || !positive(e.PullSpeed):
+			return fmt.Errorf("%q pull %v, pullRadius %v and pullSpeed %v must be above 0", e.Name, e.Pull, e.PullRadius, e.PullSpeed)
+		case bolt || halo || trail || bell || chain:
 			return fmt.Errorf("%q sets fields for another weapon kind", e.Name)
 		}
 	}
@@ -947,6 +1029,26 @@ func (l *weaponLevelDef) validate(kind string, cooldownMin float64) error {
 			return fmt.Errorf("radius %v is not above 0", l.Radius)
 		}
 		if l.Count != 0 || l.Pierce != 0 || l.Duration != 0 || l.Tick != 0 {
+			return errors.New("sets fields for another weapon kind")
+		}
+	case weaponChain:
+		if l.Count < 1 || l.Count > maxChainHits {
+			return fmt.Errorf("count %d is not in [1, %d]", l.Count, maxChainHits)
+		}
+		if l.Pierce != 0 || l.Radius != 0 || l.Duration != 0 || l.Tick != 0 {
+			return errors.New("sets fields for another weapon kind")
+		}
+	case weaponCenser:
+		if !positive(l.Radius) {
+			return fmt.Errorf("radius %v is not above 0", l.Radius)
+		}
+		if !positive(l.Duration) {
+			return fmt.Errorf("duration %v is not above 0", l.Duration)
+		}
+		if !positive(l.Tick) {
+			return fmt.Errorf("tick %v is not above 0", l.Tick)
+		}
+		if l.Count != 0 || l.Pierce != 0 {
 			return errors.New("sets fields for another weapon kind")
 		}
 	}

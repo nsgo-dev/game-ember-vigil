@@ -1,6 +1,6 @@
 # Meta progression design
 
-Status: structure agreed with the user; the ember payout, the Long Night tiers, chests with evolution and the ember shop are built, and the open questions below remain for the rest.
+Status: structure agreed with the user; the ember payout, the Long Night tiers, chests with evolution, the ember shop and the two new weapons are built, and the open questions below remain for the rest.
 
 ## Why
 
@@ -70,9 +70,9 @@ A run was too easy and left nothing behind: the balance bot won 9 of 10 seeds wi
   | Redraw | One more redraw of the level-up cards per run (new mechanic) | 5 per run |
 
 - Tier 1 is the base run, made harder in `data/waves.yaml` before any tier exists: enemy damage from 4:30 on rises by 13–20% and the Hollow King's health from 20000 to 32000. Over 30 seeds the sharp bot now wins 67% with a median minimum health of about 36% among its wins, and the boss fight lasts about 70 seconds; the bot test holds its wins on seeds 1–10 between 6 and 8. Chests then gave the bot a free card from each Gloomwarden, so enemy damage from 2:00 on rose by another 30% and from 7:30 on by 15% more; over 120 seeds the sharp bot wins about 73%, and about 82% with evolution unlocked, which shortens the Hollow King fight by about 15%. The evolutions' numbers live in `data/weapons.yaml`.
+- Spark Chain and Ash Censer, also in `data/weapons.yaml`, are tuned to widen the choice, not the power: over seeds 1–100 the evolved bot with them wins 84% at tier 1 and 42% at tier 5, against 82% and 38% without them. Each alone barely moves tier 1, but together they lifted tier 5 from 38% to 56% before Spark Chain lost about a fifth of its damage and Ember Storm its extra damage fell from ×1.25 to ×1.2.
 - First version scope: the ember currency and shop, Long Night tiers 1–5, two new weapons, and six evolutions (one for each weapon).
 
 ## Open questions
 
-- Exact numbers of the new weapons.
 - Screens: the shop and the collection open from the title. The results show the embers a run earned, the new balance and what it unlocked.

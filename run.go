@@ -2,6 +2,7 @@ package main
 
 import (
 	"math"
+	"slices"
 	"time"
 
 	"github.com/nsgo-dev/game/packages/game/random"
@@ -19,8 +20,12 @@ const (
 	maxPatches    = 64
 	maxPulses     = 16
 	maxChests     = 16
-	maxEvents     = 256
-	maxShotHits   = 8
+	maxArcs       = 96
+	maxCensers    = 16
+	// maxChainHits is the most foes one Spark Chain cast strikes, forks included.
+	maxChainHits = 32
+	maxEvents    = 256
+	maxShotHits  = 8
 )
 
 // Vec2 is a position, a direction or a velocity in world units, whose X grows right and Y grows down.
@@ -275,7 +280,7 @@ type ember struct {
 	attracted bool
 }
 
-// patch is one burning ground patch left by Cinder Trail.
+// patch is one burning ground patch left by Cinder Trail or an Ash Censer's burst. Both burn a foe at most once per the tick of the patch that last burned it.
 type patch struct {
 	id     uint64
 	pos    Vec2
@@ -284,11 +289,12 @@ type patch struct {
 	tick   float64
 	life   float64
 	max    float64
-	// wild marks a Wildfire Path patch, which merges with the wild patches it touches.
-	wild bool
+	// wild marks a Wildfire Path patch, which merges with the wild patches it touches, and censer the fire an Ash Censer leaves.
+	wild   bool
+	censer bool
 }
 
-// pulse is one expanding shockwave ring from Bell Toll.
+// pulse is one expanding shockwave ring from Bell Toll, or the burst of an Ash Censer.
 type pulse struct {
 	id     uint64
 	pos    Vec2
@@ -296,6 +302,41 @@ type pulse struct {
 	life   float64
 	max    float64
 	dawn   bool
+	censer bool
+	pyre   bool
+}
+
+// censerBurstLife is how long an Ash Censer's burst shows, in seconds.
+const censerBurstLife = 0.4
+
+// arc is one leap of Spark Chain's spark, from where it was to the foe it struck, kept a moment for drawing.
+type arc struct {
+	id       uint64
+	from, to Vec2
+	life     float64
+	max      float64
+	storm    bool
+}
+
+// censer is one Ash Censer in flight toward where it lands, then, as a Pyre Censer, pulling foes and embers in before it bursts. It carries what it was thrown with, so a card taken meanwhile does not change it.
+type censer struct {
+	id       uint64
+	from, to Vec2
+	flight   float64
+	left     float64
+	// pull is how many seconds a Pyre Censer pulls for once it lands, and pulling how many are left.
+	pull       float64
+	pulling    float64
+	pullRadius float64
+	pullSpeed  float64
+	landed     bool
+	damage     float64
+	radius     float64
+	knockback  float64
+	fireRadius float64
+	fireDamage float64
+	fireLife   float64
+	fireTick   float64
 }
 
 // Run is one run of the game, simulated headlessly: no views, devices, sound or storage, and no wall clock. The shell steps it one fixed step at a time and draws what its snapshot and events say.
@@ -328,6 +369,8 @@ type Run struct {
 	patches    []patch
 	pulses     []pulse
 	shadows    []shadow
+	arcs       []arc
+	censers    []censer
 	// shadowTick is how long until a shadow zone the keeper stands in hurts again.
 	shadowTick float64
 	chestDrops []chest
@@ -343,6 +386,8 @@ type Run struct {
 	// shopLevels holds the bought level of each ember shop item, in data/progression.yaml's order, and redraws how many level-up redraws are left.
 	shopLevels []int
 	redraws    int
+	// locked marks, in weapons order, the weapons an offer leaves out until UnlockWeapons names their unlock.
+	locked []bool
 	// evolution is whether chests may evolve weapons, evolved which weapons have, in weapons order, and made the evolution ids this run made, in order.
 	evolution bool
 	evolved   []bool
@@ -396,7 +441,13 @@ func newRunWith(d *gameData, seed uint64, tier int) *Run {
 		shadows:         make([]shadow, 0, maxShadows),
 		chestDrops:      make([]chest, 0, maxChests),
 		evolved:         make([]bool, len(d.weapons.Weapons)),
+		locked:          make([]bool, len(d.weapons.Weapons)),
+		arcs:            make([]arc, 0, maxArcs),
+		censers:         make([]censer, 0, maxCensers),
 		heading:         Vec2{X: 1},
+	}
+	for i := range d.weapons.Weapons {
+		r.locked[i] = d.weapons.Weapons[i].Unlock != ""
 	}
 	if len(r.weaponLevels) > 0 {
 		r.weaponLevels[d.starterWeapon] = 1
@@ -441,6 +492,15 @@ func (r *Run) Redraw() bool {
 	return true
 }
 
+// UnlockWeapons lets offers hold the weapons whose unlock is among the ids the player has unlocked. The shell calls it before the first step; a replay must call it with the same ids.
+func (r *Run) UnlockWeapons(unlocked []string) {
+	for i := range r.data.weapons.Weapons {
+		if r.locked[i] && slices.Contains(unlocked, r.data.weapons.Weapons[i].Unlock) {
+			r.locked[i] = false
+		}
+	}
+}
+
 // Evolutions returns the ids of the evolutions this run has made, in the order it made them.
 func (r *Run) Evolutions() []string { return r.made }
 
@@ -481,6 +541,7 @@ func (r *Run) Step(dt time.Duration, controls Controls) {
 		e.stun = math.Max(0, e.stun-stepSeconds)
 	}
 	r.tickPulses()
+	r.tickArcs()
 
 	// Spawn from the timeline, step the boss, then move the world.
 	r.director.step(r)
@@ -499,6 +560,7 @@ func (r *Run) Step(dt time.Duration, controls Controls) {
 	r.contact()
 	r.stepShadows()
 	r.stepWeapons()
+	r.stepCensers()
 	r.stepPatches()
 	r.reap()
 	if r.phase == PhaseVictory {
@@ -1095,6 +1157,10 @@ func (r *Run) stepWeapons() {
 			r.stepTrail(i, w, lvl, evo)
 		case weaponBell:
 			r.stepBell(i, w, lvl, evo)
+		case weaponChain:
+			r.stepChain(i, w, lvl, evo)
+		case weaponCenser:
+			r.throwCenser(i, w, lvl, evo)
 		}
 	}
 }
@@ -1611,6 +1677,8 @@ type Snapshot struct {
 	Ring     RingView      `json:"ring"`
 	Patches  []PatchView   `json:"patches"`
 	Pulses   []PulseView   `json:"pulses"`
+	Arcs     []ArcView     `json:"arcs"`
+	Censers  []CenserView  `json:"censers"`
 	Shadows  []ShadowView  `json:"shadows"`
 	Boss     BossView      `json:"boss"`
 	Weapons  []SlotView    `json:"weapons"`
@@ -1716,9 +1784,10 @@ type PatchView struct {
 	Life   float64 `json:"life"`
 	Max    float64 `json:"max"`
 	Wild   bool    `json:"wild,omitempty"`
+	Censer bool    `json:"censer,omitempty"`
 }
 
-// PulseView is one expanding Bell Toll shockwave ring.
+// PulseView is one expanding Bell Toll shockwave ring, or the burst of an Ash Censer (Censer), a Pyre Censer's when Pyre is set.
 type PulseView struct {
 	ID     uint64  `json:"id"`
 	Pos    Vec2    `json:"pos"`
@@ -1726,6 +1795,27 @@ type PulseView struct {
 	Life   float64 `json:"life"`
 	Max    float64 `json:"max"`
 	Dawn   bool    `json:"dawn,omitempty"`
+	Censer bool    `json:"censer,omitempty"`
+	Pyre   bool    `json:"pyre,omitempty"`
+}
+
+// ArcView is one leap of Spark Chain's spark, from From to the foe it struck at To, which fades as Life runs out of Max; Storm marks Ember Storm's.
+type ArcView struct {
+	ID    uint64  `json:"id"`
+	From  Vec2    `json:"from"`
+	To    Vec2    `json:"to"`
+	Life  float64 `json:"life"`
+	Max   float64 `json:"max"`
+	Storm bool    `json:"storm,omitempty"`
+}
+
+// CenserView is one Ash Censer: in flight, Pos is under it on the ground and Progress how far it has flown, from 0 to 1; once a Pyre Censer lands, Pulling is how far its pull has run, from 0 to 1, and Radius how far it reaches.
+type CenserView struct {
+	ID       uint64  `json:"id"`
+	Pos      Vec2    `json:"pos"`
+	Progress float64 `json:"progress"`
+	Pulling  float64 `json:"pulling,omitempty"`
+	Radius   float64 `json:"radius,omitempty"`
 }
 
 // SlotView is one owned weapon or passive slot in the keeper's build; an evolved weapon shows its evolution's id and name.
@@ -1884,12 +1974,30 @@ func (r *Run) Snapshot() Snapshot {
 	s.Patches = s.Patches[:0]
 	for i := range r.patches {
 		p := &r.patches[i]
-		s.Patches = append(s.Patches, PatchView{ID: p.id, Pos: p.pos, Radius: p.radius, Life: p.life, Max: p.max, Wild: p.wild})
+		s.Patches = append(s.Patches, PatchView{ID: p.id, Pos: p.pos, Radius: p.radius, Life: p.life, Max: p.max, Wild: p.wild, Censer: p.censer})
 	}
 	s.Pulses = s.Pulses[:0]
 	for i := range r.pulses {
 		p := &r.pulses[i]
-		s.Pulses = append(s.Pulses, PulseView{ID: p.id, Pos: p.pos, Radius: p.radius, Life: p.life, Max: p.max, Dawn: p.dawn})
+		s.Pulses = append(s.Pulses, PulseView{ID: p.id, Pos: p.pos, Radius: p.radius, Life: p.life, Max: p.max, Dawn: p.dawn, Censer: p.censer, Pyre: p.pyre})
+	}
+	s.Arcs = s.Arcs[:0]
+	for i := range r.arcs {
+		a := &r.arcs[i]
+		s.Arcs = append(s.Arcs, ArcView{ID: a.id, From: a.from, To: a.to, Life: a.life, Max: a.max, Storm: a.storm})
+	}
+	s.Censers = s.Censers[:0]
+	for i := range r.censers {
+		c := &r.censers[i]
+		v := CenserView{ID: c.id, Pos: c.to, Progress: 1}
+		if !c.landed {
+			v.Progress = 1 - c.left/c.flight
+			v.Pos = c.from.Add(c.to.Sub(c.from).Scale(v.Progress))
+		} else if c.pull > 0 {
+			v.Pulling = 1 - math.Max(0, c.pulling)/c.pull
+			v.Radius = c.pullRadius
+		}
+		s.Censers = append(s.Censers, v)
 	}
 	s.Shadows = s.Shadows[:0]
 	for i := range r.shadows {

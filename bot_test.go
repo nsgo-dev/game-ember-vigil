@@ -23,11 +23,16 @@ type botResult struct {
 	evolved  []string
 }
 
-// playBot runs a deterministic kiting and upgrade-picking bot until Victory, Defeat, or maxMinutes. It steers afresh every react steps and holds its last heading in between, so a larger react plays a slower player; evolve plays a player who has won once.
-func playBot(seed uint64, tier, maxMinutes, react int, evolve bool) (*Run, botResult) {
+// playBot runs a deterministic kiting and upgrade-picking bot until Victory, Defeat, or maxMinutes. It steers afresh every react steps and holds its last heading in between, so a larger react plays a slower player; veteran plays a player who has won once and unlocked evolution and every weapon.
+func playBot(seed uint64, tier, maxMinutes, react int, veteran bool) (*Run, botResult) {
 	r := NewRun(seed, tier)
-	if evolve {
+	if veteran {
 		r.EnableEvolution()
+		var all []string
+		for _, u := range r.data.progression.Unlocks {
+			all = append(all, u.ID)
+		}
+		r.UnlockWeapons(all)
 	}
 	bossAt := 0.0
 	res := botResult{
@@ -251,6 +256,10 @@ func botChoose(s Snapshot) int {
 				score += 12
 			case "cinder-trail":
 				score += 8
+			case "spark-chain":
+				score += 13
+			case "ash-censer":
+				score += 10
 			}
 		case o.Kind == offerPassive:
 			score = 45
