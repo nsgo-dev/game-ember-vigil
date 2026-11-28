@@ -52,7 +52,7 @@ spans:
     every: 0.25
     maxAlive: 270
     health: 1.75
-    damage: 1.5
+    damage: 1.7
     enemies:
       - name: Ash Mite
         weight: 2
@@ -68,7 +68,7 @@ spans:
     every: 0.21
     maxAlive: 345
     health: 2.1
-    damage: 1.65
+    damage: 1.9
     enemies:
       - name: Ash Mite
         weight: 2
@@ -86,7 +86,7 @@ spans:
     every: 0.18
     maxAlive: 413
     health: 2.4
-    damage: 1.7
+    damage: 2
     enemies:
       - name: Moth
         weight: 2
@@ -102,7 +102,7 @@ spans:
     every: 0.145
     maxAlive: 490
     health: 2.7
-    damage: 1.76
+    damage: 2.1
     enemies:
       - name: Husk
         weight: 3
@@ -116,7 +116,7 @@ spans:
     every: 0.118
     maxAlive: 570
     health: 3.2
-    damage: 1.88
+    damage: 2.25
     enemies:
       - name: Husk
         weight: 3
@@ -191,7 +191,7 @@ elites:
 boss:
   at: 720
   name: Hollow King
-  health: 20000
+  health: 32000
   speed: 44
   radius: 20
   damage: 38
