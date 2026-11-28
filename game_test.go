@@ -786,11 +786,23 @@ func TestRecordsUpdateOncePerRunAndPersist(t *testing.T) {
 		t.Fatalf("first run record label = %q, want New record", got)
 	}
 
-	// Extra frames and repeated recordResult calls must not double-count wins.
+	en := evstrings.For(evstrings.EN)
+	won := g.run.Payout(runTier)
+	if won < 50 {
+		t.Fatalf("a won run pays %d embers, want at least the 50 for a win", won)
+	}
+	if got, want := app.Find("id:results-embers").Props.Label, en.EmbersEarned(won)+"  ·  "+en.EmberBalance(won); got != want {
+		t.Fatalf("results embers = %q, want %q", got, want)
+	}
+
+	// Extra frames and repeated recordResult calls must not double-count wins or embers.
 	app.Advance(20 * frame)
 	g.recordResult(g.run.Snapshot())
 	if wins := g.records.Get().Wins; wins != 1 {
 		t.Fatalf("wins after one victory = %d, want 1", wins)
+	}
+	if g.progress.Embers != won || g.progress.TierWon != 1 {
+		t.Fatalf("progression after one victory = %+v, want %d embers and tier 1 won", g.progress, won)
 	}
 
 	// Restart app from persisted storage and verify title shows saved records.
@@ -813,6 +825,18 @@ func TestRecordsUpdateOncePerRunAndPersist(t *testing.T) {
 	}
 	if rec := g2.records.Get(); rec.BestKills != wantKills || rec.BestLevel != 5 || rec.Wins != 1 {
 		t.Fatalf("worse run altered records: %+v", rec)
+	}
+
+	// The balance survived the restart, and the lost run added its own payout to it.
+	lost := g2.run.Payout(runTier)
+	if g2.progress.Embers != won+lost || g2.progress.TierWon != 1 {
+		t.Fatalf("progression after a restart and a lost run = %+v, want %d embers and tier 1 won", g2.progress, won+lost)
+	}
+	if got, want := app2.Find("id:results-embers").Props.Label, en.EmbersEarned(lost)+"  ·  "+en.EmberBalance(won+lost); got != want {
+		t.Fatalf("lost run results embers = %q, want %q", got, want)
+	}
+	if got := loadProgression(app2.Storage()); got.Embers != won+lost {
+		t.Fatalf("saved balance = %d, want %d", got.Embers, won+lost)
 	}
 }
 

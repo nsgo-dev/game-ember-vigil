@@ -81,6 +81,67 @@ func TestSameSeedAndControlsReplayIdentically(t *testing.T) {
 	if !reflect.DeepEqual(first.Snapshot(), second.Snapshot()) {
 		t.Fatalf("the same seed and controls ended in different runs:\n%+v\n%+v", first.Snapshot(), second.Snapshot())
 	}
+	if a, b := first.Payout(1), second.Payout(1); a != b {
+		t.Fatalf("the same seed and controls paid %d and %d embers", a, b)
+	}
+}
+
+// TestPayoutFollowsTheDesign checks the ember payout of docs/meta-progression.md: 5 a whole minute, 2 per whole hundred kills, 15 a chest and 50 a win, times 1 + 0.25 per tier above 1.
+func TestPayoutFollowsTheDesign(t *testing.T) {
+	r := NewRun(1)
+	if got := r.Payout(1); got != 0 {
+		t.Fatalf("a fresh run pays %d embers, want 0", got)
+	}
+	r.time, r.kills, r.chests, r.phase = 3*60+59, 250, 0, PhaseDefeat
+	if got := r.Payout(1); got != 3*5+2*2 {
+		t.Fatalf("a death at 3:59 with 250 kills pays %d, want 19", got)
+	}
+	r.time, r.kills, r.chests, r.phase = 14*60, 5000, 2, PhaseVictory
+	base := 14*5 + 50*2 + 2*15 + 50
+	for tier, want := range map[int]int{0: base, 1: base, 3: base * 3 / 2, 5: 2 * base} {
+		if got := r.Payout(tier); got != want {
+			t.Fatalf("a won run at tier %d pays %d, want %d", tier, got, want)
+		}
+	}
+}
+
+// TestUnlocksNeedEveryConditionTheyName checks the unlock list against a run's kills, elites defeated and win, with test entries.
+func TestUnlocksNeedEveryConditionTheyName(t *testing.T) {
+	d := *mustGameData()
+	d.progression.Unlocks = []unlockDef{
+		{ID: "kills", Name: "Kills", Kills: 100},
+		{ID: "elites-and-win", Name: "Elites and win", Elites: 2, Win: true},
+		{ID: "win", Name: "Win", Win: true},
+	}
+	r := newRunWith(&d, 7)
+	if got := r.Unlocks(); len(got) != 0 {
+		t.Fatalf("a fresh run unlocks %v, want nothing", got)
+	}
+	r.kills = 100
+	if got := r.Unlocks(); !reflect.DeepEqual(got, []string{"kills"}) {
+		t.Fatalf("100 kills unlock %v, want [kills]", got)
+	}
+	r.phase = PhaseVictory
+	if got := r.Unlocks(); !reflect.DeepEqual(got, []string{"kills", "win"}) {
+		t.Fatalf("a win with 100 kills unlocks %v, want [kills win]", got)
+	}
+
+	// Killing Gloomwardens counts toward the elites an unlock asks for.
+	r = quietRun(t)
+	r.data = &d
+	r.phase = PhaseVictory
+	warden := enemyByName(t, r, "Gloomwarden")
+	for range 2 {
+		putEnemy(t, r, warden, Vec2{X: 20})
+		r.enemies[len(r.enemies)-1].hp = 0
+		r.reap()
+	}
+	if r.elites != 2 {
+		t.Fatalf("two dead Gloomwardens count %d elites, want 2", r.elites)
+	}
+	if got := r.Unlocks(); !reflect.DeepEqual(got, []string{"elites-and-win", "win"}) {
+		t.Fatalf("a win with two elites unlocks %v, want [elites-and-win win]", got)
+	}
 }
 
 // TestThreeMinutesWithFixedControlsLevelsUpTakesACardAndDies checks that a stationary keeper levels up, takes a card, and eventually falls in defeat.

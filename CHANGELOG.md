@@ -23,3 +23,4 @@
 - Publish the web version to GitHub Pages on every push to `main` (#44 by @oneo-me).
 - Redraw the title with an animated painted cover and a painted menu centred at the bottom, without Quit on phones, tablets and the web, draw settings in the painted HUD style, and paint the touch stick and a thumb-sized pause button (#39, #43 by @oneo-me).
 - Make the run harder after 4:30 and give the Hollow King more health, so a good run is no longer a sure win (#48 by @oneo-me).
+- Pay embers at the end of every run, won or lost, show them and the new balance on the results, and keep the balance and unlocks across restarts (#49, #56 by @oneo-me).

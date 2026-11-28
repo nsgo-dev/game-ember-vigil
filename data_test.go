@@ -23,7 +23,7 @@ func readData(t *testing.T, name string) []byte {
 
 // TestDataFilesLoadAndAreCanonical checks that each tuning file shares its bytes with the embedded copy and that parsing and encoding it changes nothing, as a designer's editor and the loader must agree.
 func TestDataFilesLoadAndAreCanonical(t *testing.T) {
-	for _, name := range []string{fileRun, fileWeapons, fileUpgrades, fileEnemies, fileWaves} {
+	for _, name := range []string{fileRun, fileWeapons, fileUpgrades, fileEnemies, fileWaves, fileProgression} {
 		data := readData(t, name)
 		embedded, err := fs.ReadFile(dataFS, name)
 		if err != nil {
@@ -44,6 +44,8 @@ func TestDataFilesLoadAndAreCanonical(t *testing.T) {
 			decoded, err = parseEnemyFile(name, data)
 		case fileWaves:
 			decoded, err = parseWaveFile(name, data)
+		case fileProgression:
+			decoded, err = parseProgressionFile(name, data)
 		}
 		if err != nil {
 			t.Fatal(err)
@@ -115,11 +117,15 @@ func TestDataLoadersRefuseBrokenFiles(t *testing.T) {
 	upgradeYAML := readData(t, fileUpgrades)
 	enemyYAML := readData(t, fileEnemies)
 	waveYAML := readData(t, fileWaves)
+	progressionYAML := readData(t, fileProgression)
 	replace := func(data []byte, old, new string) []byte {
 		if !bytes.Contains(data, []byte(old)) {
 			t.Fatalf("%q is not in the file to replace", old)
 		}
 		return bytes.Replace(data, []byte(old), []byte(new), 1)
+	}
+	withUnlock := func(entry string) []byte {
+		return replace(progressionYAML, "unlocks: []", "unlocks:\n"+entry)
 	}
 
 	tests := []struct {
@@ -216,6 +222,34 @@ func TestDataLoadersRefuseBrokenFiles(t *testing.T) {
 				return err
 			}
 			return (&gameData{enemies: *enemies, waves: *waves}).check()
+		}},
+		{"progression with another version", func() error {
+			_, err := parseProgressionFile(fileProgression, replace(progressionYAML, "version: 1", "version: 2"))
+			return err
+		}},
+		{"progression with an unknown field", func() error {
+			_, err := parseProgressionFile(fileProgression, append(append([]byte(nil), progressionYAML...), []byte("\nunknown: true\n")...))
+			return err
+		}},
+		{"progression paying a negative amount", func() error {
+			_, err := parseProgressionFile(fileProgression, replace(progressionYAML, "perChest: 15", "perChest: -15"))
+			return err
+		}},
+		{"progression with a negative tier bonus", func() error {
+			_, err := parseProgressionFile(fileProgression, replace(progressionYAML, "tierBonus: 0.25", "tierBonus: -0.25"))
+			return err
+		}},
+		{"an unlock without a condition", func() error {
+			_, err := parseProgressionFile(fileProgression, withUnlock("  - id: a\n    name: A\n"))
+			return err
+		}},
+		{"an unlock without a name", func() error {
+			_, err := parseProgressionFile(fileProgression, withUnlock("  - id: a\n    name: \"\"\n    win: true\n"))
+			return err
+		}},
+		{"an unlock defined twice", func() error {
+			_, err := parseProgressionFile(fileProgression, withUnlock("  - id: a\n    name: A\n    win: true\n  - id: a\n    name: B\n    kills: 1\n"))
+			return err
 		}},
 		{"enemies with unknown motion", func() error {
 			_, err := parseEnemyFile(fileEnemies, replace(enemyYAML, "motion: ranged", "motion: teleport"))

@@ -45,6 +45,7 @@ const (
 	resultsStatH         = 48
 	resultsCaptionH      = 16
 	resultsBestLineH     = 14
+	resultsLineH         = 16
 	overlayHeadingFontPt = 26
 )
 
@@ -188,9 +189,9 @@ type panelLayout struct {
 	panel   rect
 	heading rect
 	buttons []rect
-	// body is the confirmation's text; the results' rows are outcome, stats and records.
-	body, outcome, record, best rect
-	stats                       [3]rect
+	// body is the confirmation's text; the results' rows are outcome, stats, record, embers, unlocks and best records.
+	body, outcome, record, embers, unlocked, best rect
+	stats                                         [3]rect
 }
 
 // layoutPause places the pause panel's three stacked buttons, or the quit confirmation's two side by side.
@@ -222,10 +223,14 @@ func layoutPause(size core.Size, safe core.Edges, confirm bool) panelLayout {
 	return l
 }
 
-// layoutResults places the results panel: outcome, heading, the time, kills and level, the record line, the best records and two buttons.
-func layoutResults(size core.Size, safe core.Edges) panelLayout {
+// layoutResults places the results panel: outcome, heading, the time, kills and level, the record line, the embers line, the unlocks line when the run unlocked anything, the best records and two buttons.
+func layoutResults(size core.Size, safe core.Edges, unlocked bool) panelLayout {
 	area := overlayArea(size, safe)
-	h := float32(overlayPad + 14 + 4 + 30 + 8 + resultsStatH + resultsCaptionH + 10 + 16 + 4 + 2*resultsBestLineH + 14 + overlayButtonH + overlayPad)
+	unlockH := float32(0)
+	if unlocked {
+		unlockH = resultsLineH + 4
+	}
+	h := float32(overlayPad+14+4+30+8+resultsStatH+resultsCaptionH+10+16+4+resultsLineH+4+2*resultsBestLineH+14+overlayButtonH+overlayPad) + unlockH
 	u := overlayScale(size, area, resultsPanelW, h)
 	l := panelLayout{scale: u, panel: centred(area, resultsPanelW*u, h*u)}
 	x, w := l.panel.x+overlayPad*u, l.panel.w-2*overlayPad*u
@@ -241,6 +246,12 @@ func layoutResults(size core.Size, safe core.Edges) panelLayout {
 	y += (resultsStatH + resultsCaptionH + 10) * u
 	l.record = rect{x, y, w, 16 * u}
 	y += 20 * u
+	l.embers = rect{x, y, w, resultsLineH * u}
+	y += (resultsLineH + 4) * u
+	if unlocked {
+		l.unlocked = rect{x, y, w, resultsLineH * u}
+		y += (resultsLineH + 4) * u
+	}
 	l.best = rect{x, y, w, 2 * resultsBestLineH * u}
 	y += (2*resultsBestLineH + 14) * u
 	l.buttons = buttonRow(l.panel, y, 2, u)
@@ -437,11 +448,12 @@ func drawPause(p *overlayPainter, l panelLayout, confirm bool, focus int) {
 
 // resultsText is what the results panel says, which the canvas draws and the native layer reads out.
 type resultsText struct {
-	outcome, title, time, kills, level, record, best string
-	victory, newRecord                               bool
+	outcome, title, time, kills, level, record, embers, unlocked, best string
+	victory, newRecord                                                 bool
 }
 
-func resultsTextOf(tr evstrings.Table, st hudState, rec Records) resultsText {
+// resultsTextOf is what the results say of a run whose hud is st, with the records, the run's reward and the ember balance after it.
+func resultsTextOf(tr evstrings.Table, st hudState, rec Records, reward runReward, balance int) resultsText {
 	r := resultsText{outcome: tr.DefeatBadge, title: tr.DefeatTitle, record: tr.NoNewRecord}
 	if st.phase == PhaseVictory {
 		r.victory, r.outcome, r.title = true, tr.VictoryBadge, tr.VictoryTitle
@@ -450,11 +462,32 @@ func resultsTextOf(tr evstrings.Table, st hudState, rec Records) resultsText {
 		r.newRecord, r.record = true, tr.NewRecord
 	}
 	r.time, r.kills, r.level = tr.Time(st.time), tr.Kills(st.kills), tr.Level(st.level)
+	r.embers = tr.EmbersEarned(reward.embers) + "  ·  " + tr.EmberBalance(balance)
+	if len(reward.unlocks) > 0 {
+		names := make([]string, len(reward.unlocks))
+		for i, id := range reward.unlocks {
+			names[i] = unlockName(tr, id)
+		}
+		r.unlocked = tr.UnlockedList(names)
+	}
 	r.best = strings.Join([]string{tr.BestTime(clockText(rec.BestTime)), tr.BestKills(rec.BestKills), tr.BestLevel(rec.BestLevel), tr.Wins(rec.Wins)}, "  ·  ")
 	return r
 }
 
-// drawResults draws the results panel: the outcome, the run's time, kills and level in the painted numerals, the record lines and two buttons.
+// unlockName is the localized name of the unlock id, falling back to the name data/progression.yaml gives it.
+func unlockName(tr evstrings.Table, id string) string {
+	if name, ok := tr.Unlocks[id]; ok {
+		return name
+	}
+	for _, u := range mustGameData().progression.Unlocks {
+		if u.ID == id {
+			return u.Name
+		}
+	}
+	return id
+}
+
+// drawResults draws the results panel: the outcome, the run's time, kills and level in the painted numerals, the record line, the embers and unlocks, the best records and two buttons.
 func drawResults(p *overlayPainter, l panelLayout, st hudState, txt resultsText, focus int) {
 	tr := p.tr
 	u := l.scale
@@ -504,6 +537,11 @@ func drawResults(p *overlayPainter, l panelLayout, st hudState, txt resultsText,
 	}
 	cx, cy = l.record.center()
 	p.text(txt.record, cx, cy, 13*u, true, recordColor, core.TextAlignCenter)
+	cx, cy = l.embers.center()
+	p.text(txt.embers, cx, cy, 12*u, true, hudGold, core.TextAlignCenter)
+	if txt.unlocked != "" {
+		p.lines(txt.unlocked, l.unlocked, 12*u, resultsLineH*u, hudGold)
+	}
 	p.lines(txt.best, l.best, 11*u, resultsBestLineH*u, overlayDim)
 
 	p.button("results-play-again", tr.PlayAgain, l.buttons[0], u, buttonEmber, focus == 0)

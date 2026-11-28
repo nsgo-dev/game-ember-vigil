@@ -60,6 +60,10 @@ At 12:00 the director stops normal spawns, clears space and spawns the Hollow Ki
 
 Three distinct cards are drawn from the pool on the offer stream. If fewer than three remain, the rest are healing cards. There is no reroll in the first version. Applying a card raises a level and recomputes one derived stat block: damage, cooldown, area, move speed, max health, regeneration, pickup radius and XP gain. Weapons read the block every step instead of caching a modified copy.
 
+## Payout and unlocks
+
+A finished run reports what it earned without touching storage. `Payout(tier)` counts whole minutes survived, whole hundreds of kills, chests opened and a win at the rates in `data/progression.yaml`, multiplied by 1 + `tierBonus` for each Long Night tier above 1; until tiers exist the shell passes tier 1. `Unlocks()` lists the unlocks whose every condition (kills, elites defeated, a win) the run met. The shell adds both to the progression save and names only the unlocks that are new.
+
 ## Events
 
 Each step returns a bounded list of events: `Shot`, `Hit`, `Kill`, `Ember`, `LevelUp`, `BossSpawn`, `BossPhase`, `Victory` and `Defeat`. The shell maps them to sounds, flashes, shake and screen changes. Events carry ids and positions, never pointers into run slices.

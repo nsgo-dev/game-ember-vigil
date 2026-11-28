@@ -62,6 +62,9 @@ const (
 	resultsMenuCount     = 2                    // Play Again, Title
 )
 
+// runTier is the Long Night tier every run plays until the player can choose one.
+const runTier = 1
+
 // emberVigil is the game's shell: it owns the window, the fixed-step loop, input and the screens, and hands the run its steps.
 type emberVigil struct {
 	cx      *core.Scope
@@ -101,8 +104,10 @@ type emberVigil struct {
 	viewSize *core.Signal[core.Size]
 
 	// Persisted settings and lifetime records, plus reactive menu state.
-	settings       *core.Signal[Settings]
-	records        *core.Signal[Records]
+	settings *core.Signal[Settings]
+	records  *core.Signal[Records]
+	// progress is the saved progression; it changes only as a run ends, before the HUD publishes the results it shows on.
+	progress       Progression
 	savedSettings  Settings
 	settingsReturn phase
 	confirmQuit    *core.Signal[bool]
@@ -113,6 +118,7 @@ type emberVigil struct {
 	// Per-run record guard so a finished run updates persisted records at most once.
 	runRecorded   bool
 	lastNewRecord bool
+	lastReward    runReward
 
 	// size is the arena canvas's size when it last drew, which input maps into virtual pixels.
 	size      core.Size
@@ -131,6 +137,7 @@ func newEmberVigil(cx *core.Scope) *emberVigil {
 	storage := cx.Storage()
 	saved := loadSettings(storage)
 	recs := loadRecords(storage)
+	prog := loadProgression(storage)
 
 	desktop.SetTitle(cx, evstrings.For(saved.Language).GameTitle)
 	cx.RequestOrientation(core.OrientationLandscape)
@@ -147,6 +154,7 @@ func newEmberVigil(cx *core.Scope) *emberVigil {
 		hud:            core.NewSignal(cx, hudState{}),
 		settings:       core.NewSignal(cx, saved),
 		records:        core.NewSignal(cx, recs),
+		progress:       prog,
 		savedSettings:  saved,
 		settingsReturn: phaseTitle,
 		confirmQuit:    core.NewSignal(cx, false),
@@ -474,12 +482,16 @@ func (g *emberVigil) setPhase(p phase) {
 	g.actions.Reset()
 }
 
-// recordResult persists lifetime records once when a run ends in victory or defeat.
+// recordResult persists lifetime records, the run's embers and its unlocks once when a run ends in victory or defeat.
 func (g *emberVigil) recordResult(s Snapshot) {
 	if g.runRecorded {
 		return
 	}
 	g.runRecorded = true
+	prog, reward := applyRunProgression(g.progress, s.Phase == PhaseVictory, runTier, g.run.Payout(runTier), g.run.Unlocks())
+	_ = saveProgression(g.storage, prog)
+	g.lastReward = reward
+	g.progress = prog
 	next, isNew := applyRunRecords(g.records.GetUntracked(), s)
 	_ = saveRecords(g.storage, next)
 	g.records.Set(next)
@@ -505,6 +517,7 @@ func (g *emberVigil) start() {
 	g.cardFocus = 0
 	g.runRecorded = false
 	g.lastNewRecord = false
+	g.lastReward = runReward{}
 	g.confirmQuit.Set(false)
 	g.setPhase(phaseArena)
 	g.audio.setPaused(false)
@@ -961,7 +974,8 @@ func (g *emberVigil) drawArena(d *core.Drawing, p *overlayPainter, size core.Siz
 	case st.phase == PhaseLevelUp:
 		drawCards(p, layoutCards(size, safe, len(g.run.Snapshot().Offers)), st, g.cardFocus)
 	case st.phase == PhaseVictory || st.phase == PhaseDefeat:
-		drawResults(p, layoutResults(size, safe), st, resultsTextOf(tr, st, g.records.GetUntracked()), g.menuFocus.GetUntracked())
+		txt := resultsTextOf(tr, st, g.records.GetUntracked(), g.lastReward, g.progress.Embers)
+		drawResults(p, layoutResults(size, safe, txt.unlocked != ""), st, txt, g.menuFocus.GetUntracked())
 	}
 }
 
