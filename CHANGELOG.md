@@ -31,4 +31,4 @@
 - Make a win take both skill and luck: tougher foes from 2:00 on, and much tougher foes on every Long Night tier, so even a full shop rarely clears tier 5 (#62 by @oneo-me).
 - Turn up small potions and ember magnets on the ground now and then, drop a magnet from every Gloomwarden, and offset them with foes that hit a little harder (#63 by @oneo-me).
 - Show the frame rate and the longest recent frame in the corner when the settings turn it on (#63 by @oneo-me).
-- Hold 120 frames a second on a ProMotion iPhone in a crowded fight, instead of dropping to about 80 with stutters, by mixing sound effects on Apple platforms in the game and drawing fewer images a frame (by @oneo-me).
+- Hold 120 frames a second on a ProMotion iPhone in a crowded fight, instead of dropping to about 80 with stutters, by mixing sound effects on Apple platforms in the game and drawing fewer images a frame (#64 by @oneo-me).
